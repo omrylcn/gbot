@@ -1,0 +1,53 @@
+# GraphBot Configuration
+# Detay: howtowork-development-plan.md § 3.9
+
+assistant:
+  name: "GraphBot"
+  workspace: ./workspace
+  model: "anthropic/claude-sonnet-4-5-20250929"
+  temperature: 0.7
+  session_token_limit: 30000
+  max_iterations: 20
+  tools: ["*"]
+  # agents:                         # Opsiyonel alt-agent'lar
+  #   chef:
+  #     name: "Yemek Uzmanı"
+  #     workspace: ./workspace/agents/chef
+  #     model: "anthropic/claude-sonnet-4-5-20250929"
+  #     tools: [search_items, get_item_detail]
+  #     mode: "sync"
+
+providers:
+  anthropic:
+    api_key: ""                      # .env'den veya buradan
+  # openai:
+  #   api_key: ""
+
+channels:
+  telegram:
+    enabled: false
+    token: ""
+    allow_from: []
+  # discord:
+  #   enabled: false
+
+# rag:                               # Faz 9'da aktif edilecek
+#   embedding_model: "intfloat/multilingual-e5-small"
+#   data_source: ./data/items.json
+#   index_path: ./data/faiss_index
+#   text_template: "{title}. {description}. Kategori: {category}."
+#   id_field: "id"
+
+tools:
+  shell:
+    timeout: 60
+    restrict_to_workspace: false
+  # web:
+  #   search_api_key: ""
+
+background:
+  cron:
+    enabled: true
+  heartbeat:
+    enabled: false
+    interval_s: 1800
