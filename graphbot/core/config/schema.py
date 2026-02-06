@@ -1,0 +1,216 @@
+"""GraphBot configuration schema — YAML + Pydantic + env override."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+# ════════════════════════════════════════════════════════════
+# SUB-CONFIGS (nested BaseModel)
+# ════════════════════════════════════════════════════════════
+
+
+class ProviderConfig(BaseModel):
+    """Single LLM provider."""
+
+    api_key: str = ""
+    api_base: str | None = None
+
+
+class ProvidersConfig(BaseModel):
+    """LLM providers (LiteLLM multi-provider)."""
+
+    anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
+    openai: ProviderConfig = Field(default_factory=ProviderConfig)
+    openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
+    deepseek: ProviderConfig = Field(default_factory=ProviderConfig)
+    groq: ProviderConfig = Field(default_factory=ProviderConfig)
+    gemini: ProviderConfig = Field(default_factory=ProviderConfig)
+
+
+class AgentConfig(BaseModel):
+    """Sub-agent definition (assistant.agents.*)."""
+
+    name: str = ""
+    description: str = ""
+    workspace: str = ""
+    model: str = ""
+    tools: list[str] = Field(default_factory=list)
+    mode: str = "sync"  # "sync" | "async"
+
+
+class AssistantConfig(BaseModel):
+    """Main assistant (assistant.*)."""
+
+    name: str = "GraphBot"
+    workspace: str = "./workspace"
+    model: str = "anthropic/claude-sonnet-4-5-20250929"
+    temperature: float = 0.7
+    session_token_limit: int = 30_000
+    max_iterations: int = 20
+    tools: list[str] = Field(default_factory=lambda: ["*"])
+    system_prompt: str | None = None
+    agents: dict[str, AgentConfig] = Field(default_factory=dict)
+
+
+# Channels
+class TelegramChannelConfig(BaseModel):
+    enabled: bool = False
+    token: str = ""
+    allow_from: list[str] = Field(default_factory=list)
+
+
+class DiscordChannelConfig(BaseModel):
+    enabled: bool = False
+    token: str = ""
+    allow_from: list[str] = Field(default_factory=list)
+
+
+class WhatsAppChannelConfig(BaseModel):
+    enabled: bool = False
+    bridge_url: str = "ws://localhost:3001"
+    allow_from: list[str] = Field(default_factory=list)
+
+
+class FeishuChannelConfig(BaseModel):
+    enabled: bool = False
+    app_id: str = ""
+    app_secret: str = ""
+    allow_from: list[str] = Field(default_factory=list)
+
+
+class ChannelsConfig(BaseModel):
+    telegram: TelegramChannelConfig = Field(default_factory=TelegramChannelConfig)
+    discord: DiscordChannelConfig = Field(default_factory=DiscordChannelConfig)
+    whatsapp: WhatsAppChannelConfig = Field(default_factory=WhatsAppChannelConfig)
+    feishu: FeishuChannelConfig = Field(default_factory=FeishuChannelConfig)
+
+
+# RAG (Faz 9)
+class RagConfig(BaseModel):
+    embedding_model: str = "intfloat/multilingual-e5-small"
+    data_source: str = "./data/items.json"
+    index_path: str = "./data/faiss_index"
+    text_template: str = "{title}. {description}."
+    id_field: str = "id"
+
+
+# Tools
+class ShellToolConfig(BaseModel):
+    timeout: int = 60
+    restrict_to_workspace: bool = False
+
+
+class WebToolConfig(BaseModel):
+    search_api_key: str = ""
+    max_results: int = 5
+
+
+class ToolsConfig(BaseModel):
+    shell: ShellToolConfig = Field(default_factory=ShellToolConfig)
+    web: WebToolConfig = Field(default_factory=WebToolConfig)
+
+
+# Background
+class CronConfig(BaseModel):
+    enabled: bool = True
+
+
+class HeartbeatConfig(BaseModel):
+    enabled: bool = False
+    interval_s: int = 1800
+
+
+class BackgroundConfig(BaseModel):
+    cron: CronConfig = Field(default_factory=CronConfig)
+    heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+
+
+# Database
+class DatabaseConfig(BaseModel):
+    path: str = "data/graphbot.db"
+
+
+# ════════════════════════════════════════════════════════════
+# ROOT CONFIG (BaseSettings — env + .env support)
+# ════════════════════════════════════════════════════════════
+
+
+class Config(BaseSettings):
+    """
+    Root configuration.
+
+    Priority: env vars > .env > YAML (init kwargs) > defaults
+
+    Env override examples:
+        GRAPHBOT_ASSISTANT__MODEL=openai/gpt-4o
+        GRAPHBOT_DATABASE__PATH=data/prod.db
+        GRAPHBOT_PROVIDERS__ANTHROPIC__API_KEY=sk-...
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="GRAPHBOT_",
+        env_nested_delimiter="__",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    assistant: AssistantConfig = Field(default_factory=AssistantConfig)
+    providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
+    channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
+    rag: RagConfig | None = None
+    tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    background: BackgroundConfig = Field(default_factory=BackgroundConfig)
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+
+    # ── Computed properties ─────────────────────────────────
+
+    @property
+    def workspace_path(self) -> Path:
+        return Path(self.assistant.workspace).expanduser().resolve()
+
+    @property
+    def db_path(self) -> Path:
+        return Path(self.database.path)
+
+    # ── Provider helpers (nanobot pattern) ──────────────────
+
+    def get_api_key(self, model: str | None = None) -> str | None:
+        """Get API key for model name. Falls back to first available."""
+        model_name = (model or self.assistant.model).lower()
+
+        keyword_map: dict[str, ProviderConfig] = {
+            "anthropic": self.providers.anthropic,
+            "claude": self.providers.anthropic,
+            "openai": self.providers.openai,
+            "gpt": self.providers.openai,
+            "openrouter": self.providers.openrouter,
+            "deepseek": self.providers.deepseek,
+            "groq": self.providers.groq,
+            "gemini": self.providers.gemini,
+        }
+        for keyword, provider in keyword_map.items():
+            if keyword in model_name and provider.api_key:
+                return provider.api_key
+
+        # Fallback: first key found
+        for name in ProvidersConfig.model_fields:
+            p = getattr(self.providers, name)
+            if isinstance(p, ProviderConfig) and p.api_key:
+                return p.api_key
+        return None
+
+    def get_api_base(self, model: str | None = None) -> str | None:
+        """Get API base URL for model name."""
+        model_name = (model or self.assistant.model).lower()
+        if "openrouter" in model_name:
+            return self.providers.openrouter.api_base or "https://openrouter.ai/api/v1"
+        for name in ProvidersConfig.model_fields:
+            p = getattr(self.providers, name)
+            if isinstance(p, ProviderConfig) and name in model_name and p.api_base:
+                return p.api_base
+        return None
