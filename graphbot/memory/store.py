@@ -127,15 +127,29 @@ class MemoryStore:
             ).fetchone()
         return dict(row) if row else None
 
-    def get_active_session(self, user_id: str) -> dict[str, Any] | None:
-        """Get the user's currently open session (ended_at IS NULL)."""
+    def get_active_session(
+        self, user_id: str, channel: str | None = None
+    ) -> dict[str, Any] | None:
+        """Get the user's currently open session (ended_at IS NULL).
+
+        If channel is provided, returns only sessions for that channel.
+        This ensures telegram sessions stay separate from api sessions.
+        """
         with self._get_conn() as conn:
-            row = conn.execute(
-                """SELECT * FROM sessions
-                   WHERE user_id = ? AND ended_at IS NULL
-                   ORDER BY started_at DESC LIMIT 1""",
-                (user_id,),
-            ).fetchone()
+            if channel:
+                row = conn.execute(
+                    """SELECT * FROM sessions
+                       WHERE user_id = ? AND channel = ? AND ended_at IS NULL
+                       ORDER BY started_at DESC LIMIT 1""",
+                    (user_id, channel),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """SELECT * FROM sessions
+                       WHERE user_id = ? AND ended_at IS NULL
+                       ORDER BY started_at DESC LIMIT 1""",
+                    (user_id,),
+                ).fetchone()
         return dict(row) if row else None
 
     def end_session(
