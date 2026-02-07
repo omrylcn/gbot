@@ -68,6 +68,7 @@ class UserContextResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     agent_ready: bool
+    version: str = ""
     items_count: int = 0
 
 

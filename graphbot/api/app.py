@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
+from graphbot import __version__
 from graphbot.agent.runner import GraphRunner
 from graphbot.api.auth import router as auth_router
 from graphbot.api.routes import router as core_router
@@ -83,7 +84,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="GraphBot API",
         description="General-purpose AI assistant API",
-        version="0.1.0",
+        version=__version__,
         lifespan=lifespan,
     )
 
