@@ -33,9 +33,11 @@ async def telegram_webhook(
     # Verify user exists and has a telegram link
     link = db.get_channel_link(user_id, "telegram")
     if not link:
+        logger.debug(f"Telegram webhook: unknown user_id={user_id}")
         return JSONResponse({"error": "Unknown user"}, status_code=404)
 
     token = link["channel_user_id"]
+    logger.debug(f"Telegram webhook: user={user_id}, token={token[:10]}...")
 
     body = await request.json()
 
@@ -46,11 +48,13 @@ async def telegram_webhook(
 
     chat_id = message["chat"]["id"]
     text = message["text"]
+    logger.debug(f"Telegram incoming: user={user_id}, chat_id={chat_id}, text={text[:50]}")
 
     # Save chat_id for proactive messaging
     db.update_channel_metadata_by_user(user_id, "telegram", {"chat_id": chat_id})
     active = db.get_active_session(user_id, channel="telegram")
     session_id = active["session_id"] if active else None
+    logger.debug(f"Telegram session: user={user_id}, active_session={session_id}")
 
     # Process message
     try:

@@ -148,6 +148,7 @@ class CronScheduler:
 
     async def _send_to_channel(self, user_id: str, channel: str, text: str) -> bool:
         """Deliver a message to the user's channel. Returns True if sent directly."""
+        logger.debug(f"Delivery attempt: user={user_id}, channel={channel}, text={text[:50]}")
         if channel == "telegram":
             link = self.db.get_channel_link(user_id, "telegram")
             if link:
@@ -155,11 +156,14 @@ class CronScheduler:
                 if chat_id:
                     from graphbot.core.channels.telegram import send_message
 
+                    logger.debug(f"Sending to Telegram: chat_id={chat_id}, token={link['channel_user_id'][:10]}...")
                     await send_message(link["channel_user_id"], int(chat_id), text)
                     return True
                 logger.warning(f"No chat_id for user {user_id}")
             else:
                 logger.warning(f"No telegram link for user {user_id}")
+        else:
+            logger.debug(f"Channel '{channel}' has no direct delivery, skipping")
         return False
 
     # ── Execution ─────────────────────────────────────────────

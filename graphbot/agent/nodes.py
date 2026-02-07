@@ -67,7 +67,12 @@ def make_nodes(config: Config, db: MemoryStore, tools: list | None = None):
                     # Inject state context into tools that accept these params
                     tool_fields = set(tool.args_schema.model_fields) if tool.args_schema else set()
                     if "channel" in tool_fields:
+                        original = args.get("channel")
                         args["channel"] = state["channel"]
+                        logger.debug(
+                            f"Channel inject: tool={call['name']}, "
+                            f"{original!r} → {state['channel']!r}"
+                        )
                     result = await tool.ainvoke(args)
                 except Exception as e:
                     result = f"Tool error: {e}"
