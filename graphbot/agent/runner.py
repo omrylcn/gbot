@@ -69,9 +69,10 @@ class GraphRunner:
         # 4. Extract response
         response = self._extract_response(state)
 
-        # 5. Save to SQLite
+        # 5. Save to SQLite (only NEW messages, skip loaded history + new HumanMessage)
         self.db.add_message(session_id, "user", message)
-        self._save_ai_messages(session_id, state)
+        new_start = len(history) + 1  # skip history + HumanMessage
+        self._save_ai_messages(session_id, state, skip=new_start)
 
         # 6. Token limit check
         token_count = state.get("token_count", 0)
@@ -100,7 +101,8 @@ class GraphRunner:
                         tc = None
                 messages.append(AIMessage(content=content, tool_calls=tc or []))
             elif role == "tool":
-                messages.append(ToolMessage(content=content, tool_call_id=""))
+                tc_id = row.get("tool_call_id") or ""
+                messages.append(ToolMessage(content=content, tool_call_id=tc_id))
         return messages
 
     def _extract_response(self, state: dict) -> str:
@@ -110,14 +112,16 @@ class GraphRunner:
                 return msg.content
         return ""
 
-    def _save_ai_messages(self, session_id: str, state: dict) -> None:
+    def _save_ai_messages(self, session_id: str, state: dict, skip: int = 0) -> None:
         """Save new AI + tool messages to SQLite."""
-        for msg in state["messages"]:
+        for msg in state["messages"][skip:]:
             if isinstance(msg, AIMessage):
                 tc = json.dumps(msg.tool_calls) if msg.tool_calls else None
                 self.db.add_message(session_id, "assistant", msg.content, tool_calls=tc)
             elif isinstance(msg, ToolMessage):
-                self.db.add_message(session_id, "tool", msg.content)
+                self.db.add_message(
+                    session_id, "tool", msg.content, tool_call_id=msg.tool_call_id,
+                )
 
     async def _rotate_session(self, user_id: str, session_id: str) -> None:
         """Close session with summary, open new one."""

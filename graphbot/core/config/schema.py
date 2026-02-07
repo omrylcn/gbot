@@ -42,10 +42,18 @@ class AgentConfig(BaseModel):
     mode: str = "sync"  # "sync" | "async"
 
 
+class OwnerConfig(BaseModel):
+    """Owner (default user) configuration."""
+
+    username: str
+    name: str = ""
+
+
 class AssistantConfig(BaseModel):
     """Main assistant (assistant.*)."""
 
     name: str = "GraphBot"
+    owner: OwnerConfig | None = None
     workspace: str = "./workspace"
     model: str = "anthropic/claude-sonnet-4-5-20250929"
     temperature: float = 0.7
@@ -59,7 +67,6 @@ class AssistantConfig(BaseModel):
 # Channels
 class TelegramChannelConfig(BaseModel):
     enabled: bool = False
-    token: str = ""
     allow_from: list[str] = Field(default_factory=list)
 
 
@@ -168,6 +175,11 @@ class Config(BaseSettings):
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
 
     # ── Computed properties ─────────────────────────────────
+
+    @property
+    def owner_user_id(self) -> str | None:
+        """Return the owner's username if configured, else None."""
+        return self.assistant.owner.username if self.assistant.owner else None
 
     @property
     def workspace_path(self) -> Path:

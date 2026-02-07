@@ -63,7 +63,12 @@ def make_nodes(config: Config, db: MemoryStore, tools: list | None = None):
                 result = f"Tool '{call['name']}' not found"
             else:
                 try:
-                    result = await tool.ainvoke(call["args"])
+                    args = call["args"].copy()
+                    # Inject state context into tools that accept these params
+                    tool_fields = set(tool.args_schema.model_fields) if tool.args_schema else set()
+                    if "channel" in tool_fields:
+                        args["channel"] = state["channel"]
+                    result = await tool.ainvoke(args)
                 except Exception as e:
                     result = f"Tool error: {e}"
 

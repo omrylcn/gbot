@@ -71,10 +71,14 @@ def chat(
     db = MemoryStore(config.database.path)
     runner = GraphRunner(config, db)
 
-    user_id = "cli_user"
+    # Use owner if configured, else fallback to "cli_user"
+    if config.assistant.owner is not None:
+        user_id = config.assistant.owner.username
+        db.get_or_create_user(user_id, name=config.assistant.owner.name or None)
+    else:
+        user_id = "cli_user"
+        db.get_or_create_user(user_id, name="CLI User")
     channel = "cli"
-
-    db.get_or_create_user(user_id, name="CLI User")
 
     if message:
         # Single message mode
@@ -195,3 +199,103 @@ def cron_remove(
 
     db.remove_cron_job(job_id)
     console.print(f"[green]Removed cron job:[/green] {job_id}")
+
+
+# ════════════════════════════════════════════════════════════
+# user — user management (sub-command group)
+# ════════════════════════════════════════════════════════════
+
+user_app = typer.Typer(help="Manage users")
+app.add_typer(user_app, name="user")
+
+
+@user_app.command("add")
+def user_add(
+    username: str = typer.Argument(help="User ID (e.g. 'ali')"),
+    name: str = typer.Option("", "--name", "-n", help="Display name"),
+    telegram: str | None = typer.Option(None, "--telegram", "-t", help="Telegram bot token"),
+) -> None:
+    """Add a new user, optionally linking a Telegram account."""
+    from graphbot.core.config.loader import load_config
+    from graphbot.memory.store import MemoryStore
+
+    config = load_config()
+    db = MemoryStore(config.database.path)
+
+    if db.user_exists(username):
+        console.print(f"[yellow]User already exists:[/yellow] {username}")
+        return
+
+    db.get_or_create_user(username, name=name or None)
+    console.print(f"[green]User created:[/green] {username}")
+
+    if telegram:
+        db.link_channel(username, "telegram", telegram)
+        console.print(f"  [dim]Linked telegram:{telegram}[/dim]")
+
+
+@user_app.command("list")
+def user_list() -> None:
+    """List all users and their linked channels."""
+    from graphbot.core.config.loader import load_config
+    from graphbot.memory.store import MemoryStore
+
+    config = load_config()
+    db = MemoryStore(config.database.path)
+
+    users = db.list_users()
+    if not users:
+        console.print("[dim]No users found.[/dim]")
+        return
+
+    table = Table(title="Users")
+    table.add_column("User ID", style="cyan")
+    table.add_column("Name", style="blue")
+    table.add_column("Channels", style="yellow")
+    table.add_column("Created", style="dim")
+
+    for u in users:
+        channels_str = ", ".join(
+            f"{c['channel']}:{c['channel_user_id']}" for c in u["channels"]
+        ) or "-"
+        table.add_row(u["user_id"], u["name"] or "-", channels_str, u["created_at"])
+
+    console.print(table)
+
+
+@user_app.command("remove")
+def user_remove(
+    username: str = typer.Argument(help="User ID to remove"),
+) -> None:
+    """Remove a user and their channel links."""
+    from graphbot.core.config.loader import load_config
+    from graphbot.memory.store import MemoryStore
+
+    config = load_config()
+    db = MemoryStore(config.database.path)
+
+    if db.delete_user(username):
+        console.print(f"[green]Removed user:[/green] {username}")
+    else:
+        console.print(f"[red]User not found:[/red] {username}")
+
+
+@user_app.command("link")
+def user_link(
+    username: str = typer.Argument(help="User ID"),
+    channel: str = typer.Argument(help="Channel name (telegram, discord, ...)"),
+    channel_user_id: str = typer.Argument(help="User's ID on that channel"),
+) -> None:
+    """Link a channel identity to a user."""
+    from graphbot.core.config.loader import load_config
+    from graphbot.memory.store import MemoryStore
+
+    config = load_config()
+    db = MemoryStore(config.database.path)
+
+    if not db.user_exists(username):
+        console.print(f"[red]User not found:[/red] {username}")
+        raise typer.Exit(code=1)
+
+    db.link_channel(username, channel, channel_user_id)
+    console.print(f"[green]Linked[/green] {channel}:{channel_user_id} [green]to[/green] {username}")

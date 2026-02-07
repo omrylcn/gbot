@@ -8,6 +8,7 @@ from loguru import logger
 
 from graphbot.agent.tools.cron_tool import make_cron_tools
 from graphbot.agent.tools.delegate import make_delegate_tools
+from graphbot.agent.tools.reminder import make_reminder_tools
 from graphbot.agent.tools.filesystem import make_filesystem_tools
 from graphbot.agent.tools.memory_tools import make_memory_tools
 from graphbot.agent.tools.search import make_search_tools
@@ -45,6 +46,7 @@ def make_tools(
     tools += make_web_tools(config)
     tools += make_delegate_tools(worker)
     tools += make_cron_tools(scheduler)
+    tools += make_reminder_tools(scheduler)
     return tools
 
 

@@ -80,6 +80,36 @@ class MemoryStore:
                 is not None
             )
 
+    def list_users(self) -> list[dict[str, Any]]:
+        """List all users with their linked channels."""
+        with self._get_conn() as conn:
+            users = conn.execute(
+                "SELECT user_id, name, created_at FROM users ORDER BY created_at"
+            ).fetchall()
+        result = []
+        for u in users:
+            user = dict(u)
+            user["channels"] = self.get_user_channels(u["user_id"])
+            result.append(user)
+        return result
+
+    def get_user_channels(self, user_id: str) -> list[dict[str, Any]]:
+        """Get all channel links for a user."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT channel, channel_user_id, metadata FROM user_channels WHERE user_id = ?",
+                (user_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_user(self, user_id: str) -> bool:
+        """Delete user and all channel links. Returns True if user existed."""
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM user_channels WHERE user_id = ?", (user_id,))
+            cursor = conn.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+            conn.commit()
+        return cursor.rowcount > 0
+
     # ════════════════════════════════════════════════════════════
     # USER CHANNELS (cross-channel identity)
     # ════════════════════════════════════════════════════════════
@@ -103,6 +133,67 @@ class MemoryStore:
                 (channel, channel_user_id),
             ).fetchone()
         return row["user_id"] if row else None
+
+    def update_channel_metadata(
+        self, channel: str, channel_user_id: str, metadata: dict[str, Any]
+    ) -> None:
+        """Merge metadata into a channel identity (e.g. chat_id for Telegram)."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT metadata FROM user_channels WHERE channel = ? AND channel_user_id = ?",
+                (channel, channel_user_id),
+            ).fetchone()
+            if not row:
+                return
+            current = json.loads(row["metadata"] or "{}")
+            current.update(metadata)
+            conn.execute(
+                "UPDATE user_channels SET metadata = ? WHERE channel = ? AND channel_user_id = ?",
+                (json.dumps(current, ensure_ascii=False), channel, channel_user_id),
+            )
+            conn.commit()
+
+    def get_channel_metadata(self, user_id: str, channel: str) -> dict[str, Any]:
+        """Get metadata for a user's channel identity."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT metadata FROM user_channels WHERE user_id = ? AND channel = ?",
+                (user_id, channel),
+            ).fetchone()
+        return json.loads(row["metadata"] or "{}") if row else {}
+
+    def get_channel_link(self, user_id: str, channel: str) -> dict[str, Any] | None:
+        """Get channel link: {channel_user_id, metadata}."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT channel_user_id, metadata FROM user_channels WHERE user_id = ? AND channel = ?",
+                (user_id, channel),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "channel_user_id": row["channel_user_id"],
+            "metadata": json.loads(row["metadata"] or "{}"),
+        }
+
+    def update_channel_metadata_by_user(
+        self, user_id: str, channel: str, metadata: dict[str, Any]
+    ) -> None:
+        """Merge metadata by user_id + channel (token-based model)."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT metadata FROM user_channels WHERE user_id = ? AND channel = ?",
+                (user_id, channel),
+            ).fetchone()
+            if not row:
+                return
+            current = json.loads(row["metadata"] or "{}")
+            current.update(metadata)
+            conn.execute(
+                "UPDATE user_channels SET metadata = ? WHERE user_id = ? AND channel = ?",
+                (json.dumps(current, ensure_ascii=False), user_id, channel),
+            )
+            conn.commit()
 
     # ════════════════════════════════════════════════════════════
     # SESSIONS (token-based)
@@ -208,12 +299,13 @@ class MemoryStore:
         role: str,
         content: str,
         tool_calls: str | None = None,
+        tool_call_id: str | None = None,
     ) -> int:
         with self._get_conn() as conn:
             cursor = conn.execute(
-                """INSERT INTO messages (session_id, role, content, tool_calls)
-                   VALUES (?, ?, ?, ?)""",
-                (session_id, role, content, tool_calls),
+                """INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (session_id, role, content, tool_calls, tool_call_id),
             )
             conn.commit()
             return cursor.lastrowid or 0
@@ -221,7 +313,7 @@ class MemoryStore:
     def get_session_messages(self, session_id: str) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
             rows = conn.execute(
-                """SELECT role, content, tool_calls, created_at
+                """SELECT role, content, tool_calls, tool_call_id, created_at
                    FROM messages WHERE session_id = ?
                    ORDER BY created_at ASC""",
                 (session_id,),
@@ -437,6 +529,38 @@ class MemoryStore:
             conn.execute("DELETE FROM cron_jobs WHERE job_id = ?", (job_id,))
             conn.commit()
 
+    def add_reminder(
+        self,
+        job_id: str,
+        user_id: str,
+        run_at: str,
+        message: str,
+        channel: str = "api",
+    ) -> None:
+        """Add a one-shot reminder (run_at = ISO datetime)."""
+        with self._get_conn() as conn:
+            conn.execute(
+                """INSERT INTO cron_jobs
+                   (job_id, user_id, cron_expr, message, channel, run_at)
+                   VALUES (?, ?, '', ?, ?, ?)""",
+                (job_id, user_id, message, channel, run_at),
+            )
+            conn.commit()
+
+    def get_pending_reminders(self, user_id: str | None = None) -> list[dict[str, Any]]:
+        """Get reminders (cron_jobs with run_at set)."""
+        with self._get_conn() as conn:
+            if user_id:
+                rows = conn.execute(
+                    "SELECT * FROM cron_jobs WHERE run_at IS NOT NULL AND user_id = ?",
+                    (user_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM cron_jobs WHERE run_at IS NOT NULL"
+                ).fetchall()
+        return [dict(r) for r in rows]
+
     # ════════════════════════════════════════════════════════════
     # COMBINED USER CONTEXT (for ContextBuilder)
     # ════════════════════════════════════════════════════════════
@@ -492,6 +616,7 @@ CREATE TABLE IF NOT EXISTS user_channels (
     user_id TEXT NOT NULL,
     channel TEXT NOT NULL,
     channel_user_id TEXT NOT NULL,
+    metadata TEXT DEFAULT '{}',
     PRIMARY KEY (channel, channel_user_id),
     FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
@@ -517,6 +642,7 @@ CREATE TABLE IF NOT EXISTS messages (
     role TEXT NOT NULL,
     content TEXT,
     tool_calls TEXT,
+    tool_call_id TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (session_id) REFERENCES sessions(session_id)
 );
@@ -574,14 +700,15 @@ CREATE TABLE IF NOT EXISTS preferences (
     FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
 
--- 10. Cron jobs
+-- 10. Cron jobs + reminders
 CREATE TABLE IF NOT EXISTS cron_jobs (
     job_id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
-    cron_expr TEXT NOT NULL,
+    cron_expr TEXT NOT NULL DEFAULT '',
     message TEXT NOT NULL,
     channel TEXT DEFAULT 'api',
     enabled INTEGER DEFAULT 1,
+    run_at TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(user_id)
 );

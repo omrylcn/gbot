@@ -10,9 +10,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 
 from graphbot.agent.runner import GraphRunner
-from graphbot.api.deps import get_config, get_db, get_runner
-from graphbot.core.channels.base import check_allowlist, resolve_or_create_user
-from graphbot.core.config.schema import Config
+from graphbot.api.deps import get_db, get_runner
 from graphbot.memory.store import MemoryStore
 
 router = APIRouter(tags=["telegram"])
@@ -20,14 +18,25 @@ router = APIRouter(tags=["telegram"])
 TELEGRAM_API = "https://api.telegram.org/bot{token}"
 
 
-@router.post("/webhooks/telegram")
+@router.post("/webhooks/telegram/{user_id}")
 async def telegram_webhook(
+    user_id: str,
     request: Request,
-    config: Config = Depends(get_config),
     db: MemoryStore = Depends(get_db),
     runner: GraphRunner = Depends(get_runner),
 ):
-    """Handle incoming Telegram webhook updates."""
+    """Handle incoming Telegram webhook updates.
+
+    Each user has their own bot token stored in user_channels.
+    The user_id in the path identifies which user this webhook belongs to.
+    """
+    # Verify user exists and has a telegram link
+    link = db.get_channel_link(user_id, "telegram")
+    if not link:
+        return JSONResponse({"error": "Unknown user"}, status_code=404)
+
+    token = link["channel_user_id"]
+
     body = await request.json()
 
     # Extract message (skip non-message updates)
@@ -35,18 +44,11 @@ async def telegram_webhook(
     if not message or not message.get("text"):
         return JSONResponse({"ok": True})
 
-    sender = message.get("from", {})
-    sender_id = str(sender.get("id", ""))
     chat_id = message["chat"]["id"]
     text = message["text"]
 
-    # Allowlist check
-    if not check_allowlist(config.channels, "telegram", sender_id):
-        logger.warning(f"Telegram: denied sender {sender_id}")
-        return JSONResponse({"ok": True}, status_code=403)
-
-    # Resolve user + reuse active session
-    user_id = resolve_or_create_user(db, "telegram", sender_id)
+    # Save chat_id for proactive messaging
+    db.update_channel_metadata_by_user(user_id, "telegram", {"chat_id": chat_id})
     active = db.get_active_session(user_id, channel="telegram")
     session_id = active["session_id"] if active else None
 
@@ -60,7 +62,6 @@ async def telegram_webhook(
         response = "An error occurred while processing your message."
 
     # Send response
-    token = config.channels.telegram.token
     await send_message(token, chat_id, response)
 
     return JSONResponse({"ok": True})
@@ -71,7 +72,7 @@ async def send_message(token: str, chat_id: int, text: str) -> None:
     url = f"{TELEGRAM_API.format(token=token)}/sendMessage"
     html_text = md_to_html(text)
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
         resp = await client.post(
             url,
             json={

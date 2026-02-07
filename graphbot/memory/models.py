@@ -39,7 +39,7 @@ class ItemCard(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
-    user_id: str = "default"
+    user_id: str | None = None
     session_id: str | None = None
 
 

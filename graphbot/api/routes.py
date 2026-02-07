@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 
 from graphbot.agent.runner import GraphRunner
-from graphbot.api.deps import get_db, get_runner
+from graphbot.api.deps import get_config, get_db, get_runner
+from graphbot.core.config.schema import Config
 from graphbot.memory.models import (
     ChatRequest,
     ChatResponse,
@@ -24,11 +25,13 @@ router = APIRouter()
 async def chat(
     body: ChatRequest,
     runner: GraphRunner = Depends(get_runner),
+    config: Config = Depends(get_config),
 ):
     """Send a message and get assistant response."""
+    user_id = body.user_id or config.owner_user_id or "default"
     try:
         response, session_id = await runner.process(
-            user_id=body.user_id,
+            user_id=user_id,
             channel="api",
             message=body.message,
             session_id=body.session_id,

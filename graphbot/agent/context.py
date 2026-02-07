@@ -38,6 +38,18 @@ class ContextBuilder:
         if identity:
             parts.append(identity)
 
+        # 1.5. Runtime info (user_id, datetime)
+        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+        user = self.db.get_user(user_id)
+        user_name = user["name"] if user and user.get("name") else user_id
+        parts.append(
+            f"# Runtime\n\n"
+            f"- Current user_id: {user_id}\n"
+            f"- Current user_name: {user_name}\n"
+            f"- Current time: {now}\n"
+            f"- Use this user_id when calling tools that require it."
+        )
+
         # 2. Agent memory
         memory = self.db.read_memory("long_term")
         if memory:

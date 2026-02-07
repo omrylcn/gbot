@@ -24,17 +24,38 @@ from graphbot.core.cron.scheduler import CronScheduler
 from graphbot.memory.store import MemoryStore
 
 
+def _ensure_owner(config, db) -> None:
+    """Create owner user in DB at startup if configured."""
+    if config.assistant.owner is None:
+        return
+    owner = config.assistant.owner
+    db.get_or_create_user(owner.username, name=owner.name)
+    logger.info(f"Owner user ensured: {owner.username}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: init Config → MemoryStore → GraphRunner → Background Services. Shutdown: cleanup."""
+    from graphbot.agent.tools import make_tools
+
     config = load_config()
     db = MemoryStore(str(config.db_path))
-    runner = GraphRunner(config, db)
+    _ensure_owner(config, db)
 
-    # Background services
-    cron_scheduler = CronScheduler(db, runner)
+    # Create runner with empty tools first (chicken-and-egg: scheduler needs runner)
+    runner = GraphRunner(config, db, tools=[])
+
+    # Background services (need runner)
+    cron_scheduler = CronScheduler(db, runner, config=config)
     heartbeat = HeartbeatService(config, runner)
     worker = SubagentWorker(runner)
+
+    # Now build tools with scheduler+worker, and rebuild graph
+    from graphbot.agent.graph import create_graph
+
+    tools = make_tools(config, db, scheduler=cron_scheduler, worker=worker)
+    runner.tools = tools
+    runner._graph = create_graph(config, db, tools)
 
     await cron_scheduler.start()
     heartbeat_task = asyncio.create_task(heartbeat.start())

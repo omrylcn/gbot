@@ -10,7 +10,8 @@ class CronJob(BaseModel):
 
     job_id: str
     user_id: str
-    cron_expr: str
+    cron_expr: str = ""
     message: str
     channel: str = "api"
     enabled: bool = True
+    run_at: str | None = None  # ISO datetime for one-shot reminders
