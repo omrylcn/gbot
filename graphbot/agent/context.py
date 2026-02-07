@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+from graphbot.agent.skills.loader import SkillLoader
 from graphbot.core.config.schema import Config
 from graphbot.memory.store import MemoryStore
 
@@ -16,12 +17,17 @@ class ContextBuilder:
       2. Agent memory (agent_memory table)
       3. User context (notes, activities, favorites, preferences)
       4. Previous session summary
-      5-6. Skills (Faz 6 placeholder)
+      5. Active skills (always-on, full content)
+      6. Skills index (all skills, name + description)
     """
 
     def __init__(self, config: Config, db: MemoryStore):
         self.config = config
         self.db = db
+        self.skills = SkillLoader(
+            workspace=config.workspace_path,
+            builtin_dir=Path(__file__).parent / "skills" / "builtin",
+        )
 
     def build(self, user_id: str) -> str:
         """Build full system prompt for a user."""
@@ -47,7 +53,22 @@ class ContextBuilder:
         if summary:
             parts.append(f"# Previous Conversation\n\n{summary}")
 
-        # 5-6. Skills placeholder (Faz 6)
+        # 5. Active skills (always-on, full content)
+        always_on = self.skills.get_always_on()
+        if always_on:
+            skill_texts = [self.skills.load_content(s.name) for s in always_on]
+            active = "\n\n---\n\n".join(t for t in skill_texts if t)
+            if active:
+                parts.append(f"# Active Skills\n\n{active}")
+
+        # 6. Skills index
+        index = self.skills.build_index()
+        if index:
+            parts.append(
+                "# Available Skills\n\n"
+                "Use read_file to load a skill's full instructions when needed.\n\n"
+                + index
+            )
 
         return "\n\n---\n\n".join(parts)
 

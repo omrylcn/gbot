@@ -34,14 +34,23 @@ class GraphRunner:
         setup_provider(config)
         self._graph = create_graph(config, db, self.tools)
 
-    async def process(self, user_id: str, channel: str, message: str) -> str:
-        """Process a user message and return assistant response."""
-        # 1. Session
-        session = self.db.get_active_session(user_id)
-        if not session:
+    async def process(
+        self, user_id: str, channel: str, message: str, session_id: str | None = None
+    ) -> tuple[str, str]:
+        """Process a user message and return (response, session_id).
+
+        Args:
+            user_id: User identifier.
+            channel: Channel name (api, telegram, etc.).
+            message: User message text.
+            session_id: Existing session ID. If None, creates a new session.
+
+        Returns:
+            Tuple of (assistant_response, session_id).
+        """
+        # 1. Session — client provides session_id, or we create one
+        if session_id is None:
             session_id = self.db.create_session(user_id, channel)
-        else:
-            session_id = session["session_id"]
 
         # 2. Load history → LangChain messages
         history = self._load_history(session_id)
@@ -72,7 +81,7 @@ class GraphRunner:
         if token_count >= self.config.assistant.session_token_limit:
             await self._rotate_session(user_id, session_id)
 
-        return response
+        return response, session_id
 
     def _load_history(self, session_id: str) -> list:
         """SQLite messages → LangChain messages."""
