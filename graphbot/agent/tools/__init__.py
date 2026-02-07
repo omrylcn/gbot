@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from loguru import logger
+
 from graphbot.agent.tools.cron_tool import make_cron_tools
 from graphbot.agent.tools.delegate import make_delegate_tools
 from graphbot.agent.tools.filesystem import make_filesystem_tools
@@ -18,7 +20,6 @@ if TYPE_CHECKING:
     from graphbot.core.background.worker import SubagentWorker
     from graphbot.core.cron.scheduler import CronScheduler
 
-
 def make_tools(
     config: Config,
     db: MemoryStore,
@@ -26,9 +27,19 @@ def make_tools(
     worker: SubagentWorker | None = None,
 ) -> list:
     """Create all agent tools from config and db."""
+    # Build RAG retriever if configured
+    retriever = None
+    if config.rag is not None:
+        try:
+            from graphbot.rag.retriever import SemanticRetriever
+
+            retriever = SemanticRetriever(config.rag)
+        except ImportError:
+            logger.warning("RAG deps not installed (faiss-cpu, sentence-transformers)")
+
     tools: list = []
     tools += make_memory_tools(db)
-    tools += make_search_tools()
+    tools += make_search_tools(retriever)
     tools += make_filesystem_tools(config)
     tools += make_shell_tools(config)
     tools += make_web_tools(config)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from loguru import logger

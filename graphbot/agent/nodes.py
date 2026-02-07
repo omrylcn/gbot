@@ -106,7 +106,7 @@ def should_continue(state: AgentState) -> str:
 
 def _langchain_to_dict(msg: Any) -> dict[str, Any]:
     """Convert LangChain message to dict for litellm."""
-    from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+    from langchain_core.messages import HumanMessage, ToolMessage
 
     if isinstance(msg, HumanMessage):
         return {"role": "user", "content": msg.content}
