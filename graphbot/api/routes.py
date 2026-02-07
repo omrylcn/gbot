@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 
+from graphbot import __version__
 from graphbot.agent.runner import GraphRunner
 from graphbot.api.deps import get_config, get_db, get_runner
 from graphbot.core.config.schema import Config
@@ -45,7 +46,7 @@ async def chat(
 @router.get("/health", response_model=HealthResponse)
 async def health():
     """Health check."""
-    return HealthResponse(status="ok", agent_ready=True)
+    return HealthResponse(status="ok", agent_ready=True, version=__version__)
 
 
 @router.get("/sessions/{user_id}", response_model=list[SessionInfo])
