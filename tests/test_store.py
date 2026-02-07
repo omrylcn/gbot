@@ -95,3 +95,72 @@ def test_user_context(store):
     assert "vegetarian" in ctx
     assert "Pizza" in ctx
     assert "spice" in ctx
+
+
+# ── User Management ──────────────────────────────────────
+
+
+def test_list_users(store):
+    """list_users returns all users with their channels."""
+    store.get_or_create_user("u1", name="Alice")
+    store.get_or_create_user("u2", name="Bob")
+    store.link_channel("u1", "telegram", "111")
+
+    users = store.list_users()
+    assert len(users) == 2
+    u1 = next(u for u in users if u["user_id"] == "u1")
+    assert u1["name"] == "Alice"
+    assert len(u1["channels"]) == 1
+    assert u1["channels"][0]["channel"] == "telegram"
+
+
+def test_get_user_channels(store):
+    """get_user_channels returns channel links for a user."""
+    store.link_channel("u1", "telegram", "111")
+    store.link_channel("u1", "discord", "abc")
+
+    channels = store.get_user_channels("u1")
+    assert len(channels) == 2
+    channel_names = {c["channel"] for c in channels}
+    assert channel_names == {"telegram", "discord"}
+
+
+def test_delete_user(store):
+    """delete_user removes user and channel links."""
+    store.get_or_create_user("u1", name="Alice")
+    store.link_channel("u1", "telegram", "111")
+
+    assert store.delete_user("u1") is True
+    assert not store.user_exists("u1")
+    assert store.resolve_user("telegram", "111") is None
+    # Deleting non-existent user returns False
+    assert store.delete_user("u1") is False
+
+
+def test_get_channel_link(store):
+    """get_channel_link returns token + metadata for user+channel."""
+    store.link_channel("u1", "telegram", "123456:ABC_TOKEN")
+    store.update_channel_metadata_by_user("u1", "telegram", {"chat_id": 99999})
+
+    link = store.get_channel_link("u1", "telegram")
+    assert link is not None
+    assert link["channel_user_id"] == "123456:ABC_TOKEN"
+    assert link["metadata"]["chat_id"] == 99999
+
+
+def test_get_channel_link_not_found(store):
+    """get_channel_link returns None for unknown user+channel."""
+    store.get_or_create_user("u1")
+    assert store.get_channel_link("u1", "telegram") is None
+    assert store.get_channel_link("nonexistent", "telegram") is None
+
+
+def test_update_channel_metadata_by_user(store):
+    """update_channel_metadata_by_user merges metadata by user_id+channel."""
+    store.link_channel("u1", "telegram", "token123")
+    store.update_channel_metadata_by_user("u1", "telegram", {"chat_id": 111})
+    store.update_channel_metadata_by_user("u1", "telegram", {"username": "ali"})
+
+    link = store.get_channel_link("u1", "telegram")
+    assert link["metadata"]["chat_id"] == 111
+    assert link["metadata"]["username"] == "ali"

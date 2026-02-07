@@ -37,3 +37,22 @@ def test_load_yaml(tmp_path):
 def test_load_missing(tmp_path):
     cfg = load_config(tmp_path / "nope.yaml")
     assert cfg.assistant.name == "GraphBot"
+
+
+# ── Owner Config ──────────────────────────────────────────
+
+
+def test_owner_config_none():
+    """No owner configured → owner is None, owner_user_id is None."""
+    cfg = Config()
+    assert cfg.assistant.owner is None
+    assert cfg.owner_user_id is None
+
+
+def test_owner_config_from_dict():
+    """Owner parsed from dict correctly."""
+    cfg = Config(assistant={"name": "Bot", "owner": {"username": "ali", "name": "Ali"}})
+    assert cfg.assistant.owner is not None
+    assert cfg.assistant.owner.username == "ali"
+    assert cfg.assistant.owner.name == "Ali"
+    assert cfg.owner_user_id == "ali"

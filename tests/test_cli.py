@@ -30,6 +30,7 @@ def test_chat_single_message(tmp_path):
 
     fake_config = MagicMock()
     fake_config.database.path = str(tmp_path / "test.db")
+    fake_config.assistant.owner = None  # no owner → legacy "cli_user"
 
     fake_db = MagicMock()
 
@@ -104,6 +105,68 @@ def test_cron_remove(tmp_path):
     assert result.exit_code == 0
     assert "job-123" in result.output
     fake_db.remove_cron_job.assert_called_once_with("job-123")
+
+
+def test_chat_uses_owner(tmp_path):
+    """chat command uses owner user_id when configured."""
+    mock_runner = MagicMock()
+    mock_runner.process = AsyncMock(return_value=("Owner reply", "cli:default"))
+
+    fake_config = MagicMock()
+    fake_config.database.path = str(tmp_path / "test.db")
+    fake_config.assistant.owner.username = "omrylcn"
+    fake_config.assistant.owner.name = "Ömer"
+
+    fake_db = MagicMock()
+
+    with (
+        patch(_PATCH_CONFIG, return_value=fake_config),
+        patch(_PATCH_STORE, return_value=fake_db),
+        patch(_PATCH_RUNNER, return_value=mock_runner),
+    ):
+        result = runner.invoke(app, ["chat", "-m", "test"])
+
+    assert result.exit_code == 0
+    mock_runner.process.assert_called_once_with("omrylcn", "cli", "test", "cli:default")
+    fake_db.get_or_create_user.assert_called_once_with("omrylcn", name="Ömer")
+
+
+def test_user_add_cli(tmp_path):
+    """user add creates a user."""
+    fake_config = MagicMock()
+    fake_config.database.path = str(tmp_path / "test.db")
+
+    fake_db = MagicMock()
+    fake_db.user_exists.return_value = False
+
+    with (
+        patch(_PATCH_CONFIG, return_value=fake_config),
+        patch(_PATCH_STORE, return_value=fake_db),
+    ):
+        result = runner.invoke(app, ["user", "add", "ali", "--name", "Ali", "--telegram", "555"])
+
+    assert result.exit_code == 0
+    assert "ali" in result.output
+    fake_db.get_or_create_user.assert_called_once_with("ali", name="Ali")
+    fake_db.link_channel.assert_called_once_with("ali", "telegram", "555")
+
+
+def test_user_list_empty(tmp_path):
+    """user list shows message when no users."""
+    fake_config = MagicMock()
+    fake_config.database.path = str(tmp_path / "test.db")
+
+    fake_db = MagicMock()
+    fake_db.list_users.return_value = []
+
+    with (
+        patch(_PATCH_CONFIG, return_value=fake_config),
+        patch(_PATCH_STORE, return_value=fake_db),
+    ):
+        result = runner.invoke(app, ["user", "list"])
+
+    assert result.exit_code == 0
+    assert "No users found" in result.output
 
 
 def test_main_module():

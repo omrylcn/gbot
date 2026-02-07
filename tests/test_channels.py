@@ -7,7 +7,12 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from graphbot.core.channels.base import check_allowlist, resolve_or_create_user
+from graphbot.core.channels.base import (
+    check_allowlist,
+    is_owner_mode,
+    resolve_or_create_user,
+    resolve_user_strict,
+)
 from graphbot.core.channels.telegram import md_to_html
 from graphbot.core.config import Config
 from graphbot.memory.store import MemoryStore
@@ -21,7 +26,7 @@ def store(tmp_path):
 @pytest.fixture
 def cfg():
     return Config(
-        channels={"telegram": {"enabled": True, "token": "fake-token", "allow_from": ["111", "222"]}}
+        channels={"telegram": {"enabled": True, "allow_from": ["111", "222"]}}
     )
 
 
@@ -44,6 +49,33 @@ def test_resolve_or_create_user_existing(store):
 
     user_id = resolve_or_create_user(store, "telegram", "99999")
     assert user_id == "my_user"
+
+
+# ── Owner Mode & Strict Resolve ───────────────────────────
+
+
+def test_is_owner_mode_true():
+    """Config with owner → owner mode active."""
+    cfg = Config(assistant={"owner": {"username": "ali", "name": "Ali"}})
+    assert is_owner_mode(cfg) is True
+
+
+def test_is_owner_mode_false():
+    """Config without owner → owner mode inactive."""
+    cfg = Config()
+    assert is_owner_mode(cfg) is False
+
+
+def test_resolve_strict_found(store):
+    """Linked user → returns user_id."""
+    store.get_or_create_user("ali")
+    store.link_channel("ali", "telegram", "555")
+    assert resolve_user_strict(store, "telegram", "555") == "ali"
+
+
+def test_resolve_strict_not_found(store):
+    """Unknown channel user → None (no auto-create)."""
+    assert resolve_user_strict(store, "telegram", "unknown") is None
 
 
 # ── Allowlist ──────────────────────────────────────────────
@@ -131,41 +163,46 @@ async def test_telegram_webhook(telegram_update, tmp_path):
     mock_runner.process = AsyncMock(return_value=("Hi there!", "sess-1"))
 
     app.state.config = Config(
-        channels={"telegram": {"enabled": True, "token": "fake-token", "allow_from": []}}
+        channels={"telegram": {"enabled": True, "allow_from": []}}
     )
-    app.state.db = MemoryStore(str(tmp_path / "tg.db"))
+    db = MemoryStore(str(tmp_path / "tg.db"))
+    # Pre-register user with telegram token
+    db.get_or_create_user("testuser")
+    db.link_channel("testuser", "telegram", "fake-token")
+    app.state.db = db
     app.state.runner = mock_runner
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         with patch("graphbot.core.channels.telegram.send_message", new_callable=AsyncMock) as mock_send:
-            resp = await client.post("/webhooks/telegram", json=telegram_update)
+            resp = await client.post("/webhooks/telegram/testuser", json=telegram_update)
 
     assert resp.status_code == 200
     mock_runner.process.assert_called_once()
     call_kwargs = mock_runner.process.call_args.kwargs
     assert call_kwargs["channel"] == "telegram"
     assert call_kwargs["message"] == "Hello bot"
+    assert call_kwargs["user_id"] == "testuser"
 
 
 @pytest.mark.asyncio
-async def test_telegram_allowlist_denied(telegram_update, tmp_path):
-    """Sender not in allowlist → 403."""
+async def test_telegram_webhook_unknown_user(telegram_update, tmp_path):
+    """Unknown user_id in path → 404."""
     from graphbot.api.app import create_app
 
     app = create_app()
 
     app.state.config = Config(
-        channels={"telegram": {"enabled": True, "token": "fake-token", "allow_from": ["999"]}}
+        channels={"telegram": {"enabled": True, "allow_from": []}}
     )
     app.state.db = MemoryStore(str(tmp_path / "tg.db"))
     app.state.runner = AsyncMock()
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/webhooks/telegram", json=telegram_update)
+        resp = await client.post("/webhooks/telegram/nobody", json=telegram_update)
 
-    assert resp.status_code == 403
+    assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -175,12 +212,15 @@ async def test_telegram_non_message_update(tmp_path):
 
     app = create_app()
     app.state.config = Config()
-    app.state.db = MemoryStore(str(tmp_path / "tg.db"))
+    db = MemoryStore(str(tmp_path / "tg.db"))
+    db.get_or_create_user("testuser")
+    db.link_channel("testuser", "telegram", "fake-token")
+    app.state.db = db
     app.state.runner = AsyncMock()
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/webhooks/telegram", json={"update_id": 1})
+        resp = await client.post("/webhooks/telegram/testuser", json={"update_id": 1})
 
     assert resp.status_code == 200
     app.state.runner.process.assert_not_called()
