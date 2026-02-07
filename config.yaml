@@ -3,12 +3,17 @@
 
 assistant:
   name: "GraphBot"
+  owner:
+    username: "omrylcn"
+    name: "Ömer"
   workspace: ./workspace
-  model: "anthropic/claude-sonnet-4-5-20250929"
+  model: "openai/gpt-4o-mini"
   temperature: 0.7
   session_token_limit: 30000
   max_iterations: 20
   tools: ["*"]
+  # system_prompt: "Sen GraphBot'sun — yardımsever bir AI asistanısın."
+  # ^ Bunu aktif edersen AGENT.md yerine bu kullanılır (daha yüksek öncelik)
   # agents:                         # Opsiyonel alt-agent'lar
   #   chef:
   #     name: "Yemek Uzmanı"
@@ -25,8 +30,7 @@ providers:
 
 channels:
   telegram:
-    enabled: false
-    token: ""
+    enabled: true
     allow_from: []
   # discord:
   #   enabled: false
