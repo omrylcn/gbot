@@ -1,9 +1,9 @@
 """SQLite-based memory store for GraphBot.
 
-Generalized from ascibot's MemoryStore.  10 tables:
+Generalized from ascibot's MemoryStore.  11 tables:
     users, user_channels, sessions, messages,
     agent_memory, user_notes, activity_logs,
-    favorites, preferences, cron_jobs
+    favorites, preferences, cron_jobs, api_keys
 """
 
 from __future__ import annotations
@@ -42,7 +42,16 @@ class MemoryStore:
     def _init_db(self):
         with self._get_conn() as conn:
             conn.executescript(_SCHEMA)
+            self._migrate(conn)
             conn.commit()
+
+    def _migrate(self, conn) -> None:
+        """Add columns/tables missing in existing databases."""
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+        if "password_hash" not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
+        if "role" not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")
 
     # ════════════════════════════════════════════════════════════
     # USERS
@@ -66,7 +75,7 @@ class MemoryStore:
     def get_user(self, user_id: str) -> dict[str, Any] | None:
         with self._get_conn() as conn:
             row = conn.execute(
-                "SELECT user_id, name, created_at FROM users WHERE user_id = ?",
+                "SELECT user_id, name, password_hash, role, created_at FROM users WHERE user_id = ?",
                 (user_id,),
             ).fetchone()
         return dict(row) if row else None
@@ -109,6 +118,82 @@ class MemoryStore:
             cursor = conn.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
             conn.commit()
         return cursor.rowcount > 0
+
+    # ════════════════════════════════════════════════════════════
+    # AUTH (password + API keys)
+    # ════════════════════════════════════════════════════════════
+
+    def set_password(self, user_id: str, password_hash: str) -> None:
+        """Set password hash for a user."""
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE users SET password_hash = ? WHERE user_id = ?",
+                (password_hash, user_id),
+            )
+            conn.commit()
+
+    def get_password_hash(self, user_id: str) -> str | None:
+        """Get password hash for a user."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT password_hash FROM users WHERE user_id = ?", (user_id,)
+            ).fetchone()
+        return row["password_hash"] if row else None
+
+    def create_api_key(
+        self,
+        key_id: str,
+        user_id: str,
+        key_hash: str,
+        name: str | None = None,
+        expires_at: str | None = None,
+    ) -> None:
+        """Store a hashed API key."""
+        with self._get_conn() as conn:
+            conn.execute(
+                """INSERT INTO api_keys (key_id, user_id, key_hash, name, expires_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (key_id, user_id, key_hash, name, expires_at),
+            )
+            conn.commit()
+
+    def get_api_key(self, key_id: str) -> dict[str, Any] | None:
+        """Get API key by key_id."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM api_keys WHERE key_id = ?", (key_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def list_api_keys(self, user_id: str) -> list[dict[str, Any]]:
+        """List all API keys for a user."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT key_id, name, created_at, expires_at, is_active "
+                "FROM api_keys WHERE user_id = ? ORDER BY created_at DESC",
+                (user_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def deactivate_api_key(self, key_id: str) -> bool:
+        """Deactivate an API key. Returns True if key existed."""
+        with self._get_conn() as conn:
+            cursor = conn.execute(
+                "UPDATE api_keys SET is_active = FALSE WHERE key_id = ?", (key_id,)
+            )
+            conn.commit()
+        return cursor.rowcount > 0
+
+    def find_api_key_by_hash(self, key_hash: str) -> dict[str, Any] | None:
+        """Find active, non-expired API key by its hash."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                """SELECT key_id, user_id, name, expires_at FROM api_keys
+                   WHERE key_hash = ? AND is_active = TRUE
+                   AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)""",
+                (key_hash,),
+            ).fetchone()
+        return dict(row) if row else None
 
     # ════════════════════════════════════════════════════════════
     # USER CHANNELS (cross-channel identity)
@@ -608,6 +693,8 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     user_id TEXT PRIMARY KEY,
     name TEXT,
+    password_hash TEXT,
+    role TEXT DEFAULT 'user',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -710,6 +797,18 @@ CREATE TABLE IF NOT EXISTS cron_jobs (
     enabled INTEGER DEFAULT 1,
     run_at TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+);
+
+-- 11. API Keys
+CREATE TABLE IF NOT EXISTS api_keys (
+    key_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    key_hash TEXT NOT NULL,
+    name TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP,
+    is_active BOOLEAN DEFAULT TRUE,
     FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
 """

@@ -1,30 +1,50 @@
-"""WebSocket routes — basic chat (streaming in Faz 5+)."""
+"""WebSocket routes — basic chat (streaming in Faz 14+)."""
 
 from __future__ import annotations
 
-
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from loguru import logger
 
 from graphbot.agent.runner import GraphRunner
+from graphbot.core.config.schema import Config
 
 router = APIRouter()
 
 
 @router.websocket("/ws/chat")
-async def ws_chat(ws: WebSocket):
+async def ws_chat(ws: WebSocket, token: str | None = Query(None)):
     """WebSocket chat endpoint.
 
     Client sends: {"user_id": "...", "message": "...", "session_id": "..."}
     Server responds: {"response": "...", "session_id": "..."}
+
+    When auth is enabled, pass token as query param: /ws/chat?token=<jwt>
     """
-    await ws.accept()
+    config: Config = ws.app.state.config
     runner: GraphRunner = ws.app.state.runner
+
+    # Resolve user_id from token or default
+    default_user = config.owner_user_id or "default"
+    if config.auth_enabled and token:
+        from graphbot.api.auth import decode_token
+
+        try:
+            default_user = decode_token(
+                token, config.auth.jwt_secret_key, config.auth.jwt_algorithm
+            )
+        except Exception:
+            await ws.close(code=4001, reason="Invalid token")
+            return
+    elif config.auth_enabled and not token:
+        await ws.close(code=4001, reason="Authentication required")
+        return
+
+    await ws.accept()
 
     try:
         while True:
             data = await ws.receive_json()
-            user_id = data.get("user_id", "default")
+            user_id = default_user if config.auth_enabled else data.get("user_id", default_user)
             message = data.get("message", "")
             session_id = data.get("session_id")
 

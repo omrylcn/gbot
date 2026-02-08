@@ -80,11 +80,11 @@ async def test_register_login(client):
     )
     assert resp.json()["success"] is True
 
-    # Login unknown
+    # Login unknown → 401
     resp = await client.post(
         "/auth/login", json={"user_id": "nope", "password": "pass"}
     )
-    assert resp.json()["success"] is False
+    assert resp.status_code == 401
 
 
 # --- Chat ---

@@ -93,3 +93,25 @@ class AuthResponse(BaseModel):
     message: str
     user_id: str | None = None
     name: str | None = None
+    token: str | None = None
+
+
+class APIKeyCreate(BaseModel):
+    name: str = "default"
+    expires_in_days: int | None = None
+
+
+class APIKeyResponse(BaseModel):
+    key_id: str
+    key: str
+    name: str
+    created_at: str
+    expires_at: str | None = None
+
+
+class APIKeyInfo(BaseModel):
+    key_id: str
+    name: str | None = None
+    created_at: str
+    expires_at: str | None = None
+    is_active: bool = True
