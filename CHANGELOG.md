@@ -26,3 +26,77 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Background:** Heartbeat service and sub-agent worker
 - **RAG:** Optional FAISS-based retrieval with multilingual embeddings
 - **CLI:** Typer-based CLI with interactive chat, config check, version commands
+
+
+## [1.4.0] - 2026-02-15
+
+### Added
+
+- **DelegationPlanner:** Single LLM call to plan subagent execution — picks tools, prompt, and model automatically based on task description
+- **DelegationConfig:** New config section (`background.delegation`) with `model` and `temperature` fields for the planner LLM
+- **Tool Registry:** `build_background_tool_registry()` — shared name→tool mapping for background agents (subagent + cron), excludes meta/unsafe tools (delegate, cron, reminder, shell)
+- **`resolve_tools()`:** Centralized tool name→object resolution, replaces duplicate logic in worker and scheduler
+- **`get_tool_catalog()`:** Human-readable tool catalog string for the delegation planner prompt
+- **17 new tests** (test_delegation.py) — registry, resolve, catalog, planner parse, scheduler fix, delegate+planner integration
+
+### Changed
+
+- **Delegate tool simplified:** Main LLM now only calls `delegate(user_id, task)` — planner decides tools/prompt/model instead of main agent
+- **SubagentWorker:** Uses shared tool registry (built once in `__init__`), accepts `prompt` parameter from planner, explicit model fallback to `config.assistant.model`
+- **CronScheduler._parse_tools:** Now uses shared tool registry instead of returning empty list — cron jobs with `agent_tools` can now resolve tools correctly
+- **make_tools():** Added `planner` parameter, passed to `make_delegate_tools(worker, planner)`
+- **app.py lifespan:** Creates registry + catalog + planner, wires into tool factory
+
+### Fixed
+
+- **CronScheduler `_parse_tools()` always returned `[]`:** Cron/alert jobs using LightAgent couldn't access tools (e.g. web_search for price alerts). Now resolved via shared registry.
+- **`model=null` crash in LightAgent:** When planner LLM returned `"model": "null"` (string instead of JSON null), LightAgent passed literal `"null"` to litellm causing BadRequestError. Fixed with string sanitization in `_parse()` + explicit model fallback in worker and scheduler.
+
+## [1.3.0] - 2026-02-15
+
+### Added
+
+- **Recurring reminders:** `cron_expr` column on reminders table — periodic reminders via CronTrigger, stays "pending" (not marked sent)
+- **`create_recurring_reminder` tool:** Create periodic reminders with cron expressions, no LLM processing
+- **WebSocket event delivery:** `ConnectionManager` class for real-time push of cron/reminder/subagent results to connected clients
+- **WS fallback:** If no WebSocket connected, events stored in `system_events` table for polling/context injection
+
+### Changed
+
+- **SubagentWorker → LightAgent:** Subagents now use lightweight LightAgent instead of full GraphRunner — isolated context, restricted tools, model override
+- **Delegate tool:** Added `tools` and `model` parameters — main agent decides subagent capabilities at delegation time
+- **`_resolve_tools()`:** Converts tool name strings to actual tool objects for subagent (web_search, web_fetch, search_items, save_user_note)
+- **CronScheduler._send_to_channel:** WS push for API channel + DB fallback when not connected
+- **SubagentWorker._run:** WS push on task completion + mark_events_delivered
+- **`list_reminders` tool:** Shows recurring info (cron expression) for periodic reminders
+
+### Fixed
+
+- **`make_search_tools` call:** Fixed wrong argument count in `_resolve_tools()` — was passing `(config, db)`, function takes `(retriever)`
+
+## [1.2.0] - 2026-02-15
+
+### Added (Faz 13: LightAgent & Background Task Refactoring)
+
+- **LightAgent:** Lightweight, isolated agent for background tasks — own prompt, restricted tools, model override, no context loading
+- **NOTIFY/SKIP:** LLM response markers (SKIP, [SKIP], [NO_NOTIFY]) to suppress unnecessary cron notifications
+- **skip_context:** Flag in GraphRunner.process() to load identity-only prompt for background tasks
+- **create_alert tool:** Cron job with NOTIFY/SKIP template — only notifies when something needs attention
+- **Execution log:** cron_execution_log table tracks every cron run (result, status, duration_ms)
+- **Failure tracking:** consecutive_failures counter on cron jobs, auto-pause after 3 failures
+- **Standalone reminders table:** Separate from cron_jobs, with status tracking (pending/sent/failed/cancelled) and retry logic
+- **system_events table:** Event queue for background → agent communication, injected into context on next user session
+- **background_tasks table:** SubagentWorker results persisted to DB + system_event created on completion
+- **Agent params on cron jobs:** agent_prompt, agent_tools, agent_model, notify_condition columns
+
+### Changed
+
+- CronScheduler._execute_job() uses LightAgent when agent_prompt is set, falls back to full runner
+- SubagentWorker now accepts optional db parameter for result persistence
+- Reminders use standalone table (not cron_jobs), no LLM involved
+- ContextBuilder injects undelivered system_events as "Background Notifications" layer
+- make_cron_tools() returns 4 tools (was 3, added create_alert)
+
+## [1.1.0] - 2026-02-07
+### Added
+

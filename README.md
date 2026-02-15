@@ -120,6 +120,7 @@ graphbot/
 │   ├── graph.py                # StateGraph compile
 │   ├── nodes.py                # 4 node: load_context, reason, execute_tools, respond
 │   ├── runner.py               # GraphRunner orkestrator
+│   ├── light.py                # LightAgent — hafif background agent
 │   ├── state.py                # AgentState(MessagesState)
 │   ├── skills/
 │   │   ├── loader.py           # SkillLoader (builtin + workspace)
@@ -157,7 +158,7 @@ graphbot/
 │       ├── heartbeat.py        # Periyodik wake-up servisi
 │       └── worker.py           # Async subagent worker
 ├── memory/
-│   ├── store.py                # MemoryStore — SQLite 10 tablo, 42+ metod
+│   ├── store.py                # MemoryStore — SQLite 15 tablo, 60+ metod
 │   └── models.py               # Pydantic: ChatRequest, ChatResponse, Item, ...
 └── rag/
     ├── retriever.py            # FAISS search + format
@@ -198,6 +199,130 @@ graphbot cron remove <job_id>         # Gorev sil
 | WS | `/ws/chat` | WebSocket chat |
 | POST | `/webhooks/telegram/{user_id}` | Telegram webhook |
 
+## Auth & Token Yonetimi
+
+GraphBot iki modda calisir:
+
+### Auth Kapali (varsayilan)
+
+`jwt_secret_key` bos ise auth kapalidir. Tum endpoint'ler aciktir, `user_id` body'de gonderilir:
+
+```bash
+curl -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Merhaba", "user_id": "ali"}'
+```
+
+### Auth Aktif
+
+Auth'u aktif etmek icin `.env` veya `config.yaml`'da JWT secret tanimlayin:
+
+```bash
+# .env
+GRAPHBOT_AUTH__JWT_SECRET_KEY=super-secret-key-min-32-karakter-olmali
+```
+
+```yaml
+# config.yaml
+auth:
+  jwt_secret_key: "super-secret-key-min-32-karakter-olmali"
+  access_token_expire_minutes: 1440   # 24 saat (varsayilan)
+```
+
+#### Adim 1: Kullanici Olustur (CLI)
+
+```bash
+graphbot user add ali --name "Ali" --password "sifre123"
+```
+
+#### Adim 2: Login → Token Al
+
+```bash
+curl -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": "ali", "password": "sifre123"}'
+```
+
+Yanit:
+```json
+{
+  "success": true,
+  "token": "eyJhbGciOiJIUzI1NiIs...",
+  "user_id": "ali"
+}
+```
+
+#### Adim 3: Token ile Istek
+
+```bash
+TOKEN="eyJhbGciOiJIUzI1NiIs..."
+
+# Chat
+curl -X POST http://localhost:8000/chat \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Merhaba"}'
+
+# Session gecmisi
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8000/sessions/ali
+
+# User context
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8000/user/ali/context
+```
+
+#### API Key (Alternatif)
+
+Token yerine kalici API key de kullanilabilir:
+
+```bash
+# API key olustur (token ile)
+curl -X POST http://localhost:8000/auth/api-keys \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-key"}'
+# → {"key": "abc123...", "key_id": "..."}
+
+# API key ile istek
+curl -X POST http://localhost:8000/chat \
+  -H "X-API-Key: abc123..." \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Merhaba"}'
+```
+
+#### Register (API uzerinden)
+
+Auth aktifken yeni kullanici kaydi sadece **owner** yapabilir:
+
+```bash
+# Owner token'i ile register
+curl -X POST http://localhost:8000/auth/register \
+  -H "Authorization: Bearer $OWNER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": "veli", "name": "Veli", "password": "sifre456"}'
+```
+
+#### Rate Limiting
+
+Varsayilan: 60 istek/dakika. Ayarlamak icin:
+
+```yaml
+auth:
+  rate_limit:
+    enabled: true
+    requests_per_minute: 120
+```
+
+### Ozet
+
+| Durum | jwt_secret_key | Erisim |
+|-------|----------------|--------|
+| Auth kapali | `""` (bos) | Herkese acik, `user_id` body'de |
+| Auth aktif | `"secret..."` | JWT token veya API key gerekli |
+
+---
+
 ## Kullanici Yonetimi
 
 GraphBot **owner-based** erisim kontrolu kullanir:
@@ -215,7 +340,7 @@ assistant:
 
 Kullanici ekleme:
 ```bash
-graphbot user add veli --name "Veli" --telegram "BOT_TOKEN"
+graphbot user add veli --name "Veli" --password "sifre123" --telegram "BOT_TOKEN"
 ```
 
 ## Tool Sistemi
@@ -229,9 +354,24 @@ graphbot user add veli --name "Veli" --telegram "BOT_TOKEN"
 | Shell | exec_command | Guvenli shell (rm -rf, format vb. engelli) |
 | Web | web_search, web_fetch | Brave Search + sayfa cekme |
 | RAG | search_items, get_item_detail | Semantik arama (FAISS) |
-| Cron | add/list/remove_cron_job | Tekrarlanan gorevler |
+| Cron | add/list/remove_cron_job, create_alert | Tekrarlanan gorevler + NOTIFY/SKIP alert |
 | Reminder | create/list/cancel_reminder | Tek seferlik hatirlatma |
 | Delegate | delegate | Background subagent spawn |
+
+### Tool Kullanim Ornekleri (Chat Uzerinden)
+
+Tool'lari dogal dille kullanirsiniz — LLM uygun tool'u otomatik secer:
+
+```
+"Su notu kaydet: yarin toplanti var"              → save_user_note
+"Notlarimi listele"                                → get_user_context
+"5 dakika sonra hatirlatma kur: ilac ic"           → create_reminder
+"Her sabah 9'da hava durumu kontrol et"            → add_cron_job
+"Altin 2000$ ustuyse bildir seklinde alert kur"    → create_alert (NOTIFY/SKIP)
+"Su gorevi arka planda yap: X konusunu arastir"    → delegate (subagent)
+"Hatirlatmalarimi listele"                         → list_reminders
+"Cron job'larimi goster"                           → list_cron_jobs
+```
 
 ## Skill Sistemi
 
@@ -265,9 +405,22 @@ metadata:
 | Servis | Aciklama | Config |
 |--------|----------|--------|
 | CronScheduler | APScheduler ile cron + date trigger'lar | `background.cron.enabled` |
-| Reminder | Tek seferlik geciktirilmis mesajlar | CronScheduler uzerinden |
+| LightAgent | Hafif, izole agent — cron alert'leri icin (NOTIFY/SKIP) | Cron job'da `agent_prompt` set edilince |
+| Reminder | Tek seferlik geciktirilmis mesajlar (LLM yok, direkt gonderim) | CronScheduler uzerinden |
 | Heartbeat | Periyodik uyandirma, HEARTBEAT.md okur | `background.heartbeat.enabled/interval_s` |
-| SubagentWorker | Async background task spawn | Otomatik |
+| SubagentWorker | Async background task spawn + DB persistence + system_event | Otomatik |
+
+### Akis: delegate → SubagentWorker → Bildirim
+
+```
+User: "Su gorevi arka planda yap: ..."
+  → LLM delegate tool cagirir
+  → SubagentWorker.spawn() → background_tasks tablosuna yazar
+  → Arka planda runner.process() calisir
+  → Tamamlaninca: background_tasks = completed + system_events olusur
+  → User sonraki mesaj gonderdiginde: ContextBuilder event'i prompt'a inject eder
+  → LLM: "Arka plandaki gorev tamamlandi: ..."
+```
 
 ## Konfigürasyon
 
@@ -314,7 +467,7 @@ uv sync --extra rag   # FAISS + sentence-transformers
 
 Aktif edildiginde `search_items` ve `get_item_detail` tool'lari otomatik eklenir.
 
-## SQLite Tablolari (10)
+## SQLite Tablolari (15)
 
 | Tablo | Amac |
 |-------|------|
@@ -327,7 +480,12 @@ Aktif edildiginde `search_items` ve `get_item_detail` tool'lari otomatik eklenir
 | `activity_logs` | Aktivite kayitlari |
 | `favorites` | Favoriler |
 | `preferences` | Tercihler (JSON) |
-| `cron_jobs` | Zamanlanmis gorevler |
+| `cron_jobs` | Zamanlanmis gorevler (+ agent_prompt, notify_condition) |
+| `cron_execution_log` | Cron calisma gecmisi (result, status, duration_ms) |
+| `reminders` | Tek seferlik hatirlatmalar (status: pending/sent/failed) |
+| `system_events` | Background → agent bildirim kuyrugu |
+| `background_tasks` | Subagent gorev kayitlari (status, result) |
+| `api_keys` | API key yonetimi (hash, expiry) |
 
 ## Gelistirme
 
@@ -340,7 +498,7 @@ make run        # uvicorn --reload
 make clean      # __pycache__ temizle
 ```
 
-129 test, 12 test dosyasi.
+181 test (161 unit + 20 integration), 13 test dosyasi.
 
 ## Teknolojiler
 

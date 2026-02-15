@@ -44,8 +44,8 @@ channels:
 
 tools:
   shell:
-    timeout: 60
-    restrict_to_workspace: false
+      timeout: 60
+      restrict_to_workspace: false
   # web:
   #   search_api_key: ""
 

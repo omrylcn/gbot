@@ -39,3 +39,5 @@ uv.lock
 
 # Reference code (read-only)
 reference files/
+ui/
+gbot/
