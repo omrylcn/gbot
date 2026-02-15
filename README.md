@@ -4,6 +4,17 @@ Extensible AI assistant framework built on LangGraph.
 
 Multi-channel support, long-term memory, background tasks, tool system, and an interactive CLI — all backed by SQLite as the single source of truth.
 
+## What is this project for?
+
+GraphBot is designed to help you build a **production-ready personal/team assistant** that goes beyond plain chat:
+
+- **Persistent memory** — conversation state, user notes, preferences, and activity stored in a local SQLite database (15 tables)
+- **Tool-augmented workflows** — files, shell, web search, reminders, cron jobs, background delegation
+- **Multi-channel access** — API, CLI, WebSocket, and Telegram from one core runtime
+- **Stateless agent, stateful data** — the LLM loop stays stateless; all operational truth lives in the database
+
+In short: a practical assistant platform you can run, extend, and operate without heavyweight infrastructure.
+
 ## Quick Start
 
 ### 1. Install
