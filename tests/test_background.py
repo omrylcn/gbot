@@ -127,31 +127,115 @@ async def test_heartbeat_triggers(cfg, mock_runner):
 
 
 @pytest.mark.asyncio
-async def test_worker_spawn(mock_runner):
-    """spawn() creates a background task that calls runner.process."""
-    worker = SubagentWorker(mock_runner)
+async def test_worker_spawn(cfg):
+    """spawn() creates a background task that runs LightAgent."""
+    worker = SubagentWorker(cfg)
 
-    task_id = worker.spawn("u1", "do something", "api")
-    assert task_id
-    assert worker.get_running_count() >= 0  # may have already completed
+    with patch("graphbot.agent.light.LightAgent") as MockAgent:
+        mock_agent = AsyncMock()
+        mock_agent.run = AsyncMock(return_value=("Result", 100))
+        MockAgent.return_value = mock_agent
 
-    # Wait for the task to finish
-    await asyncio.sleep(0.1)
-    mock_runner.process.assert_called_once_with(
-        user_id="u1", channel="api", message="do something"
-    )
+        task_id = worker.spawn("u1", "do something", "api")
+        assert task_id
+        assert worker.get_running_count() >= 0
+
+        await asyncio.sleep(0.1)
+        mock_agent.run.assert_called_once_with("do something")
 
 
 @pytest.mark.asyncio
-async def test_worker_shutdown(mock_runner):
-    """shutdown() waits for all tasks."""
-    worker = SubagentWorker(mock_runner)
-    worker.spawn("u1", "task 1", "api")
-    worker.spawn("u1", "task 2", "api")
+async def test_worker_light_agent_prompt(cfg):
+    """LightAgent receives correct prompt (not full context)."""
+    from graphbot.core.background.worker import _DELEGATE_PROMPT
 
-    await worker.shutdown()
-    assert worker.get_running_count() == 0
-    assert mock_runner.process.call_count == 2
+    worker = SubagentWorker(cfg)
+
+    with patch("graphbot.agent.light.LightAgent") as MockAgent:
+        mock_agent = AsyncMock()
+        mock_agent.run = AsyncMock(return_value=("Done", 50))
+        MockAgent.return_value = mock_agent
+
+        worker.spawn("u1", "research AI trends", "api")
+        await asyncio.sleep(0.1)
+
+        # LightAgent should be created with delegate prompt, NOT full context
+        MockAgent.assert_called_once()
+        call_kwargs = MockAgent.call_args[1]
+        assert call_kwargs["prompt"] == _DELEGATE_PROMPT
+        assert call_kwargs["config"] is cfg
+
+
+@pytest.mark.asyncio
+async def test_worker_custom_model(cfg):
+    """delegate with model override passes it to LightAgent."""
+    worker = SubagentWorker(cfg)
+
+    with patch("graphbot.agent.light.LightAgent") as MockAgent:
+        mock_agent = AsyncMock()
+        mock_agent.run = AsyncMock(return_value=("Done", 30))
+        MockAgent.return_value = mock_agent
+
+        worker.spawn("u1", "simple check", "api", model="openai/gpt-4o-mini")
+        await asyncio.sleep(0.1)
+
+        call_kwargs = MockAgent.call_args[1]
+        assert call_kwargs["model"] == "openai/gpt-4o-mini"
+
+
+@pytest.mark.asyncio
+async def test_worker_custom_tools(cfg):
+    """delegate with tool names resolves to actual tool objects."""
+    worker = SubagentWorker(cfg)
+
+    with patch("graphbot.agent.light.LightAgent") as MockAgent:
+        mock_agent = AsyncMock()
+        mock_agent.run = AsyncMock(return_value=("Done", 30))
+        MockAgent.return_value = mock_agent
+
+        worker.spawn("u1", "search something", "api", tools=["web_search"])
+        await asyncio.sleep(0.1)
+
+        call_kwargs = MockAgent.call_args[1]
+        tool_names = [t.name for t in call_kwargs["tools"]]
+        assert "web_search" in tool_names
+
+
+@pytest.mark.asyncio
+async def test_worker_default_tools(cfg):
+    """No tools specified → default web tools (web_search, web_fetch)."""
+    worker = SubagentWorker(cfg)
+
+    with patch("graphbot.agent.light.LightAgent") as MockAgent:
+        mock_agent = AsyncMock()
+        mock_agent.run = AsyncMock(return_value=("Done", 30))
+        MockAgent.return_value = mock_agent
+
+        worker.spawn("u1", "research", "api")  # no tools param
+        await asyncio.sleep(0.1)
+
+        call_kwargs = MockAgent.call_args[1]
+        tool_names = [t.name for t in call_kwargs["tools"]]
+        assert "web_search" in tool_names
+        assert "web_fetch" in tool_names
+
+
+@pytest.mark.asyncio
+async def test_worker_shutdown(cfg):
+    """shutdown() waits for all tasks."""
+    worker = SubagentWorker(cfg)
+
+    with patch("graphbot.agent.light.LightAgent") as MockAgent:
+        mock_agent = AsyncMock()
+        mock_agent.run = AsyncMock(return_value=("Result", 50))
+        MockAgent.return_value = mock_agent
+
+        worker.spawn("u1", "task 1", "api")
+        worker.spawn("u1", "task 2", "api")
+
+        await worker.shutdown()
+        assert worker.get_running_count() == 0
+        assert mock_agent.run.call_count == 2
 
 
 # ── Cron Tool Integration ──────────────────────────────────
@@ -193,9 +277,9 @@ def test_delegate_tools_none():
     assert make_delegate_tools(None) == []
 
 
-def test_delegate_tools_created(mock_runner):
+def test_delegate_tools_created(cfg):
     """With worker → 1 tool."""
-    worker = SubagentWorker(mock_runner)
+    worker = SubagentWorker(cfg)
     tools = make_delegate_tools(worker)
     assert len(tools) == 1
     assert tools[0].name == "delegate"

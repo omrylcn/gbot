@@ -16,6 +16,7 @@ from starlette.responses import JSONResponse
 
 from graphbot import __version__
 from graphbot.agent.runner import GraphRunner
+from graphbot.api.admin import router as admin_router
 from graphbot.api.auth import router as auth_router
 from graphbot.api.routes import router as core_router
 from graphbot.api.ws import router as ws_router
@@ -88,7 +89,12 @@ def _ensure_owner(config, db) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: init Config → MemoryStore → GraphRunner → Background Services. Shutdown: cleanup."""
+    from graphbot.agent.delegation import DelegationPlanner
     from graphbot.agent.tools import make_tools
+    from graphbot.agent.tools.registry import (
+        build_background_tool_registry,
+        get_tool_catalog,
+    )
 
     config = load_config()
     db = MemoryStore(str(config.db_path))
@@ -100,17 +106,29 @@ async def lifespan(app: FastAPI):
     # Background services (need runner)
     cron_scheduler = CronScheduler(db, runner, config=config)
     heartbeat = HeartbeatService(config, runner)
-    worker = SubagentWorker(runner, db=db)
+    worker = SubagentWorker(config, db=db)
 
-    # Now build tools with scheduler+worker, and rebuild graph
+    # Delegation planner — plans subagent execution via LLM
+    bg_registry = build_background_tool_registry(config, db)
+    tool_catalog = get_tool_catalog(bg_registry)
+    planner = DelegationPlanner(config, tool_catalog)
+
+    # Now build tools with scheduler+worker+planner, and rebuild graph
     from graphbot.agent.graph import create_graph
 
-    tools = make_tools(config, db, scheduler=cron_scheduler, worker=worker)
+    tools = make_tools(config, db, scheduler=cron_scheduler, worker=worker, planner=planner)
     runner.tools = tools
     runner._graph = create_graph(config, db, tools)
 
     await cron_scheduler.start()
     heartbeat_task = asyncio.create_task(heartbeat.start())
+
+    # WebSocket connection registry for event push
+    from graphbot.api.ws import ConnectionManager
+
+    ws_manager = ConnectionManager()
+    cron_scheduler.ws_manager = ws_manager
+    worker.ws_manager = ws_manager
 
     app.state.config = config
     app.state.db = db
@@ -118,6 +136,7 @@ async def lifespan(app: FastAPI):
     app.state.cron = cron_scheduler
     app.state.heartbeat = heartbeat
     app.state.worker = worker
+    app.state.ws_manager = ws_manager
 
     logger.info(f"GraphBot API started — model: {config.assistant.model}")
     yield
@@ -152,6 +171,7 @@ def create_app() -> FastAPI:
     # Routers
     app.include_router(core_router)
     app.include_router(auth_router)
+    app.include_router(admin_router)
     app.include_router(ws_router)
 
     # Channel webhooks

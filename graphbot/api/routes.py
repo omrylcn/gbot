@@ -128,3 +128,19 @@ async def user_context(
         favorites=[ItemCard(id=f.get("item_id", ""), title=f.get("item_title", "")) for f in favs],
         recent_activities=activities,
     )
+
+
+@router.get("/events/{user_id}")
+async def get_events(
+    user_id: str,
+    current_user: str = Depends(get_current_user),
+    db: MemoryStore = Depends(get_db),
+    config: Config = Depends(get_config),
+):
+    """Get undelivered system events and mark them as delivered."""
+    if config.auth_enabled and user_id != current_user:
+        raise HTTPException(status_code=403, detail="Access denied")
+    events = db.get_undelivered_events(user_id)
+    if events:
+        db.mark_events_delivered([e["id"] for e in events])
+    return {"events": [dict(e) for e in events]}

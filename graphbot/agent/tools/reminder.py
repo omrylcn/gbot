@@ -1,4 +1,4 @@
-"""Reminder tools — one-shot scheduling for proactive messaging."""
+"""Reminder tools — one-shot and recurring scheduling for proactive messaging."""
 
 from __future__ import annotations
 
@@ -37,6 +37,32 @@ def make_reminder_tools(scheduler: CronScheduler | None = None) -> list:
             return f"Failed to create reminder: {e}"
 
     @tool
+    def create_recurring_reminder(
+        user_id: str, cron_expr: str, message: str, channel: str = "telegram"
+    ) -> str:
+        """Create a recurring reminder that sends a message periodically.
+
+        Uses cron expressions — no LLM processing, message is sent as-is.
+        Examples:
+          "her 5 dakikada hatırlat" → cron_expr="*/5 * * * *"
+          "her gün saat 9'da hatırlat" → cron_expr="0 9 * * *"
+          "her saat başı hatırlat" → cron_expr="0 * * * *"
+
+        Note: channel is auto-injected from session context, do not set manually.
+        """
+        try:
+            row = scheduler.add_reminder(
+                user_id, channel, delay_seconds=0, message=message,
+                cron_expr=cron_expr,
+            )
+            return (
+                f"Recurring reminder set: '{message}' ({cron_expr}) "
+                f"(id: {row['reminder_id']})"
+            )
+        except Exception as e:
+            return f"Failed to create recurring reminder: {e}"
+
+    @tool
     def list_reminders(user_id: str) -> str:
         """List all pending reminders for a user."""
         reminders = scheduler.list_reminders(user_id)
@@ -44,8 +70,9 @@ def make_reminder_tools(scheduler: CronScheduler | None = None) -> list:
             return "No pending reminders."
         lines = []
         for r in reminders:
+            kind = f"recurring ({r['cron_expr']})" if r.get("cron_expr") else r["run_at"]
             lines.append(
-                f"- [{r['reminder_id']}] {r['run_at']} → {r['message'][:50]}"
+                f"- [{r['reminder_id']}] {kind} → {r['message'][:50]}"
             )
         return "\n".join(lines)
 
@@ -60,4 +87,4 @@ def make_reminder_tools(scheduler: CronScheduler | None = None) -> list:
         except Exception as e:
             return f"Failed to cancel reminder: {e}"
 
-    return [create_reminder, list_reminders, cancel_reminder]
+    return [create_reminder, create_recurring_reminder, list_reminders, cancel_reminder]

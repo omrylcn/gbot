@@ -223,12 +223,17 @@ async def test_cron_job_legacy_fallback(store, mock_runner):
 
 
 @pytest.mark.asyncio
-async def test_background_task_persistence(store, mock_runner):
+async def test_background_task_persistence(store, cfg):
     """Worker saves result to DB + creates system_event."""
-    worker = SubagentWorker(mock_runner, db=store)
+    worker = SubagentWorker(cfg, db=store)
 
-    task_id = worker.spawn("u1", "research something", "api")
-    await asyncio.sleep(0.2)
+    with patch("graphbot.agent.light.LightAgent") as MockAgent:
+        mock_agent = AsyncMock()
+        mock_agent.run = AsyncMock(return_value=("Done", 100))
+        MockAgent.return_value = mock_agent
+
+        task_id = worker.spawn("u1", "research something", "api")
+        await asyncio.sleep(0.2)
 
     task = store.get_background_task(task_id)
     assert task is not None

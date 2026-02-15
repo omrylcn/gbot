@@ -5,6 +5,18 @@ description = "LangGraph-based AI assistant framework"
 license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.11"
+authors = [{name = "GraphBot Contributors"}]
+keywords = ["langgraph", "agent", "llm", "fastapi", "ai-assistant", "chatbot", "sqlite"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
 dependencies = [
     # LangGraph & LangChain
     "langgraph>=0.2.0",
@@ -31,13 +43,23 @@ dependencies = [
     # Logging
     "loguru>=0.7.0",
 
+    # Auth
+    "PyJWT>=2.8.0",
+    "bcrypt>=4.0.0",
+
     # CLI
     "typer>=0.9.0",
     "rich>=13.0.0",
+    "prompt_toolkit>=3.0.0",
 ]
 
+[project.urls]
+Repository = "https://github.com/omrylcn/graphbot"
+Changelog = "https://github.com/omrylcn/graphbot/blob/main/CHANGELOG.md"
+
 [project.scripts]
-graphbot = "graphbot.cli.commands:app"
+gbot = "gbot_cli.commands:app"
+graphbot = "gbot_cli.commands:app"
 
 [project.optional-dependencies]
 channels = [
@@ -63,7 +85,7 @@ build-backend = "hatchling.build"
 path = "graphbot/__version__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["graphbot"]
+packages = ["graphbot", "gbot_cli"]
 
 [tool.ruff]
 line-length = 100
@@ -72,3 +94,11 @@ target-version = "py311"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "integration: Integration tests (require running server on localhost:8000)",
+]
+
+[dependency-groups]
+dev = [
+    "jupyterlab>=4.5.4",
+]

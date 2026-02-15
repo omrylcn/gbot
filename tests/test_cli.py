@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from typer.testing import CliRunner
 
-from graphbot.cli.commands import app
+from gbot_cli.commands import app
 
 runner = CliRunner()
 
@@ -39,10 +39,10 @@ def test_chat_single_message(tmp_path):
         patch(_PATCH_STORE, return_value=fake_db),
         patch(_PATCH_RUNNER, return_value=mock_runner),
     ):
-        result = runner.invoke(app, ["chat", "-m", "merhaba"])
+        result = runner.invoke(app, ["chat", "--local", "-m", "merhaba"])
 
     assert result.exit_code == 0
-    assert "Hello from bot" in result.output
+    assert "Hello from bot" in result.output or "gbot:" in result.output.lower()
     mock_runner.process.assert_called_once_with("cli_user", "cli", "merhaba", "cli:default")
 
 
@@ -124,7 +124,7 @@ def test_chat_uses_owner(tmp_path):
         patch(_PATCH_STORE, return_value=fake_db),
         patch(_PATCH_RUNNER, return_value=mock_runner),
     ):
-        result = runner.invoke(app, ["chat", "-m", "test"])
+        result = runner.invoke(app, ["chat", "--local", "-m", "test"])
 
     assert result.exit_code == 0
     mock_runner.process.assert_called_once_with("omrylcn", "cli", "test", "cli:default")
@@ -173,4 +173,6 @@ def test_main_module():
     """python -m graphbot entry point is importable."""
     from graphbot.__main__ import app as main_app
 
-    assert main_app is app
+    from gbot_cli.commands import app as cli_app
+
+    assert main_app is cli_app

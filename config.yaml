@@ -1,22 +1,21 @@
 # GraphBot Configuration
-# Detay: howtowork-development-plan.md § 3.9
 
 assistant:
   name: "GraphBot"
   owner:
-    username: "omrylcn"
-    name: "Ömer"
+    username: "owner"
+    name: "Owner"
   workspace: ./workspace
   model: "openai/gpt-4o-mini"
   temperature: 0.7
   session_token_limit: 30000
   max_iterations: 20
   tools: ["*"]
-  # system_prompt: "Sen GraphBot'sun — yardımsever bir AI asistanısın."
-  # ^ Bunu aktif edersen AGENT.md yerine bu kullanılır (daha yüksek öncelik)
-  # agents:                         # Opsiyonel alt-agent'lar
+  # system_prompt: "You are GraphBot — a helpful AI assistant."
+  # ^ If set, this overrides AGENT.md (higher priority)
+  # agents:                         # Optional sub-agents
   #   chef:
-  #     name: "Yemek Uzmanı"
+  #     name: "Chef Expert"
   #     workspace: ./workspace/agents/chef
   #     model: "anthropic/claude-sonnet-4-5-20250929"
   #     tools: [search_items, get_item_detail]
@@ -24,7 +23,7 @@ assistant:
 
 providers:
   anthropic:
-    api_key: ""                      # .env'den veya buradan
+    api_key: ""                      # Set via .env or here
   # openai:
   #   api_key: ""
 
@@ -35,19 +34,26 @@ channels:
   # discord:
   #   enabled: false
 
-# rag:                               # Faz 9'da aktif edilecek
+# rag:
 #   embedding_model: "intfloat/multilingual-e5-small"
 #   data_source: ./data/items.json
 #   index_path: ./data/faiss_index
-#   text_template: "{title}. {description}. Kategori: {category}."
+#   text_template: "{title}. {description}. Category: {category}."
 #   id_field: "id"
 
 tools:
   shell:
-    timeout: 60
-    restrict_to_workspace: false
+      timeout: 60
+      restrict_to_workspace: false
   # web:
   #   search_api_key: ""
+
+auth:
+  jwt_secret_key: ""                 # Empty = auth disabled; set 32+ char secret to enable
+  # access_token_expire_minutes: 1440  # 24 hours (default)
+  # rate_limit:
+  #   enabled: true
+  #   requests_per_minute: 60
 
 background:
   cron:

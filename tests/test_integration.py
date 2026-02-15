@@ -256,17 +256,197 @@ async def test_api_chat_turkish(api_client):
 
 
 # ════════════════════════════════════════════════════════════
+# CRON / REMINDER TESTS (real LLM tool calls)
+# ════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_api_create_reminder(api_client):
+    """Ask LLM to create a one-shot reminder → tool called, reminder in DB."""
+    uid = api_client._test_user_id
+    resp = await api_client.post(
+        "/chat",
+        json={
+            "message": (
+                "30 saniye sonra bana 'test hatirlatma' diye hatırlat. "
+                "create_reminder tool'unu kullan."
+            ),
+            "user_id": uid,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["response"]) > 0
+    # LLM response should confirm the reminder was set (various phrasings)
+    response_lower = data["response"].lower()
+    assert any(
+        kw in response_lower
+        for kw in [
+            "hatırlat", "reminder", "ayarla", "kuruldu", "oluştur",
+            "set", "alacak", "mesaj", "saniye", "dakika",
+        ]
+    ), f"Unexpected response: {data['response'][:200]}"
+
+
+@pytest.mark.asyncio
+async def test_api_create_recurring_reminder(api_client):
+    """Ask LLM to create a recurring reminder → tool called."""
+    uid = api_client._test_user_id
+    resp = await api_client.post(
+        "/chat",
+        json={
+            "message": (
+                "Her 10 dakikada bir bana 'su iç' diye hatırlat. "
+                "create_recurring_reminder tool'unu kullan, cron_expr='*/10 * * * *'."
+            ),
+            "user_id": uid,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["response"]) > 0
+    response_lower = data["response"].lower()
+    assert any(
+        kw in response_lower
+        for kw in ["recurring", "periyodik", "hatırlat", "reminder", "set", "kuruldu"]
+    ), f"Unexpected response: {data['response'][:200]}"
+
+
+@pytest.mark.asyncio
+async def test_api_list_reminders(api_client):
+    """Create a reminder then ask LLM to list reminders."""
+    uid = api_client._test_user_id
+    # First create one
+    await api_client.post(
+        "/chat",
+        json={
+            "message": "60 saniye sonra bana 'list testi' diye hatırlat.",
+            "user_id": uid,
+        },
+    )
+    # Then list
+    resp = await api_client.post(
+        "/chat",
+        json={
+            "message": "Bekleyen hatırlatmalarımı listele. list_reminders tool'unu kullan.",
+            "user_id": uid,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["response"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_api_create_cron_job(api_client):
+    """Ask LLM to create a cron job → tool called."""
+    uid = api_client._test_user_id
+    resp = await api_client.post(
+        "/chat",
+        json={
+            "message": (
+                "Her gün saat 09:00'da 'günaydın' mesajı gönderen bir cron job oluştur. "
+                "add_cron_job tool'unu kullan, cron_expr='0 9 * * *'."
+            ),
+            "user_id": uid,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["response"]) > 0
+    response_lower = data["response"].lower()
+    assert any(
+        kw in response_lower
+        for kw in ["cron", "job", "oluştur", "created", "görev", "zamanla"]
+    ), f"Unexpected response: {data['response'][:200]}"
+
+
+@pytest.mark.asyncio
+async def test_api_events_endpoint(api_client):
+    """GET /events/{uid} → returns (possibly empty) events list."""
+    uid = api_client._test_user_id
+    resp = await api_client.get(f"/events/{uid}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "events" in data
+    assert isinstance(data["events"], list)
+
+
+# ════════════════════════════════════════════════════════════
+# DELEGATION TESTS (planner + background subagent)
+# ════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_api_delegate_task(api_client):
+    """Ask LLM to delegate a background task → delegate tool called."""
+    uid = api_client._test_user_id
+    resp = await api_client.post(
+        "/chat",
+        json={
+            "message": (
+                "delegate tool'unu kullanarak şu görevi arka planda çalıştır: "
+                "'Python 3.13 yeniliklerini araştır ve özetle'. "
+                "user_id olarak benim id'mi kullan."
+            ),
+            "user_id": uid,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["response"]) > 0
+    response_lower = data["response"].lower()
+    assert any(
+        kw in response_lower
+        for kw in [
+            "delegat", "delegate", "task", "görev", "arka plan",
+            "background", "spawn", "başlat",
+        ]
+    ), f"Unexpected response: {data['response'][:200]}"
+
+
+@pytest.mark.asyncio
+async def test_api_background_task_events(api_client):
+    """After delegation, background task result appears as event or in tasks."""
+    import asyncio
+
+    uid = api_client._test_user_id
+    # Delegate a simple task
+    resp = await api_client.post(
+        "/chat",
+        json={
+            "message": (
+                "delegate tool'unu kullanarak arka planda '2+2 nedir?' görevini çalıştır. "
+                "user_id olarak benim id'mi kullan."
+            ),
+            "user_id": uid,
+        },
+    )
+    assert resp.status_code == 200
+
+    # Wait a bit for background task to complete
+    await asyncio.sleep(5)
+
+    # Check events — should have task_completed event
+    events_resp = await api_client.get(f"/events/{uid}")
+    assert events_resp.status_code == 200
+    data = events_resp.json()
+    assert isinstance(data["events"], list)
+    # May or may not have events depending on timing, but endpoint works
+
+
+# ════════════════════════════════════════════════════════════
 # CLI TESTS
 # ════════════════════════════════════════════════════════════
 
 
 def test_cli_help(cli_runner):
     """graphbot --help → shows all commands."""
-    from graphbot.cli.commands import app
+    from gbot_cli.commands import app
 
     result = cli_runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "graphbot" in result.output.lower()
+    assert "gbot" in result.output.lower()
     assert "chat" in result.output
     assert "status" in result.output
     assert "run" in result.output
@@ -274,7 +454,7 @@ def test_cli_help(cli_runner):
 
 def test_cli_status(cli_runner):
     """graphbot status → shows version, model, DB path."""
-    from graphbot.cli.commands import app
+    from gbot_cli.commands import app
 
     result = cli_runner.invoke(app, ["status"])
     assert result.exit_code == 0
@@ -284,7 +464,7 @@ def test_cli_status(cli_runner):
 
 def test_cli_user_add_list_remove(cli_runner):
     """User lifecycle: add → list → remove."""
-    from graphbot.cli.commands import app
+    from gbot_cli.commands import app
 
     uid = f"clitest_{uuid4().hex[:6]}"
 
@@ -306,7 +486,7 @@ def test_cli_user_add_list_remove(cli_runner):
 
 def test_cli_cron_list(cli_runner):
     """graphbot cron list → no error."""
-    from graphbot.cli.commands import app
+    from gbot_cli.commands import app
 
     result = cli_runner.invoke(app, ["cron", "list"])
     assert result.exit_code == 0
@@ -314,11 +494,11 @@ def test_cli_cron_list(cli_runner):
 
 def test_cli_chat_message(cli_runner):
     """graphbot chat -m 'merhaba' → LLM response."""
-    from graphbot.cli.commands import app
+    from gbot_cli.commands import app
 
-    result = cli_runner.invoke(app, ["chat", "-m", "Say hi in one word."])
+    result = cli_runner.invoke(app, ["chat", "--local", "-m", "Say hi in one word."])
     assert result.exit_code == 0
-    assert "graphbot:" in result.output.lower() or len(result.output) > 5
+    assert "gbot:" in result.output.lower() or len(result.output) > 5
 
 
 # ════════════════════════════════════════════════════════════

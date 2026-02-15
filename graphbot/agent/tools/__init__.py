@@ -18,6 +18,7 @@ from graphbot.core.config.schema import Config
 from graphbot.memory.store import MemoryStore
 
 if TYPE_CHECKING:
+    from graphbot.agent.delegation import DelegationPlanner
     from graphbot.core.background.worker import SubagentWorker
     from graphbot.core.cron.scheduler import CronScheduler
 
@@ -26,6 +27,7 @@ def make_tools(
     db: MemoryStore,
     scheduler: CronScheduler | None = None,
     worker: SubagentWorker | None = None,
+    planner: DelegationPlanner | None = None,
 ) -> list:
     """Create all agent tools from config and db."""
     # Build RAG retriever if configured
@@ -44,7 +46,7 @@ def make_tools(
     tools += make_filesystem_tools(config)
     tools += make_shell_tools(config)
     tools += make_web_tools(config)
-    tools += make_delegate_tools(worker)
+    tools += make_delegate_tools(worker, planner)
     tools += make_cron_tools(scheduler)
     tools += make_reminder_tools(scheduler)
     return tools

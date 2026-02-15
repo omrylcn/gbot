@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from datetime import datetime, timedelta
@@ -12,6 +13,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from loguru import logger
 
+from graphbot.agent.tools.registry import build_background_tool_registry, resolve_tools
 from graphbot.core.cron.types import CronJob
 from graphbot.memory.store import MemoryStore
 
@@ -50,6 +52,10 @@ class CronScheduler:
         self._scheduler = AsyncIOScheduler(
             job_defaults={"coalesce": True, "max_instances": 1}
         )
+        if config:
+            self._registry = build_background_tool_registry(config, db)
+        else:
+            self._registry = {}
 
     async def start(self) -> None:
         """Load cron jobs and reminders from SQLite and start the scheduler."""
@@ -124,21 +130,38 @@ class CronScheduler:
     # ── Reminders (one-shot) ────────────────────────────────
 
     def add_reminder(
-        self, user_id: str, channel: str, delay_seconds: int, message: str
+        self,
+        user_id: str,
+        channel: str,
+        delay_seconds: int,
+        message: str,
+        cron_expr: str | None = None,
     ) -> dict:
-        """Create a one-shot reminder that fires after delay_seconds."""
+        """Create a reminder.
+
+        Parameters
+        ----------
+        cron_expr : str, optional
+            When provided, creates a *recurring* reminder using CronTrigger.
+            ``delay_seconds`` is ignored for recurring reminders (run_at is
+            stored as creation time for reference only).
+        """
         run_at = (datetime.now() + timedelta(seconds=delay_seconds)).isoformat()
         reminder_id = str(uuid.uuid4())[:8]
-        self.db.add_reminder(reminder_id, user_id, run_at, message, channel)
+        self.db.add_reminder(
+            reminder_id, user_id, run_at, message, channel, cron_expr=cron_expr,
+        )
         row = {
             "reminder_id": reminder_id,
             "user_id": user_id,
             "message": message,
             "channel": channel,
             "run_at": run_at,
+            "cron_expr": cron_expr,
         }
         self._register_reminder_from_row(row)
-        logger.info(f"Reminder added: {reminder_id} (fires at {run_at})")
+        kind = f"recurring ({cron_expr})" if cron_expr else f"one-shot at {run_at}"
+        logger.info(f"Reminder added: {reminder_id} ({kind})")
         return row
 
     def list_reminders(self, user_id: str | None = None) -> list[dict]:
@@ -169,18 +192,29 @@ class CronScheduler:
             logger.error(f"Failed to register cron job {job.job_id}: {e}")
 
     def _register_reminder_from_row(self, row: dict) -> None:
-        """Register a reminder with APScheduler DateTrigger."""
-        run_at = row.get("run_at")
-        if not run_at:
-            return
+        """Register a reminder with APScheduler.
+
+        Uses CronTrigger for recurring reminders (cron_expr set),
+        DateTrigger for one-shot reminders.
+        """
         reminder_id = row["reminder_id"]
+        cron_expr = row.get("cron_expr")
+
         try:
-            run_date = datetime.fromisoformat(run_at)
-            # Skip past reminders
-            if run_date < datetime.now():
-                self.db.remove_reminder(reminder_id)
-                return
-            trigger = DateTrigger(run_date=run_date)
+            if cron_expr:
+                # Recurring reminder — fires periodically
+                trigger = CronTrigger.from_crontab(cron_expr)
+            else:
+                # One-shot reminder — fires once at run_at
+                run_at = row.get("run_at")
+                if not run_at:
+                    return
+                run_date = datetime.fromisoformat(run_at)
+                if run_date < datetime.now():
+                    self.db.remove_reminder(reminder_id)
+                    return
+                trigger = DateTrigger(run_date=run_date)
+
             self._scheduler.add_job(
                 self._execute_reminder,
                 trigger=trigger,
@@ -209,8 +243,24 @@ class CronScheduler:
                 logger.warning(f"No chat_id for user {user_id}")
             else:
                 logger.warning(f"No telegram link for user {user_id}")
-        else:
-            logger.debug(f"Channel '{channel}' has no direct delivery, skipping")
+            return False
+
+        # API/WS channel: try WebSocket push, fallback to system_event
+        ws_manager = getattr(self, "ws_manager", None)
+        if ws_manager and ws_manager.is_connected(user_id):
+            sent = await ws_manager.send_event(user_id, {
+                "type": "event",
+                "event_type": "message",
+                "source": "cron",
+                "payload": text,
+            })
+            if sent:
+                logger.info(f"Event pushed via WS to user={user_id}")
+                return True
+
+        # Fallback: save as system_event for polling / context injection
+        self.db.add_system_event(user_id, "cron", "message", text)
+        logger.info(f"Event saved to DB for user={user_id} (no active WS)")
         return False
 
     # ── Execution ─────────────────────────────────────────────
@@ -271,22 +321,27 @@ class CronScheduler:
         from graphbot.agent.light import LightAgent
 
         tools = self._parse_tools(job.agent_tools)
+        resolved_model = job.agent_model or self.config.assistant.model
         agent = LightAgent(
             config=self.config,
             prompt=job.agent_prompt,
             tools=tools,
-            model=job.agent_model,
+            model=resolved_model,
         )
         return await agent.run(job.message)
 
     def _parse_tools(self, agent_tools: str | None) -> list:
         """Parse JSON tool name list into actual tool objects.
 
-        Returns empty list if agent_tools is None or empty.
-        Tool filtering is a future enhancement — for now returns empty.
+        Returns empty list if agent_tools is None/empty or registry is empty.
         """
-        # TODO: resolve tool names to actual tool objects from a registry
-        return []
+        if not agent_tools or not self._registry:
+            return []
+        try:
+            names = json.loads(agent_tools) if isinstance(agent_tools, str) else agent_tools
+        except json.JSONDecodeError:
+            return []
+        return resolve_tools(self._registry, names)
 
     def _pause_job(self, job_id: str) -> None:
         """Pause a job after consecutive failures by disabling it."""
@@ -302,7 +357,10 @@ class CronScheduler:
             pass
 
     async def _execute_reminder(self, row: dict) -> None:
-        """Execute a one-shot reminder: send message directly, no LLM.
+        """Execute a reminder: send message directly, no LLM.
+
+        One-shot reminders are marked 'sent' after delivery.
+        Recurring reminders stay 'pending' so they keep firing.
 
         On failure, marks as failed (retry_count incremented).
         After 3 failures, status becomes 'failed' permanently.
@@ -310,13 +368,23 @@ class CronScheduler:
         reminder_id = row["reminder_id"]
         user_id = row["user_id"]
         channel = row.get("channel", "telegram")
-        logger.info(f"Reminder trigger: {reminder_id} → user={user_id}")
+        is_recurring = bool(row.get("cron_expr"))
+        logger.info(
+            f"Reminder trigger: {reminder_id} → user={user_id}"
+            f" ({'recurring' if is_recurring else 'one-shot'})"
+        )
         try:
             text = f"Hatirlatma: {row['message']}"
             sent = await self._send_to_channel(user_id, channel, text)
             if sent:
-                self.db.mark_reminder_sent(reminder_id)
-                logger.info(f"Reminder {reminder_id} sent")
+                if not is_recurring:
+                    self.db.mark_reminder_sent(reminder_id)
+                logger.info(f"Reminder {reminder_id} sent directly")
+            elif channel in ("api", "ws"):
+                # Fallback: event saved to DB by _send_to_channel
+                if not is_recurring:
+                    self.db.mark_reminder_sent(reminder_id)
+                logger.info(f"Reminder {reminder_id} saved as system_event")
             else:
                 self.db.mark_reminder_failed(reminder_id, "Channel delivery failed")
                 logger.warning(f"Reminder {reminder_id} delivery failed")
