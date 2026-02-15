@@ -442,11 +442,11 @@ async def test_api_background_task_events(api_client):
 
 def test_cli_help(cli_runner):
     """graphbot --help → shows all commands."""
-    from graphbot.cli.commands import app
+    from gbot_cli.commands import app
 
     result = cli_runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "graphbot" in result.output.lower()
+    assert "gbot" in result.output.lower()
     assert "chat" in result.output
     assert "status" in result.output
     assert "run" in result.output
@@ -454,7 +454,7 @@ def test_cli_help(cli_runner):
 
 def test_cli_status(cli_runner):
     """graphbot status → shows version, model, DB path."""
-    from graphbot.cli.commands import app
+    from gbot_cli.commands import app
 
     result = cli_runner.invoke(app, ["status"])
     assert result.exit_code == 0
@@ -464,7 +464,7 @@ def test_cli_status(cli_runner):
 
 def test_cli_user_add_list_remove(cli_runner):
     """User lifecycle: add → list → remove."""
-    from graphbot.cli.commands import app
+    from gbot_cli.commands import app
 
     uid = f"clitest_{uuid4().hex[:6]}"
 
@@ -486,7 +486,7 @@ def test_cli_user_add_list_remove(cli_runner):
 
 def test_cli_cron_list(cli_runner):
     """graphbot cron list → no error."""
-    from graphbot.cli.commands import app
+    from gbot_cli.commands import app
 
     result = cli_runner.invoke(app, ["cron", "list"])
     assert result.exit_code == 0
@@ -494,11 +494,11 @@ def test_cli_cron_list(cli_runner):
 
 def test_cli_chat_message(cli_runner):
     """graphbot chat -m 'merhaba' → LLM response."""
-    from graphbot.cli.commands import app
+    from gbot_cli.commands import app
 
-    result = cli_runner.invoke(app, ["chat", "-m", "Say hi in one word."])
+    result = cli_runner.invoke(app, ["chat", "--local", "-m", "Say hi in one word."])
     assert result.exit_code == 0
-    assert "graphbot:" in result.output.lower() or len(result.output) > 5
+    assert "gbot:" in result.output.lower() or len(result.output) > 5
 
 
 # ════════════════════════════════════════════════════════════

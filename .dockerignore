@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.git/
+.env
+.venv/
+.pytest_cache/
+.ruff_cache/
+.claude/
+reference files/
+data/
+workspace/
+tests/
+gbot/
+*.ipynb
+*.md
+!README.md

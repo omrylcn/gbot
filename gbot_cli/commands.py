@@ -1,4 +1,4 @@
-"""GraphBot CLI — Typer-based command-line interface."""
+"""gbot CLI — Typer-based command-line interface."""
 
 from __future__ import annotations
 
@@ -11,9 +11,10 @@ from rich.table import Table
 from graphbot import __version__
 
 app = typer.Typer(
-    name="graphbot",
-    help="graphbot - LangGraph-based AI assistant",
-    no_args_is_help=True,
+    name="gbot",
+    help="gbot - LangGraph-based AI assistant",
+    no_args_is_help=False,
+    invoke_without_command=True,
 )
 
 console = Console()
@@ -21,17 +22,21 @@ console = Console()
 
 def _version_callback(value: bool) -> None:
     if value:
-        console.print(f"graphbot v{__version__}")
+        console.print(f"gbot v{__version__}")
         raise typer.Exit()
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def main(
+    ctx: typer.Context,
     version: bool = typer.Option(
         None, "--version", "-v", callback=_version_callback, is_eager=True
     ),
 ) -> None:
-    """graphbot - LangGraph-based AI assistant."""
+    """gbot - LangGraph-based AI assistant."""
+    if ctx.invoked_subcommand is None:
+        # Default: open interactive REPL (same as `gbot chat`)
+        _start_repl()
 
 
 # ════════════════════════════════════════════════════════════
@@ -48,21 +53,80 @@ def run(
     """Start the API server (uvicorn)."""
     import uvicorn
 
-    console.print(f"[green]Starting graphbot API on {host}:{port}[/green]")
+    console.print(f"[green]Starting gbot API on {host}:{port}[/green]")
     uvicorn.run("graphbot.api.app:app", host=host, port=port, reload=reload)
 
 
 # ════════════════════════════════════════════════════════════
-# chat — terminal chat
+# chat — terminal chat (API-backed REPL or local standalone)
 # ════════════════════════════════════════════════════════════
+
+
+def _start_repl(
+    server: str = "http://localhost:8000",
+    token: str | None = None,
+    api_key: str | None = None,
+    message: str | None = None,
+    session: str | None = None,
+) -> None:
+    """Core REPL logic — shared by `gbot` (bare) and `gbot chat`."""
+    from gbot_cli.credentials import load_credentials
+
+    creds = load_credentials()
+    resolved_server = server if server != "http://localhost:8000" else creds.get("server_url", server)
+    resolved_token = token or creds.get("token")
+    resolved_api_key = api_key or creds.get("api_key")
+    import getpass
+
+    user_id = creds.get("user_id", getpass.getuser())
+
+    from gbot_cli.client import GraphBotClient
+
+    client = GraphBotClient(
+        base_url=resolved_server,
+        token=resolved_token,
+        api_key=resolved_api_key,
+    )
+
+    try:
+        if message:
+            from gbot_cli.client import APIError
+
+            try:
+                data = client.chat(message, session_id=session)
+                console.print(f"\n[bold cyan]gbot:[/bold cyan] {data['response']}\n")
+            except APIError as e:
+                console.print(f"[red]Error:[/red] {e.detail}")
+                raise typer.Exit(code=1)
+        else:
+            from gbot_cli.repl import REPL
+
+            repl = REPL(client, user_id, console=console)
+            if session:
+                repl.session_id = session
+            repl.start()
+    finally:
+        client.close()
 
 
 @app.command()
 def chat(
-    message: str | None = typer.Option(None, "--message", "-m", help="Single message to send"),
-    session: str = typer.Option("cli:default", "--session", "-s", help="Session ID"),
+    server: str = typer.Option("http://localhost:8000", "--server", "-s", help="API server URL"),
+    token: str | None = typer.Option(None, "--token", "-t", help="Bearer token"),
+    api_key: str | None = typer.Option(None, "--api-key", "-k", help="API key"),
+    message: str | None = typer.Option(None, "--message", "-m", help="Single message (non-interactive)"),
+    session: str | None = typer.Option(None, "--session", help="Session ID"),
+    local: bool = typer.Option(False, "--local", "-l", help="Local standalone mode (no API server)"),
 ) -> None:
-    """Chat with the assistant from the terminal."""
+    """Chat with the assistant — connects to the API server by default."""
+    if local:
+        _chat_local(message, session or "cli:default")
+        return
+    _start_repl(server=server, token=token, api_key=api_key, message=message, session=session)
+
+
+def _chat_local(message: str | None, session: str) -> None:
+    """Legacy local standalone chat (direct GraphRunner, no API)."""
     from graphbot.agent.runner import GraphRunner
     from graphbot.core.config.loader import load_config
     from graphbot.memory.store import MemoryStore
@@ -71,7 +135,6 @@ def chat(
     db = MemoryStore(config.database.path)
     runner = GraphRunner(config, db)
 
-    # Use owner if configured, else fallback to "cli_user"
     if config.assistant.owner is not None:
         user_id = config.assistant.owner.username
         db.get_or_create_user(user_id, name=config.assistant.owner.name or None)
@@ -81,12 +144,10 @@ def chat(
     channel = "cli"
 
     if message:
-        # Single message mode
         response, _ = asyncio.run(runner.process(user_id, channel, message, session))
-        console.print(f"\n[bold cyan]graphbot:[/bold cyan] {response}\n")
+        console.print(f"\n[bold cyan]gbot:[/bold cyan] {response}\n")
     else:
-        # Interactive mode
-        console.print("[bold]graphbot interactive mode[/bold] (type 'exit' or 'quit' to leave)\n")
+        console.print("[bold]gbot interactive mode[/bold] (type 'exit' or 'quit' to leave)\n")
 
         async def _interactive() -> None:
             sid = session
@@ -105,9 +166,50 @@ def chat(
                     break
 
                 response, sid = await runner.process(user_id, channel, text, sid)
-                console.print(f"\n[bold cyan]graphbot:[/bold cyan] {response}\n")
+                console.print(f"\n[bold cyan]gbot:[/bold cyan] {response}\n")
 
         asyncio.run(_interactive())
+
+
+# ════════════════════════════════════════════════════════════
+# login / logout — credential management
+# ════════════════════════════════════════════════════════════
+
+
+@app.command()
+def login(
+    server: str = typer.Option("http://localhost:8000", "--server", "-s", help="API server URL"),
+    user_id: str = typer.Argument(help="User ID"),
+    password: str = typer.Option(..., "--password", "-p", prompt=True, hide_input=True, help="Password"),
+) -> None:
+    """Login to the API server and save credentials."""
+    from gbot_cli.client import APIError, GraphBotClient
+    from gbot_cli.credentials import save_credentials
+
+    client = GraphBotClient(base_url=server)
+    try:
+        data = client.login(user_id, password)
+        token = data.get("token")
+        save_credentials({
+            "server_url": server,
+            "user_id": user_id,
+            "token": token,
+        })
+        console.print(f"[green]Logged in as[/green] {user_id}")
+    except APIError as e:
+        console.print(f"[red]Login failed:[/red] {e.detail}")
+        raise typer.Exit(code=1)
+    finally:
+        client.close()
+
+
+@app.command()
+def logout() -> None:
+    """Clear saved credentials."""
+    from gbot_cli.credentials import clear_credentials
+
+    clear_credentials()
+    console.print("[green]Logged out.[/green]")
 
 
 # ════════════════════════════════════════════════════════════
@@ -131,7 +233,7 @@ def status() -> None:
             "SELECT COUNT(*) FROM sessions WHERE ended_at IS NULL"
         ).fetchone()[0]
 
-    table = Table(title="graphbot status")
+    table = Table(title="gbot status")
     table.add_column("Key", style="cyan")
     table.add_column("Value", style="green")
 

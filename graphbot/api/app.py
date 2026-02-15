@@ -16,6 +16,7 @@ from starlette.responses import JSONResponse
 
 from graphbot import __version__
 from graphbot.agent.runner import GraphRunner
+from graphbot.api.admin import router as admin_router
 from graphbot.api.auth import router as auth_router
 from graphbot.api.routes import router as core_router
 from graphbot.api.ws import router as ws_router
@@ -170,6 +171,7 @@ def create_app() -> FastAPI:
     # Routers
     app.include_router(core_router)
     app.include_router(auth_router)
+    app.include_router(admin_router)
     app.include_router(ws_router)
 
     # Channel webhooks
