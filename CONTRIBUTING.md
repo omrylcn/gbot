@@ -5,7 +5,7 @@ Thanks for your interest! Here's how to get started.
 ## Development Setup
 
 ```bash
-git clone https://github.com/<user>/graphbot.git
+git clone https://github.com/omrylcn/graphbot.git
 cd graphbot
 uv sync --extra dev
 cp .env.example .env          # fill in at least one LLM API key
@@ -22,8 +22,8 @@ uv run pytest tests/ -v
 We use [ruff](https://docs.astral.sh/ruff/) for linting:
 
 ```bash
-uv run ruff check graphbot/
-uv run ruff format graphbot/
+uv run ruff check graphbot/ gbot_cli/
+uv run ruff format graphbot/ gbot_cli/
 ```
 
 - Line length: 100
@@ -43,10 +43,9 @@ uv run ruff format graphbot/
 1. Fork the repo and create your branch from `dev`
 2. Add tests for new functionality
 3. Ensure `uv run pytest tests/ -v` passes
-4. Ensure `uv run ruff check graphbot/` is clean
+4. Ensure `uv run ruff check graphbot/ gbot_cli/` is clean
 5. Open a PR against `dev`
 
 ## Architecture
 
-See [CLAUDE.md](CLAUDE.md) for architecture rules and key files.
-See [mimari_kararlar.md](mimari_kararlar.md) for detailed architectural decisions.
+See the [README](README.md) for architecture overview, project structure, and design decisions.

@@ -8,43 +8,43 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [1.6.0] - 2026-02-15
 
-### Added (Faz 16: CLI Enhancement — API Client + Rich REPL)
+### Added (CLI Enhancement — API Client + Rich REPL)
 
-- **`gbot` CLI entry point:** Terminal komutu `graphbot` → `gbot` olarak yeniden adlandırıldı (`graphbot` alias olarak korunuyor)
-- **`gbot_cli/` paketi:** CLI kodu `graphbot/cli/` altından ayrı `gbot_cli/` paketine taşındı
+- **`gbot` CLI entry point:** Terminal command renamed `graphbot` → `gbot` (`graphbot` kept as alias)
+- **`gbot_cli/` package:** CLI code moved from `graphbot/cli/` to a separate `gbot_cli/` package
 - **GraphBotClient:** Sync httpx wrapper for all API endpoints (health, chat, login, sessions, user, admin)
 - **Credentials:** Token storage at `~/.graphbot/credentials.json` with `chmod 0600`
 - **Interactive REPL:** Rich-rendered chat shell with robot logo, markdown output, spinner, auto session management
-- **Slash command autocomplete:** `prompt_toolkit` ile `/` yazarken real-time completion (Claude Code benzeri UX)
+- **Slash command autocomplete:** Real-time `/` completion via `prompt_toolkit`
 - **Slash commands:** `/help`, `/status`, `/session`, `/history`, `/context`, `/config`, `/skill`, `/cron`, `/user`, `/events`, `/clear`, `/exit`
 - **Rich formatters:** Table/panel renderers for sessions, users, crons, skills, config, events, history
 - **Admin API:** `GET /admin/status`, `/admin/config`, `/admin/skills`, `/admin/users`, `/admin/crons`, `/admin/logs`, `DELETE /admin/crons/{job_id}` (owner-only)
 - **`login` / `logout` commands:** Save/clear credentials for API authentication
-- **Default REPL:** `gbot` (bare, argümansız) direkt REPL açar
-- **System user fallback:** Login yoksa `getpass.getuser()` ile OS kullanıcı adı kullanılır
+- **Default REPL:** `gbot` (bare, no arguments) opens REPL directly
+- **System user fallback:** When not logged in, uses `getpass.getuser()` for OS username
 - **23 new tests** (test_cli_client.py, test_cli_repl.py, test_admin_api.py)
 
 ### Changed
 
 - **`chat` command reworked:** Defaults to API-backed REPL mode; `--local` flag preserves standalone mode; `--server`, `--token`, `--api-key` flags for connection config; `-m` for single-shot API calls
 - **`app.py`:** Admin router registered
-- **`graphbot/cli/` removed:** Tüm CLI kodu `gbot_cli/` paketine taşındı, eski dizin silindi
+- **`graphbot/cli/` removed:** All CLI code moved to `gbot_cli/` package, old directory deleted
 
 ## [1.5.0] - 2026-02-15
 
-### Added (Faz 15: Docker & Deploy)
+### Added (Docker & Deploy)
 
-- **Dockerfile:** `uv:python3.11-bookworm-slim` base image, `.[channels]` dahil, healthcheck, `graphbot` CLI entrypoint
-- **docker-compose.yml:** Tek servis, named volume'lar (`graphbot_data`, `graphbot_workspace`), `config.yaml` read-only bind mount, `.env` env_file
-- **.dockerignore:** `reference files/`, `data/`, `.venv/`, `tests/`, `gbot/` vb. container dışında tutar
+- **Dockerfile:** `uv:python3.11-bookworm-slim` base image, `.[channels]` included, healthcheck, `graphbot` CLI entrypoint
+- **docker-compose.yml:** Single service, named volumes (`graphbot_data`, `graphbot_workspace`), `config.yaml` read-only bind mount, `.env` env_file
+- **.dockerignore:** Excludes `reference files/`, `data/`, `.venv/`, `tests/`, `gbot/` etc. from container
 
 ### Fixed
 
-- **config.yaml:** `channels.telegram.enabled: true1` typo düzeltildi → `true`
+- **config.yaml:** Fixed `channels.telegram.enabled: true1` typo → `true`
 
 ## [1.4.0] - 2026-02-15
 
-### Added
+### Added (Delegation Planner)
 
 - **DelegationPlanner:** Single LLM call to plan subagent execution — picks tools, prompt, and model automatically based on task description
 - **DelegationConfig:** New config section (`background.delegation`) with `model` and `temperature` fields for the planner LLM
@@ -68,7 +68,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [1.3.0] - 2026-02-15
 
-### Added
+### Added (WebSocket Events & Recurring Reminders)
 
 - **Recurring reminders:** `cron_expr` column on reminders table — periodic reminders via CronTrigger, stays "pending" (not marked sent)
 - **`create_recurring_reminder` tool:** Create periodic reminders with cron expressions, no LLM processing
@@ -90,7 +90,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [1.2.0] - 2026-02-15
 
-### Added (Faz 13: LightAgent & Background Task Refactoring)
+### Added (LightAgent & Background Task Refactoring)
 
 - **LightAgent:** Lightweight, isolated agent for background tasks — own prompt, restricted tools, model override, no context loading
 - **NOTIFY/SKIP:** LLM response markers (SKIP, [SKIP], [NO_NOTIFY]) to suppress unnecessary cron notifications
@@ -113,7 +113,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [1.0.0] - 2025-02-07
 
-### Added
+### Added (Initial Release)
 
 - **Core:** LangGraph-based stateless agent with 4-node graph (load_context → reason ⇄ execute_tools → respond)
 - **Core:** GraphRunner orchestrator — SQLite ↔ LangGraph bridge, request-scoped
@@ -132,4 +132,3 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Background:** Heartbeat service and sub-agent worker
 - **RAG:** Optional FAISS-based retrieval with multilingual embeddings
 - **CLI:** Typer-based CLI with interactive chat, config check, version commands
-
