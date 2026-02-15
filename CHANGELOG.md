@@ -10,19 +10,25 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added (Faz 16: CLI Enhancement — API Client + Rich REPL)
 
+- **`gbot` CLI entry point:** Terminal komutu `graphbot` → `gbot` olarak yeniden adlandırıldı (`graphbot` alias olarak korunuyor)
+- **`gbot_cli/` paketi:** CLI kodu `graphbot/cli/` altından ayrı `gbot_cli/` paketine taşındı
 - **GraphBotClient:** Sync httpx wrapper for all API endpoints (health, chat, login, sessions, user, admin)
 - **Credentials:** Token storage at `~/.graphbot/credentials.json` with `chmod 0600`
-- **Interactive REPL:** Rich-rendered chat shell with markdown output, spinner, auto session management
+- **Interactive REPL:** Rich-rendered chat shell with robot logo, markdown output, spinner, auto session management
+- **Slash command autocomplete:** `prompt_toolkit` ile `/` yazarken real-time completion (Claude Code benzeri UX)
 - **Slash commands:** `/help`, `/status`, `/session`, `/history`, `/context`, `/config`, `/skill`, `/cron`, `/user`, `/events`, `/clear`, `/exit`
 - **Rich formatters:** Table/panel renderers for sessions, users, crons, skills, config, events, history
 - **Admin API:** `GET /admin/status`, `/admin/config`, `/admin/skills`, `/admin/users`, `/admin/crons`, `/admin/logs`, `DELETE /admin/crons/{job_id}` (owner-only)
 - **`login` / `logout` commands:** Save/clear credentials for API authentication
+- **Default REPL:** `gbot` (bare, argümansız) direkt REPL açar
+- **System user fallback:** Login yoksa `getpass.getuser()` ile OS kullanıcı adı kullanılır
 - **23 new tests** (test_cli_client.py, test_cli_repl.py, test_admin_api.py)
 
 ### Changed
 
 - **`chat` command reworked:** Defaults to API-backed REPL mode; `--local` flag preserves standalone mode; `--server`, `--token`, `--api-key` flags for connection config; `-m` for single-shot API calls
 - **`app.py`:** Admin router registered
+- **`graphbot/cli/` removed:** Tüm CLI kodu `gbot_cli/` paketine taşındı, eski dizin silindi
 
 ## [1.5.0] - 2026-02-15
 

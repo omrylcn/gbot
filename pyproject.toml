@@ -38,10 +38,12 @@ dependencies = [
     # CLI
     "typer>=0.9.0",
     "rich>=13.0.0",
+    "prompt_toolkit>=3.0.0",
 ]
 
 [project.scripts]
-graphbot = "graphbot.cli.commands:app"
+gbot = "gbot_cli.commands:app"
+graphbot = "gbot_cli.commands:app"
 
 [project.optional-dependencies]
 channels = [
@@ -67,7 +69,7 @@ build-backend = "hatchling.build"
 path = "graphbot/__version__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["graphbot"]
+packages = ["graphbot", "gbot_cli"]
 
 [tool.ruff]
 line-length = 100
