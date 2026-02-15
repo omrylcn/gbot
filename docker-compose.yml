@@ -1,0 +1,17 @@
+services:
+  graphbot:
+    build: .
+    container_name: graphbot
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - graphbot_data:/app/data
+      - graphbot_workspace:/app/workspace
+      - ./config.yaml:/app/config.yaml:ro
+    restart: unless-stopped
+
+volumes:
+  graphbot_data:
+  graphbot_workspace:
