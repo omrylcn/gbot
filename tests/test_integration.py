@@ -256,6 +256,123 @@ async def test_api_chat_turkish(api_client):
 
 
 # ════════════════════════════════════════════════════════════
+# CRON / REMINDER TESTS (real LLM tool calls)
+# ════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_api_create_reminder(api_client):
+    """Ask LLM to create a one-shot reminder → tool called, reminder in DB."""
+    uid = api_client._test_user_id
+    resp = await api_client.post(
+        "/chat",
+        json={
+            "message": (
+                "30 saniye sonra bana 'test hatirlatma' diye hatırlat. "
+                "create_reminder tool'unu kullan."
+            ),
+            "user_id": uid,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["response"]) > 0
+    # LLM response should confirm the reminder was set (various phrasings)
+    response_lower = data["response"].lower()
+    assert any(
+        kw in response_lower
+        for kw in [
+            "hatırlat", "reminder", "ayarla", "kuruldu", "oluştur",
+            "set", "alacak", "mesaj", "saniye", "dakika",
+        ]
+    ), f"Unexpected response: {data['response'][:200]}"
+
+
+@pytest.mark.asyncio
+async def test_api_create_recurring_reminder(api_client):
+    """Ask LLM to create a recurring reminder → tool called."""
+    uid = api_client._test_user_id
+    resp = await api_client.post(
+        "/chat",
+        json={
+            "message": (
+                "Her 10 dakikada bir bana 'su iç' diye hatırlat. "
+                "create_recurring_reminder tool'unu kullan, cron_expr='*/10 * * * *'."
+            ),
+            "user_id": uid,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["response"]) > 0
+    response_lower = data["response"].lower()
+    assert any(
+        kw in response_lower
+        for kw in ["recurring", "periyodik", "hatırlat", "reminder", "set", "kuruldu"]
+    ), f"Unexpected response: {data['response'][:200]}"
+
+
+@pytest.mark.asyncio
+async def test_api_list_reminders(api_client):
+    """Create a reminder then ask LLM to list reminders."""
+    uid = api_client._test_user_id
+    # First create one
+    await api_client.post(
+        "/chat",
+        json={
+            "message": "60 saniye sonra bana 'list testi' diye hatırlat.",
+            "user_id": uid,
+        },
+    )
+    # Then list
+    resp = await api_client.post(
+        "/chat",
+        json={
+            "message": "Bekleyen hatırlatmalarımı listele. list_reminders tool'unu kullan.",
+            "user_id": uid,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["response"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_api_create_cron_job(api_client):
+    """Ask LLM to create a cron job → tool called."""
+    uid = api_client._test_user_id
+    resp = await api_client.post(
+        "/chat",
+        json={
+            "message": (
+                "Her gün saat 09:00'da 'günaydın' mesajı gönderen bir cron job oluştur. "
+                "add_cron_job tool'unu kullan, cron_expr='0 9 * * *'."
+            ),
+            "user_id": uid,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["response"]) > 0
+    response_lower = data["response"].lower()
+    assert any(
+        kw in response_lower
+        for kw in ["cron", "job", "oluştur", "created", "görev", "zamanla"]
+    ), f"Unexpected response: {data['response'][:200]}"
+
+
+@pytest.mark.asyncio
+async def test_api_events_endpoint(api_client):
+    """GET /events/{uid} → returns (possibly empty) events list."""
+    uid = api_client._test_user_id
+    resp = await api_client.get(f"/events/{uid}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "events" in data
+    assert isinstance(data["events"], list)
+
+
+# ════════════════════════════════════════════════════════════
 # CLI TESTS
 # ════════════════════════════════════════════════════════════
 

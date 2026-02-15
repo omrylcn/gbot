@@ -100,7 +100,7 @@ async def lifespan(app: FastAPI):
     # Background services (need runner)
     cron_scheduler = CronScheduler(db, runner, config=config)
     heartbeat = HeartbeatService(config, runner)
-    worker = SubagentWorker(runner, db=db)
+    worker = SubagentWorker(config, db=db)
 
     # Now build tools with scheduler+worker, and rebuild graph
     from graphbot.agent.graph import create_graph
@@ -112,12 +112,20 @@ async def lifespan(app: FastAPI):
     await cron_scheduler.start()
     heartbeat_task = asyncio.create_task(heartbeat.start())
 
+    # WebSocket connection registry for event push
+    from graphbot.api.ws import ConnectionManager
+
+    ws_manager = ConnectionManager()
+    cron_scheduler.ws_manager = ws_manager
+    worker.ws_manager = ws_manager
+
     app.state.config = config
     app.state.db = db
     app.state.runner = runner
     app.state.cron = cron_scheduler
     app.state.heartbeat = heartbeat
     app.state.worker = worker
+    app.state.ws_manager = ws_manager
 
     logger.info(f"GraphBot API started — model: {config.assistant.model}")
     yield
