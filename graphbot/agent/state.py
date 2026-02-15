@@ -18,3 +18,4 @@ class AgentState(MessagesState):
     system_prompt: str = ""
     token_count: int = 0
     iteration: int = 0
+    skip_context: bool = False

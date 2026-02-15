@@ -49,6 +49,32 @@ class OwnerConfig(BaseModel):
     name: str = ""
 
 
+class PersonaConfig(BaseModel):
+    """Agent persona definition (tone, language, constraints)."""
+
+    name: str = "GraphBot"
+    tone: str = ""
+    language: str = ""
+    constraints: list[str] = Field(default_factory=list)
+
+
+class RolesConfig(BaseModel):
+    """Agent role definitions."""
+
+    default: str = ""
+    available: dict[str, str] = Field(default_factory=dict)
+
+
+class ContextPrioritiesConfig(BaseModel):
+    """Token budget per context layer (approximate — 1 token ~ 4 chars)."""
+
+    identity: int = 500
+    agent_memory: int = 500
+    user_context: int = 1500
+    session_summary: int = 500
+    skills: int = 1000
+
+
 class AssistantConfig(BaseModel):
     """Main assistant (assistant.*)."""
 
@@ -62,6 +88,12 @@ class AssistantConfig(BaseModel):
     tools: list[str] = Field(default_factory=lambda: ["*"])
     system_prompt: str | None = None
     agents: dict[str, AgentConfig] = Field(default_factory=dict)
+    persona: PersonaConfig = Field(default_factory=PersonaConfig)
+    roles: RolesConfig = Field(default_factory=RolesConfig)
+    context_priorities: ContextPrioritiesConfig = Field(
+        default_factory=ContextPrioritiesConfig
+    )
+    prompt_template: str | None = None
 
 
 # Channels

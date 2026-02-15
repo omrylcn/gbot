@@ -128,7 +128,7 @@ def status() -> None:
     with db._get_conn() as conn:
         user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         session_count = conn.execute(
-            "SELECT COUNT(*) FROM sessions WHERE status = 'active'"
+            "SELECT COUNT(*) FROM sessions WHERE ended_at IS NULL"
         ).fetchone()[0]
 
     table = Table(title="graphbot status")

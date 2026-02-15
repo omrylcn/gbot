@@ -34,22 +34,39 @@ class GraphRunner:
         self._graph = create_graph(config, db, self.tools)
 
     async def process(
-        self, user_id: str, channel: str, message: str, session_id: str | None = None
+        self,
+        user_id: str,
+        channel: str,
+        message: str,
+        session_id: str | None = None,
+        skip_context: bool = False,
     ) -> tuple[str, str]:
         """Process a user message and return (response, session_id).
 
-        Args:
-            user_id: User identifier.
-            channel: Channel name (api, telegram, etc.).
-            message: User message text.
-            session_id: Existing session ID. If None, creates a new session.
+        Parameters
+        ----------
+        user_id : str
+            User identifier.
+        channel : str
+            Channel name (api, telegram, etc.).
+        message : str
+            User message text.
+        session_id : str, optional
+            Existing session ID. If None, creates a new session.
+        skip_context : bool
+            If True, load only identity prompt (no user context, memory, etc.).
+            Used by background tasks to reduce cost.
 
-        Returns:
-            Tuple of (assistant_response, session_id).
+        Returns
+        -------
+        tuple[str, str]
+            (assistant_response, session_id).
         """
         # 1. Session — client provides session_id, or we create one
         if session_id is None:
             session_id = self.db.create_session(user_id, channel)
+        elif not self.db.get_session(session_id):
+            self.db.create_session(user_id, channel, session_id=session_id)
 
         # 2. Load history → LangChain messages
         history = self._load_history(session_id)
@@ -63,6 +80,7 @@ class GraphRunner:
                 "messages": history + [HumanMessage(content=message)],
                 "iteration": 0,
                 "token_count": 0,
+                "skip_context": skip_context,
             }
         )
 

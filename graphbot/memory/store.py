@@ -47,11 +47,27 @@ class MemoryStore:
 
     def _migrate(self, conn) -> None:
         """Add columns/tables missing in existing databases."""
+        # Users table migrations
         cols = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
         if "password_hash" not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
         if "role" not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")
+
+        # Cron jobs: LightAgent columns (Faz 13)
+        cron_cols = {
+            row[1] for row in conn.execute("PRAGMA table_info(cron_jobs)").fetchall()
+        }
+        for col, ddl in [
+            ("agent_prompt", "TEXT"),
+            ("agent_tools", "TEXT"),
+            ("agent_model", "TEXT"),
+            ("notify_condition", "TEXT DEFAULT 'always'"),
+            ("consecutive_failures", "INTEGER DEFAULT 0"),
+            ("last_error", "TEXT"),
+        ]:
+            if col not in cron_cols:
+                conn.execute(f"ALTER TABLE cron_jobs ADD COLUMN {col} {ddl}")
 
     # ════════════════════════════════════════════════════════════
     # USERS
@@ -284,9 +300,12 @@ class MemoryStore:
     # SESSIONS (token-based)
     # ════════════════════════════════════════════════════════════
 
-    def create_session(self, user_id: str, channel: str = "api") -> str:
+    def create_session(
+        self, user_id: str, channel: str = "api", session_id: str | None = None,
+    ) -> str:
         self.get_or_create_user(user_id)
-        session_id = str(uuid.uuid4())
+        if session_id is None:
+            session_id = str(uuid.uuid4())
         with self._get_conn() as conn:
             conn.execute(
                 "INSERT INTO sessions (session_id, user_id, channel) VALUES (?, ?, ?)",
@@ -589,13 +608,21 @@ class MemoryStore:
         message: str,
         channel: str = "api",
         enabled: bool = True,
+        agent_prompt: str | None = None,
+        agent_tools: str | None = None,
+        agent_model: str | None = None,
+        notify_condition: str = "always",
     ) -> None:
         with self._get_conn() as conn:
             conn.execute(
                 """INSERT INTO cron_jobs
-                   (job_id, user_id, cron_expr, message, channel, enabled)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (job_id, user_id, cron_expr, message, channel, int(enabled)),
+                   (job_id, user_id, cron_expr, message, channel, enabled,
+                    agent_prompt, agent_tools, agent_model, notify_condition)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    job_id, user_id, cron_expr, message, channel, int(enabled),
+                    agent_prompt, agent_tools, agent_model, notify_condition,
+                ),
             )
             conn.commit()
 
@@ -614,37 +641,236 @@ class MemoryStore:
             conn.execute("DELETE FROM cron_jobs WHERE job_id = ?", (job_id,))
             conn.commit()
 
+    # ── Reminders (standalone table, no LLM) ─────────────────
+
     def add_reminder(
         self,
-        job_id: str,
+        reminder_id: str,
         user_id: str,
         run_at: str,
         message: str,
-        channel: str = "api",
+        channel: str = "telegram",
     ) -> None:
-        """Add a one-shot reminder (run_at = ISO datetime)."""
+        """Add a reminder to the reminders table."""
         with self._get_conn() as conn:
             conn.execute(
-                """INSERT INTO cron_jobs
-                   (job_id, user_id, cron_expr, message, channel, run_at)
-                   VALUES (?, ?, '', ?, ?, ?)""",
-                (job_id, user_id, message, channel, run_at),
+                """INSERT INTO reminders
+                   (reminder_id, user_id, run_at, message, channel)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (reminder_id, user_id, run_at, message, channel),
             )
             conn.commit()
 
-    def get_pending_reminders(self, user_id: str | None = None) -> list[dict[str, Any]]:
-        """Get reminders (cron_jobs with run_at set)."""
+    def get_pending_reminders(
+        self, user_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Get pending reminders."""
         with self._get_conn() as conn:
             if user_id:
                 rows = conn.execute(
-                    "SELECT * FROM cron_jobs WHERE run_at IS NOT NULL AND user_id = ?",
+                    "SELECT * FROM reminders WHERE status = 'pending' AND user_id = ?",
                     (user_id,),
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT * FROM cron_jobs WHERE run_at IS NOT NULL"
+                    "SELECT * FROM reminders WHERE status = 'pending'"
                 ).fetchall()
         return [dict(r) for r in rows]
+
+    def mark_reminder_sent(self, reminder_id: str) -> None:
+        """Mark a reminder as successfully sent."""
+        with self._get_conn() as conn:
+            conn.execute(
+                """UPDATE reminders
+                   SET status = 'sent', sent_at = CURRENT_TIMESTAMP
+                   WHERE reminder_id = ?""",
+                (reminder_id,),
+            )
+            conn.commit()
+
+    def mark_reminder_failed(self, reminder_id: str, error: str) -> None:
+        """Mark a reminder as failed and increment retry count."""
+        with self._get_conn() as conn:
+            conn.execute(
+                """UPDATE reminders
+                   SET retry_count = retry_count + 1, last_error = ?,
+                       status = CASE WHEN retry_count >= 2 THEN 'failed' ELSE 'pending' END
+                   WHERE reminder_id = ?""",
+                (error, reminder_id),
+            )
+            conn.commit()
+
+    def cancel_reminder(self, reminder_id: str) -> bool:
+        """Cancel a pending reminder. Returns True if cancelled."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                """UPDATE reminders SET status = 'cancelled'
+                   WHERE reminder_id = ? AND status = 'pending'""",
+                (reminder_id,),
+            )
+            conn.commit()
+        return cur.rowcount > 0
+
+    def remove_reminder(self, reminder_id: str) -> None:
+        """Delete a reminder from the table."""
+        with self._get_conn() as conn:
+            conn.execute(
+                "DELETE FROM reminders WHERE reminder_id = ?", (reminder_id,),
+            )
+            conn.commit()
+
+    # ── Cron execution log ─────────────────────────────────────
+
+    def log_cron_execution(
+        self,
+        job_id: str,
+        result: str,
+        status: str = "success",
+        tokens_used: int = 0,
+        duration_ms: int = 0,
+    ) -> None:
+        """Record a cron job execution result."""
+        with self._get_conn() as conn:
+            conn.execute(
+                """INSERT INTO cron_execution_log
+                   (job_id, result, status, tokens_used, duration_ms)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (job_id, result, status, tokens_used, duration_ms),
+            )
+            conn.commit()
+
+    def get_cron_execution_log(
+        self, job_id: str, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        """Get recent execution log entries for a cron job."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                """SELECT * FROM cron_execution_log
+                   WHERE job_id = ? ORDER BY executed_at DESC LIMIT ?""",
+                (job_id, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def increment_cron_failures(self, job_id: str, error: str) -> int:
+        """Increment consecutive failure count and record error. Returns new count."""
+        with self._get_conn() as conn:
+            conn.execute(
+                """UPDATE cron_jobs
+                   SET consecutive_failures = consecutive_failures + 1,
+                       last_error = ?
+                   WHERE job_id = ?""",
+                (error, job_id),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT consecutive_failures FROM cron_jobs WHERE job_id = ?",
+                (job_id,),
+            ).fetchone()
+        return row["consecutive_failures"] if row else 0
+
+    def reset_cron_failures(self, job_id: str) -> None:
+        """Reset consecutive failure count after successful execution."""
+        with self._get_conn() as conn:
+            conn.execute(
+                """UPDATE cron_jobs
+                   SET consecutive_failures = 0, last_error = NULL
+                   WHERE job_id = ?""",
+                (job_id,),
+            )
+            conn.commit()
+
+    # ── System events (background → agent) ───────────────────
+
+    def add_system_event(
+        self,
+        user_id: str,
+        source: str,
+        event_type: str,
+        payload: str,
+    ) -> int:
+        """Create a system event. Returns the event ID."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO system_events
+                   (user_id, source, event_type, payload)
+                   VALUES (?, ?, ?, ?)""",
+                (user_id, source, event_type, payload),
+            )
+            conn.commit()
+            return cur.lastrowid
+
+    def get_undelivered_events(
+        self, user_id: str, limit: int = 10
+    ) -> list[dict[str, Any]]:
+        """Get undelivered system events for a user."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                """SELECT * FROM system_events
+                   WHERE user_id = ? AND is_delivered = FALSE
+                   ORDER BY created_at ASC LIMIT ?""",
+                (user_id, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_events_delivered(self, event_ids: list[int]) -> None:
+        """Mark system events as delivered."""
+        if not event_ids:
+            return
+        placeholders = ",".join("?" for _ in event_ids)
+        with self._get_conn() as conn:
+            conn.execute(
+                f"UPDATE system_events SET is_delivered = TRUE WHERE id IN ({placeholders})",
+                event_ids,
+            )
+            conn.commit()
+
+    # ── Background tasks ─────────────────────────────────────
+
+    def create_background_task(
+        self, task_id: str, user_id: str, description: str,
+        parent_session: str | None = None, fallback_channel: str | None = None,
+    ) -> None:
+        """Record a new background task as running."""
+        with self._get_conn() as conn:
+            conn.execute(
+                """INSERT INTO background_tasks
+                   (task_id, user_id, task_description, parent_session, fallback_channel)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (task_id, user_id, description, parent_session, fallback_channel),
+            )
+            conn.commit()
+
+    def complete_background_task(self, task_id: str, result: str) -> None:
+        """Mark a background task as completed with result."""
+        with self._get_conn() as conn:
+            conn.execute(
+                """UPDATE background_tasks
+                   SET status = 'completed', result = ?,
+                       completed_at = CURRENT_TIMESTAMP
+                   WHERE task_id = ?""",
+                (result, task_id),
+            )
+            conn.commit()
+
+    def fail_background_task(self, task_id: str, error: str) -> None:
+        """Mark a background task as failed."""
+        with self._get_conn() as conn:
+            conn.execute(
+                """UPDATE background_tasks
+                   SET status = 'failed', error = ?,
+                       completed_at = CURRENT_TIMESTAMP
+                   WHERE task_id = ?""",
+                (error, task_id),
+            )
+            conn.commit()
+
+    def get_background_task(self, task_id: str) -> dict[str, Any] | None:
+        """Get a background task by ID."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM background_tasks WHERE task_id = ?", (task_id,),
+            ).fetchone()
+        return dict(row) if row else None
 
     # ════════════════════════════════════════════════════════════
     # COMBINED USER CONTEXT (for ContextBuilder)
@@ -796,11 +1022,70 @@ CREATE TABLE IF NOT EXISTS cron_jobs (
     channel TEXT DEFAULT 'api',
     enabled INTEGER DEFAULT 1,
     run_at TEXT,
+    agent_prompt TEXT,
+    agent_tools TEXT,
+    agent_model TEXT,
+    notify_condition TEXT DEFAULT 'always',
+    consecutive_failures INTEGER DEFAULT 0,
+    last_error TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
 
--- 11. API Keys
+-- 11. Cron execution log
+CREATE TABLE IF NOT EXISTS cron_execution_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL,
+    executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    result TEXT,
+    status TEXT DEFAULT 'success',
+    tokens_used INTEGER DEFAULT 0,
+    duration_ms INTEGER DEFAULT 0
+);
+
+-- 12. Reminders (standalone, no LLM)
+CREATE TABLE IF NOT EXISTS reminders (
+    reminder_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    message TEXT NOT NULL,
+    channel TEXT DEFAULT 'telegram',
+    run_at TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    retry_count INTEGER DEFAULT 0,
+    last_error TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    sent_at TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+);
+
+-- 13. System events (background → agent communication)
+CREATE TABLE IF NOT EXISTS system_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    source TEXT,
+    event_type TEXT,
+    payload TEXT,
+    is_delivered BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+);
+
+-- 14. Background tasks (subagent results)
+CREATE TABLE IF NOT EXISTS background_tasks (
+    task_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    parent_session TEXT,
+    fallback_channel TEXT,
+    task_description TEXT NOT NULL,
+    status TEXT DEFAULT 'running',
+    result TEXT,
+    error TEXT,
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+);
+
+-- 15. API Keys
 CREATE TABLE IF NOT EXISTS api_keys (
     key_id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,

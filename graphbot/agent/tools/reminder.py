@@ -27,9 +27,12 @@ def make_reminder_tools(scheduler: CronScheduler | None = None) -> list:
         Note: channel is auto-injected from session context, do not set manually.
         """
         try:
-            job = scheduler.add_reminder(user_id, channel, delay_seconds, message)
+            row = scheduler.add_reminder(user_id, channel, delay_seconds, message)
             minutes = delay_seconds // 60
-            return f"Reminder set: '{message}' in {minutes} minutes (id: {job.job_id})"
+            return (
+                f"Reminder set: '{message}' in {minutes} minutes "
+                f"(id: {row['reminder_id']})"
+            )
         except Exception as e:
             return f"Failed to create reminder: {e}"
 
@@ -41,15 +44,19 @@ def make_reminder_tools(scheduler: CronScheduler | None = None) -> list:
             return "No pending reminders."
         lines = []
         for r in reminders:
-            lines.append(f"- [{r['job_id']}] {r['run_at']} → {r['message'][:50]}")
+            lines.append(
+                f"- [{r['reminder_id']}] {r['run_at']} → {r['message'][:50]}"
+            )
         return "\n".join(lines)
 
     @tool
-    def cancel_reminder(job_id: str) -> str:
+    def cancel_reminder(reminder_id: str) -> str:
         """Cancel a pending reminder by its ID."""
         try:
-            scheduler.remove_job(job_id)
-            return f"Reminder {job_id} cancelled."
+            cancelled = scheduler.cancel_reminder(reminder_id)
+            if cancelled:
+                return f"Reminder {reminder_id} cancelled."
+            return f"Reminder {reminder_id} not found or already sent."
         except Exception as e:
             return f"Failed to cancel reminder: {e}"
 

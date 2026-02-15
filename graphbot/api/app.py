@@ -100,7 +100,7 @@ async def lifespan(app: FastAPI):
     # Background services (need runner)
     cron_scheduler = CronScheduler(db, runner, config=config)
     heartbeat = HeartbeatService(config, runner)
-    worker = SubagentWorker(runner)
+    worker = SubagentWorker(runner, db=db)
 
     # Now build tools with scheduler+worker, and rebuild graph
     from graphbot.agent.graph import create_graph
