@@ -6,14 +6,14 @@ Multi-channel support, long-term memory, background tasks, tool system, and an i
 
 ## What is this project for?
 
-GraphBot is designed to help you build a **production-ready personal/team assistant** that goes beyond plain chat:
+GraphBot is designed to help you build a **production-ready personal/team assistant** that can move beyond plain chat:
 
-- **Persistent memory** — conversation state, user notes, preferences, and activity stored in a local SQLite database (15 tables)
-- **Tool-augmented workflows** — files, shell, web search, reminders, cron jobs, background delegation
-- **Multi-channel access** — API, CLI, WebSocket, and Telegram from one core runtime
-- **Stateless agent, stateful data** — the LLM loop stays stateless; all operational truth lives in the database
+- Persist conversation state and user memory in a simple local database (SQLite)
+- Run tool-augmented workflows (files, shell, web, reminders, cron jobs, delegation)
+- Serve users through API, CLI, WebSocket, and messaging channels from one core runtime
+- Keep the agent loop stateless while maintaining durable operational history and tasks
 
-In short: a practical assistant platform you can run, extend, and operate without heavyweight infrastructure.
+In short: this project aims to be a practical assistant platform you can run, extend, and operate without heavyweight infrastructure.
 
 ## Quick Start
 
@@ -552,3 +552,4 @@ gbot run --reload                      # dev server with auto-reload
 ## License
 
 MIT — see [LICENSE](./LICENSE) for details.
+
