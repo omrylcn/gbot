@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from datetime import datetime, timedelta
@@ -12,6 +13,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from loguru import logger
 
+from graphbot.agent.tools.registry import build_background_tool_registry, resolve_tools
 from graphbot.core.cron.types import CronJob
 from graphbot.memory.store import MemoryStore
 
@@ -50,6 +52,10 @@ class CronScheduler:
         self._scheduler = AsyncIOScheduler(
             job_defaults={"coalesce": True, "max_instances": 1}
         )
+        if config:
+            self._registry = build_background_tool_registry(config, db)
+        else:
+            self._registry = {}
 
     async def start(self) -> None:
         """Load cron jobs and reminders from SQLite and start the scheduler."""
@@ -315,22 +321,27 @@ class CronScheduler:
         from graphbot.agent.light import LightAgent
 
         tools = self._parse_tools(job.agent_tools)
+        resolved_model = job.agent_model or self.config.assistant.model
         agent = LightAgent(
             config=self.config,
             prompt=job.agent_prompt,
             tools=tools,
-            model=job.agent_model,
+            model=resolved_model,
         )
         return await agent.run(job.message)
 
     def _parse_tools(self, agent_tools: str | None) -> list:
         """Parse JSON tool name list into actual tool objects.
 
-        Returns empty list if agent_tools is None or empty.
-        Tool filtering is a future enhancement — for now returns empty.
+        Returns empty list if agent_tools is None/empty or registry is empty.
         """
-        # TODO: resolve tool names to actual tool objects from a registry
-        return []
+        if not agent_tools or not self._registry:
+            return []
+        try:
+            names = json.loads(agent_tools) if isinstance(agent_tools, str) else agent_tools
+        except json.JSONDecodeError:
+            return []
+        return resolve_tools(self._registry, names)
 
     def _pause_job(self, job_id: str) -> None:
         """Pause a job after consecutive failures by disabling it."""

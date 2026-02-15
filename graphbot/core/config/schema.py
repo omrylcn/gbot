@@ -163,9 +163,17 @@ class HeartbeatConfig(BaseModel):
     interval_s: int = 1800
 
 
+class DelegationConfig(BaseModel):
+    """Config for the delegation planner LLM."""
+
+    model: str = ""  # empty → falls back to assistant.model
+    temperature: float = 0.3
+
+
 class BackgroundConfig(BaseModel):
     cron: CronConfig = Field(default_factory=CronConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    delegation: DelegationConfig = Field(default_factory=DelegationConfig)
 
 
 # Auth

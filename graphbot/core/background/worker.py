@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from graphbot.agent.tools.registry import build_background_tool_registry, resolve_tools
+
 if TYPE_CHECKING:
     from graphbot.core.config.schema import Config
     from graphbot.memory.store import MemoryStore
@@ -23,8 +25,8 @@ class SubagentWorker:
     """Manages background tasks spawned by the delegate tool.
 
     Uses LightAgent for isolated, cost-effective execution instead of
-    the full GraphRunner.  The main agent decides which tools and model
-    the subagent needs at delegation time.
+    the full GraphRunner.  The delegation planner (or caller) decides
+    which tools, prompt, and model the subagent needs.
 
     Results are persisted to background_tasks table and
     system_events are created for agent notification.
@@ -34,6 +36,7 @@ class SubagentWorker:
         self.config = config
         self.db = db
         self._tasks: dict[str, asyncio.Task] = {}
+        self._registry = build_background_tool_registry(config, db)
 
     def spawn(
         self,
@@ -41,6 +44,7 @@ class SubagentWorker:
         task: str,
         channel: str = "api",
         tools: list[str] | None = None,
+        prompt: str | None = None,
         model: str | None = None,
     ) -> str:
         """Spawn a background task. Returns task_id.
@@ -50,6 +54,8 @@ class SubagentWorker:
         tools : list[str], optional
             Tool names the subagent should have access to.
             None means default tools (web_search, web_fetch).
+        prompt : str, optional
+            System prompt for the subagent. None uses default.
         model : str, optional
             Model override.  None uses config default.
         """
@@ -59,7 +65,7 @@ class SubagentWorker:
             self.db.create_background_task(task_id, user_id, task)
 
         bg_task = asyncio.create_task(
-            self._run(task_id, user_id, task, channel, tools, model)
+            self._run(task_id, user_id, task, channel, tools, prompt, model)
         )
         self._tasks[task_id] = bg_task
         bg_task.add_done_callback(lambda _: self._tasks.pop(task_id, None))
@@ -73,18 +79,23 @@ class SubagentWorker:
         task: str,
         channel: str,
         tool_names: list[str] | None = None,
+        prompt: str | None = None,
         model: str | None = None,
     ) -> None:
         """Execute a background task via LightAgent (isolated, lightweight)."""
         try:
             from graphbot.agent.light import LightAgent
 
-            tools = self._resolve_tools(tool_names)
+            tools = resolve_tools(
+                self._registry, tool_names,
+                default=["web_search", "web_fetch"],
+            )
+            resolved_model = model or self.config.assistant.model
             agent = LightAgent(
                 config=self.config,
-                prompt=_DELEGATE_PROMPT,
+                prompt=prompt or _DELEGATE_PROMPT,
                 tools=tools,
-                model=model,
+                model=resolved_model,
             )
             response, tokens = await agent.run(task)
             logger.info(
@@ -116,39 +127,6 @@ class SubagentWorker:
             logger.error(f"Subagent {task_id} failed: {e}")
             if self.db:
                 self.db.fail_background_task(task_id, error=str(e))
-
-    def _resolve_tools(self, tool_names: list[str] | None) -> list:
-        """Resolve tool name strings to actual tool objects.
-
-        Default tools when none specified: web_search, web_fetch.
-        """
-        from graphbot.agent.tools.web import make_web_tools
-
-        if tool_names is None:
-            # Default: web tools for general research
-            return make_web_tools(self.config)
-
-        # Build a registry of available tools
-        available: dict = {}
-        for t in make_web_tools(self.config):
-            available[t.name] = t
-
-        if self.db:
-            from graphbot.agent.tools.memory_tools import make_memory_tools
-            from graphbot.agent.tools.search import make_search_tools
-
-            for t in make_memory_tools(self.db):
-                available[t.name] = t
-            for t in make_search_tools(self.config, self.db):
-                available[t.name] = t
-
-        resolved = []
-        for name in tool_names:
-            if name in available:
-                resolved.append(available[name])
-            else:
-                logger.warning(f"Tool '{name}' not found for subagent, skipping")
-        return resolved
 
     def get_running_count(self) -> int:
         """Number of currently running tasks."""

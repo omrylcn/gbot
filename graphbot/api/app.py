@@ -88,7 +88,12 @@ def _ensure_owner(config, db) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: init Config → MemoryStore → GraphRunner → Background Services. Shutdown: cleanup."""
+    from graphbot.agent.delegation import DelegationPlanner
     from graphbot.agent.tools import make_tools
+    from graphbot.agent.tools.registry import (
+        build_background_tool_registry,
+        get_tool_catalog,
+    )
 
     config = load_config()
     db = MemoryStore(str(config.db_path))
@@ -102,10 +107,15 @@ async def lifespan(app: FastAPI):
     heartbeat = HeartbeatService(config, runner)
     worker = SubagentWorker(config, db=db)
 
-    # Now build tools with scheduler+worker, and rebuild graph
+    # Delegation planner — plans subagent execution via LLM
+    bg_registry = build_background_tool_registry(config, db)
+    tool_catalog = get_tool_catalog(bg_registry)
+    planner = DelegationPlanner(config, tool_catalog)
+
+    # Now build tools with scheduler+worker+planner, and rebuild graph
     from graphbot.agent.graph import create_graph
 
-    tools = make_tools(config, db, scheduler=cron_scheduler, worker=worker)
+    tools = make_tools(config, db, scheduler=cron_scheduler, worker=worker, planner=planner)
     runner.tools = tools
     runner._graph = create_graph(config, db, tools)
 

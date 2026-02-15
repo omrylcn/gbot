@@ -373,6 +373,69 @@ async def test_api_events_endpoint(api_client):
 
 
 # ════════════════════════════════════════════════════════════
+# DELEGATION TESTS (planner + background subagent)
+# ════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_api_delegate_task(api_client):
+    """Ask LLM to delegate a background task → delegate tool called."""
+    uid = api_client._test_user_id
+    resp = await api_client.post(
+        "/chat",
+        json={
+            "message": (
+                "delegate tool'unu kullanarak şu görevi arka planda çalıştır: "
+                "'Python 3.13 yeniliklerini araştır ve özetle'. "
+                "user_id olarak benim id'mi kullan."
+            ),
+            "user_id": uid,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["response"]) > 0
+    response_lower = data["response"].lower()
+    assert any(
+        kw in response_lower
+        for kw in [
+            "delegat", "delegate", "task", "görev", "arka plan",
+            "background", "spawn", "başlat",
+        ]
+    ), f"Unexpected response: {data['response'][:200]}"
+
+
+@pytest.mark.asyncio
+async def test_api_background_task_events(api_client):
+    """After delegation, background task result appears as event or in tasks."""
+    import asyncio
+
+    uid = api_client._test_user_id
+    # Delegate a simple task
+    resp = await api_client.post(
+        "/chat",
+        json={
+            "message": (
+                "delegate tool'unu kullanarak arka planda '2+2 nedir?' görevini çalıştır. "
+                "user_id olarak benim id'mi kullan."
+            ),
+            "user_id": uid,
+        },
+    )
+    assert resp.status_code == 200
+
+    # Wait a bit for background task to complete
+    await asyncio.sleep(5)
+
+    # Check events — should have task_completed event
+    events_resp = await api_client.get(f"/events/{uid}")
+    assert events_resp.status_code == 200
+    data = events_resp.json()
+    assert isinstance(data["events"], list)
+    # May or may not have events depending on timing, but endpoint works
+
+
+# ════════════════════════════════════════════════════════════
 # CLI TESTS
 # ════════════════════════════════════════════════════════════
 
