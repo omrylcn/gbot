@@ -41,3 +41,14 @@ uv.lock
 reference files/
 ui/
 gbot/
+
+# Internal docs (not for public)
+CLAUDE.md
+todo.md
+mimari_kararlar.md
+howtowork-development-plan.md
+development-plan2.md
+development-guide.md
+background_task_analiz.md
+ascibot_poc_guide.md
+workspace.ipynb

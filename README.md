@@ -1,376 +1,336 @@
 # GraphBot
 
-LangGraph tabanli, genisletilebilir AI asistan framework'u.
+Extensible AI assistant framework built on LangGraph.
 
-nanobot'un multi-channel altyapisi + ascibot'un structured memory'si + LangGraph agent orchestration.
+Multi-channel support, long-term memory, background tasks, tool system, and an interactive CLI — all backed by SQLite as the single source of truth.
 
-## Mimari
+## Quick Start
 
-![architecture](images/architecture.png)
-
-
-**Temel prensipler:**
-- **LangGraph** = stateless executor — checkpoint kullanilmiyor
-- **SQLite** = source of truth — session, memory, user data (10 tablo)
-- **GraphRunner** = orkestrator — SQLite ↔ LangGraph koprusu (request-scoped)
-- **LiteLLM** = multi-provider LLM — OpenAI, Anthropic, DeepSeek, Groq, Gemini, OpenRouter
-
-## Ozellikler
-
-| Ozellik | Aciklama |
-|---------|----------|
-| Multi-provider LLM | LiteLLM ile 6+ provider destegi |
-| Coklu kanal | Telegram (aktif), Discord/WhatsApp/Feishu (stub) |
-| Kullanici yonetimi | Owner-based erisim, CLI ile user/channel yonetimi |
-| Uzun sureli hafiza | SQLite: notlar, tercihler, favoriler, aktiviteler |
-| Session yonetimi | Token-limit bazli, otomatik ozet ile gecis |
-| 9 tool grubu | Hafiza, dosya, shell, web, RAG, cron, reminder, delegate |
-| Skill sistemi | Markdown-based, workspace override, always-on destegi |
-| Zamanlanmis gorevler | Cron + one-shot reminder + heartbeat |
-| Background worker | Async subagent spawn (delegate tool) |
-| RAG | FAISS + sentence-transformers (opsiyonel) |
-| WebSocket | Gercek zamanli chat |
-| Interactive CLI | `gbot` — Rich REPL, slash commands, autocomplete, admin paneli |
-| Admin API | Server status, config, skills, users, cron yonetimi |
-
-## Hizli Baslangic
-
-### 1. Kurulum
+### 1. Install
 
 ```bash
-uv sync --extra dev                    # gelistirme
-uv sync --extra dev --extra rag        # + RAG (FAISS, sentence-transformers)
+uv sync --extra dev
 ```
 
-### 2. Konfigurasyon
+### 2. Configure
 
-`config.yaml`:
+Copy and edit the config file:
+
 ```yaml
+# config.yaml
 assistant:
   name: "GraphBot"
   owner:
     username: "ali"
     name: "Ali"
-  model: "openai/gpt-4o-mini"      # veya anthropic/claude-sonnet-4-5-20250929
+  model: "openai/gpt-4o-mini"
 
 providers:
   openai:
-    api_key: "sk-..."              # veya .env'den
+    api_key: "sk-..."     # or set via .env
 ```
 
-Veya `.env` dosyasi:
+Or use environment variables (`.env`):
 ```
 GRAPHBOT_PROVIDERS__OPENAI__API_KEY=sk-...
 ```
 
-### 3. Baslatma
+### 3. Run
 
 ```bash
-gbot run                             # API server (varsayilan :8000)
-gbot run --port 3000 --reload        # farkli port + auto-reload
+gbot run                    # start API server on :8000
+gbot                        # open interactive REPL
 ```
 
-### 4. Kullanim
+That's it. The REPL connects to the API server automatically.
+
+---
+
+## Architecture
+
+![architecture](images/architecture.png)
+
+**Core design decisions:**
+
+| Principle | Description |
+|-----------|-------------|
+| **LangGraph = stateless** | No checkpoint — used purely as an execution engine |
+| **SQLite = source of truth** | 15 tables for sessions, memory, users, tasks, events |
+| **GraphRunner = orchestrator** | Request-scoped bridge between SQLite and LangGraph |
+| **LiteLLM = multi-provider** | OpenAI, Anthropic, DeepSeek, Groq, Gemini, OpenRouter |
+
+The agent graph has 4 nodes: `load_context` → `reason` ⇄ `execute_tools` → `respond`
+
+---
+
+## Features
+
+| Feature | Description |
+|---------|-------------|
+| Multi-provider LLM | 6+ providers via LiteLLM |
+| Multi-channel | Telegram (active), Discord/WhatsApp/Feishu (stub) |
+| Long-term memory | Notes, preferences, favorites, activity logs in SQLite |
+| Session management | Token-limit based with automatic LLM summary on transition |
+| 9 tool groups | Memory, filesystem, shell, web search, RAG, cron, reminder, delegate |
+| Skill system | Markdown-based, workspace override, always-on support |
+| Background tasks | Cron scheduler, one-shot reminders, heartbeat, async subagents |
+| Interactive CLI | `gbot` — Rich REPL with slash commands and autocomplete |
+| Admin API | Server status, config, skills, users, cron management |
+| RAG | Optional FAISS + sentence-transformers semantic search |
+| WebSocket | Real-time chat support |
+| Docker | Single-command deployment with docker-compose |
+
+---
+
+## Usage
+
+### CLI Commands
 
 ```bash
-# Interactive REPL (varsayilan)
-gbot                                 # direkt REPL acar
-gbot chat                            # ayni sey
-
-# Tek mesaj
-gbot chat -m "merhaba"               # API uzerinden tek mesaj
-gbot chat --local -m "merhaba"       # Lokal mod (API'siz)
-
-# REPL icinde slash commands
-# /help, /status, /session, /history, /config, /skill, /cron, /user, /events
-
-# REST API
-curl http://localhost:8000/health
-curl -X POST http://localhost:8000/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "merhaba"}'
-
-# WebSocket
-wscat -c ws://localhost:8000/ws/chat
-```
-
-### 5. Login (API Auth aktifse)
-
-```bash
-gbot login ali -s http://localhost:8000    # password prompt ile
-gbot                                        # otomatik token kullanir
-gbot logout                                 # credential temizle
-```
-
-### 6. Telegram Bot
-
-Her kullanici kendi Telegram bot'unu olusturur, token `user_channels` tablosunda saklanir.
-
-```bash
-# 1. @BotFather'dan bot olustur ve token al
-
-# 2. config.yaml'da telegram'i aktif et:
-#      channels:
-#        telegram:
-#          enabled: true
-
-# 3. Kullanici ekle ve bot token'i bagla
-gbot user add ali --name "Ali" --telegram "123456:ABC_TOKEN"
-
-# 4. Public URL olustur
-ngrok http 8000
-
-# 5. Webhook kaydet (path'te user_id var)
-curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://xxxx.ngrok-free.app/webhooks/telegram/ali"
-
-# 6. Server'i baslat ve Telegram'dan yaz
-gbot run
-```
-
-## Proje Yapisi
-
-```
-graphbot/                              # Ana framework paketi
-├── agent/
-│   ├── context.py                     # ContextBuilder (6 katman system prompt)
-│   ├── graph.py                       # StateGraph compile
-│   ├── nodes.py                       # 4 node: load_context, reason, execute_tools, respond
-│   ├── runner.py                      # GraphRunner orkestrator
-│   ├── light.py                       # LightAgent — hafif background agent
-│   ├── state.py                       # AgentState(MessagesState)
-│   ├── skills/
-│   │   ├── loader.py                  # SkillLoader (builtin + workspace)
-│   │   └── builtin/                   # summarize, weather
-│   └── tools/
-│       ├── memory_tools.py            # save_note, get_context, favorites, activities
-│       ├── filesystem.py              # read/write/edit/list_dir
-│       ├── shell.py                   # exec_command (guvenlik filtreleri ile)
-│       ├── web.py                     # web_search (Brave), web_fetch
-│       ├── search.py                  # RAG: search_items, get_item_detail
-│       ├── cron_tool.py               # add/list/remove cron jobs
-│       ├── reminder.py                # create/list/cancel reminder
-│       └── delegate.py                # spawn background subagent
-├── api/
-│   ├── app.py                         # create_app(), lifespan (DB, scheduler, worker)
-│   ├── routes.py                      # /chat, /health, /sessions, /user/context
-│   ├── admin.py                       # /admin/* endpoint'leri (owner-only)
-│   ├── auth.py                        # /auth/register, /auth/login
-│   ├── ws.py                          # WebSocket /ws/chat
-│   └── deps.py                        # FastAPI dependency injection
-├── core/
-│   ├── config/
-│   │   ├── schema.py                  # Config(BaseSettings) + nested models
-│   │   └── loader.py                  # YAML → Config
-│   ├── providers/
-│   │   └── litellm.py                 # LiteLLM → AIMessage wrapper
-│   ├── channels/
-│   │   ├── base.py                    # resolve_user, allowlist, owner mode
-│   │   └── telegram.py                # Webhook handler + send_message + md→html
-│   ├── cron/
-│   │   ├── scheduler.py               # APScheduler cron + one-shot
-│   │   └── types.py                   # CronJob model
-│   └── background/
-│       ├── heartbeat.py               # Periyodik wake-up servisi
-│       └── worker.py                  # Async subagent worker
-├── memory/
-│   ├── store.py                       # MemoryStore — SQLite 15 tablo, 60+ metod
-│   └── models.py                      # Pydantic: ChatRequest, ChatResponse, Item, ...
-└── rag/
-    ├── retriever.py                   # FAISS search + format
-    └── indexer.py                     # JSON → FAISS index
-
-gbot_cli/                              # CLI paketi (ayri modul)
-├── __init__.py
-├── commands.py                        # Typer CLI (run, chat, login, logout, status, user, cron)
-├── client.py                          # GraphBotClient — sync httpx API wrapper
-├── credentials.py                     # Token saklama (~/.graphbot/credentials.json)
-├── repl.py                            # Interactive REPL — logo, autocomplete, Rich markdown
-├── slash_commands.py                  # SlashCommandRouter — /help, /status, /session, ...
-└── output.py                          # Rich tablo/panel formatters
-```
-
-## CLI Komutlari
-
-```bash
-gbot --version                           # Versiyon
-gbot                                     # Interactive REPL (varsayilan)
-
+gbot                                     # interactive REPL (default)
 gbot run [--port 8000] [--reload]        # API server
-gbot chat [-m "mesaj"] [--session sid]   # Terminal chat (API-backed)
-gbot chat --local -m "merhaba"           # Lokal mod (API'siz)
+gbot chat -m "hello"                     # single message via API
+gbot chat --local -m "hello"             # local mode (no server needed)
+gbot status                              # system info
+gbot --version                           # version
+```
 
-gbot login ali -s http://localhost:8000  # API'ye login, token sakla
-gbot logout                              # Credential temizle
+User management:
+```bash
+gbot user add ali --name "Ali" --password "pass123" --telegram "BOT_TOKEN"
+gbot user list
+gbot user remove ali
+gbot user set-password ali newpass
+gbot user link ali telegram 12345
+```
 
-gbot status                              # Sistem durumu
+Credentials:
+```bash
+gbot login ali -s http://localhost:8000  # saves token to ~/.graphbot/
+gbot logout
+```
 
-gbot user add ali --name "Ali" --telegram "TOKEN"  # Kullanici ekle
-gbot user list                           # Tum kullanicilar
-gbot user remove ali                     # Kullanici sil
-gbot user link ali telegram 555          # Kanal bagla
-gbot user set-password ali newsifre      # Sifre degistir
-
-gbot cron list                           # Zamanlanmis gorevler
-gbot cron remove <job_id>               # Gorev sil
+Cron jobs:
+```bash
+gbot cron list
+gbot cron remove <job_id>
 ```
 
 ### REPL Slash Commands
 
-REPL icinde `/` yazarak autocomplete ile komut secebilirsiniz:
+Type `/` inside the REPL for autocomplete:
 
-| Komut | Aciklama |
-|-------|----------|
-| `/help` | Komut listesi |
-| `/status` | Server durumu |
-| `/session info\|new\|list\|end` | Session yonetimi |
-| `/history [n]` | Son n mesaj |
-| `/context` | Kullanici context'i |
-| `/model` | Aktif model |
-| `/config` | Server konfigurasyonu |
-| `/skill` | Skill listesi |
-| `/cron list\|remove <id>` | Cron yonetimi |
-| `/user` | Kullanici listesi |
-| `/events` | Bekleyen event'ler |
-| `/clear` | Ekran temizle |
-| `/exit` | Cikis |
+| Command | Description |
+|---------|-------------|
+| `/help` | Command list |
+| `/status` | Server status |
+| `/session info\|new\|list\|end` | Session management |
+| `/history [n]` | Last n messages |
+| `/context` | User context |
+| `/model` | Active model |
+| `/config` | Server configuration |
+| `/skill` | Skill list |
+| `/cron list\|remove <id>` | Cron management |
+| `/user` | User list |
+| `/events` | Pending events |
+| `/clear` | Clear screen |
+| `/exit` | Exit |
 
-## API Endpoints
+### REST API
 
-| Metod | Yol | Aciklama |
-|-------|-----|----------|
-| POST | `/chat` | Mesaj gonder, yanit al |
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/chat` | Send message, get response |
 | GET | `/health` | Health check |
-| GET | `/sessions/{user_id}` | Kullanicinin session'lari |
-| GET | `/session/{sid}/history` | Session mesaj gecmisi |
-| POST | `/session/{sid}/end` | Session'i kapat |
-| GET | `/user/{user_id}/context` | Kullanici context'i |
-| POST | `/auth/register` | Kullanici kayit |
-| POST | `/auth/login` | Giris |
-| GET | `/auth/user/{user_id}` | Profil |
+| GET | `/sessions/{user_id}` | User's sessions |
+| GET | `/session/{sid}/history` | Session message history |
+| POST | `/session/{sid}/end` | End session |
+| GET | `/user/{user_id}/context` | User context |
+| POST | `/auth/register` | Register (owner-only) |
+| POST | `/auth/login` | Login |
 | WS | `/ws/chat` | WebSocket chat |
 | POST | `/webhooks/telegram/{user_id}` | Telegram webhook |
 
 ### Admin Endpoints (owner-only)
 
-| Metod | Yol | Aciklama |
-|-------|-----|----------|
-| GET | `/admin/status` | Server durumu (version, model, user/session sayisi) |
-| GET | `/admin/config` | Sanitized konfigurasyon |
-| GET | `/admin/skills` | Skill listesi |
-| GET | `/admin/users` | Kullanici listesi |
-| GET | `/admin/crons` | Cron job listesi |
-| DELETE | `/admin/crons/{job_id}` | Cron job sil |
-| GET | `/admin/logs` | Activity log'lari |
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/admin/status` | Server status |
+| GET | `/admin/config` | Sanitized configuration |
+| GET | `/admin/skills` | Skill list |
+| GET | `/admin/users` | User list |
+| GET | `/admin/crons` | Cron job list |
+| DELETE | `/admin/crons/{job_id}` | Delete cron job |
+| GET | `/admin/logs` | Activity logs |
 
-## Auth & Token Yonetimi
+### Tool Usage (via Chat)
 
-GraphBot iki modda calisir:
+Tools are invoked with natural language — the LLM picks the right one:
 
-### Auth Kapali (varsayilan)
+```
+"Save this note: meeting tomorrow"                   → save_user_note
+"Set a reminder in 5 minutes: take medicine"          → create_reminder
+"Check the weather every morning at 9"                → add_cron_job
+"Alert me if gold goes above $2000"                   → create_alert
+"Do this in the background: research topic X"         → delegate
+```
 
-`jwt_secret_key` bos ise auth kapalidir. Tum endpoint'ler aciktir, `user_id` body'de gonderilir:
+---
+
+## Configuration
+
+Priority order: `.env` > environment variables > `config.yaml` > defaults
+
+```bash
+# .env uses GRAPHBOT_ prefix with __ separator
+GRAPHBOT_ASSISTANT__MODEL=openai/gpt-4o-mini
+GRAPHBOT_PROVIDERS__OPENAI__API_KEY=sk-...
+GRAPHBOT_BACKGROUND__CRON__ENABLED=true
+```
+
+Full config reference: [`config.yaml`](./config.yaml)
+
+### Authentication
+
+GraphBot runs in two modes:
+
+#### Auth Disabled (default)
+
+The `auth.jwt_secret_key` field in `config.yaml` controls authentication. By default it is empty (`""`), which means auth is disabled — all endpoints are open and `user_id` is passed in the request body:
+
+```yaml
+# config.yaml (default)
+auth:
+  jwt_secret_key: ""    # empty = auth disabled
+```
 
 ```bash
 curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
-  -d '{"message": "Merhaba", "user_id": "ali"}'
+  -d '{"message": "hello", "user_id": "ali"}'
 ```
 
-### Auth Aktif
+#### Auth Enabled
 
-Auth'u aktif etmek icin `.env` veya `config.yaml`'da JWT secret tanimlayin:
-
-```bash
-# .env
-GRAPHBOT_AUTH__JWT_SECRET_KEY=super-secret-key-min-32-karakter-olmali
-```
+Set `jwt_secret_key` to a 32+ character secret to enable JWT authentication:
 
 ```yaml
 # config.yaml
 auth:
-  jwt_secret_key: "super-secret-key-min-32-karakter-olmali"
-  access_token_expire_minutes: 1440   # 24 saat (varsayilan)
+  jwt_secret_key: "your-secret-key-at-least-32-characters"
+  access_token_expire_minutes: 1440   # 24 hours (default)
 ```
 
-#### Adim 1: Kullanici Olustur (CLI)
-
+Or via `.env`:
 ```bash
-gbot user add ali --name "Ali" --password "sifre123"
+GRAPHBOT_AUTH__JWT_SECRET_KEY=your-secret-key-at-least-32-characters
 ```
 
-#### Adim 2: CLI Login
+| State | `auth.jwt_secret_key` | Access |
+|-------|----------------------|--------|
+| Auth disabled | `""` (empty, default) | Open — `user_id` in request body |
+| Auth enabled | `"your-secret..."` | JWT token or API key required |
+
+#### User Management
+
+Users are managed via the `gbot` CLI, which writes directly to the SQLite database. This is the **primary way** to create users — no running server or authentication needed:
 
 ```bash
-gbot login ali                         # password prompt
-# veya API ile:
+# Create user with password
+gbot user add ali --name "Ali" --password "pass123"
+
+# Create user + link Telegram bot in one command
+gbot user add ali --name "Ali" --password "pass123" --telegram "BOT_TOKEN"
+
+# Change password
+gbot user set-password ali newpass
+
+# Link a channel to an existing user
+gbot user link ali telegram 12345
+
+# List all users
+gbot user list
+
+# Remove user
+gbot user remove ali
+```
+
+> **Important:** When auth is enabled, users must exist in the database before they can login. The `owner` defined in `config.yaml` is auto-created at server startup, but all other users must be added via CLI first.
+
+#### Login & Token Flow
+
+Once a user exists, they can authenticate:
+
+**CLI login** — saves token to `~/.graphbot/credentials.json`:
+
+```bash
+gbot login ali -s http://localhost:8000   # prompts for password
+gbot                                       # uses saved token automatically
+gbot logout                                # clears saved credentials
+```
+
+**API login:**
+
+```bash
 curl -X POST http://localhost:8000/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"user_id": "ali", "password": "sifre123"}'
+  -d '{"user_id": "ali", "password": "pass123"}'
+# → {"success": true, "token": "eyJhbG...", "user_id": "ali"}
 ```
 
-Yanit:
-```json
-{
-  "success": true,
-  "token": "eyJhbGciOiJIUzI1NiIs...",
-  "user_id": "ali"
-}
-```
-
-#### Adim 3: Token ile Istek
+**Using the token:**
 
 ```bash
-TOKEN="eyJhbGciOiJIUzI1NiIs..."
+TOKEN="eyJhbG..."
 
-# Chat
 curl -X POST http://localhost:8000/chat \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"message": "Merhaba"}'
-
-# Session gecmisi
-curl -H "Authorization: Bearer $TOKEN" \
-  http://localhost:8000/sessions/ali
-
-# User context
-curl -H "Authorization: Bearer $TOKEN" \
-  http://localhost:8000/user/ali/context
+  -d '{"message": "hello"}'
 ```
 
-#### API Key (Alternatif)
+#### API Keys (Alternative)
 
-Token yerine kalici API key de kullanilabilir:
+For persistent access without token refresh, create an API key:
 
 ```bash
-# API key olustur (token ile)
+# Create (requires token auth)
 curl -X POST http://localhost:8000/auth/api-keys \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"name": "my-key"}'
 # → {"key": "abc123...", "key_id": "..."}
 
-# API key ile istek
+# Use via header
 curl -X POST http://localhost:8000/chat \
   -H "X-API-Key: abc123..." \
   -H "Content-Type: application/json" \
-  -d '{"message": "Merhaba"}'
+  -d '{"message": "hello"}'
 ```
 
-#### Register (API uzerinden)
+#### Adding Users: CLI vs API
 
-Auth aktifken yeni kullanici kaydi sadece **owner** yapabilir:
+There are two ways to add users:
+
+| Method | When to use | Auth needed? |
+|--------|-------------|-------------|
+| `gbot user add` (CLI) | Initial setup, server admin tasks | No — direct DB access |
+| `POST /auth/register` (API) | Remote user creation by owner | Yes — owner token required |
 
 ```bash
-# Owner token'i ile register
+# CLI — works anytime, no server needed
+gbot user add veli --name "Veli" --password "pass456"
+
+# API — only owner can register, requires running server + auth
 curl -X POST http://localhost:8000/auth/register \
   -H "Authorization: Bearer $OWNER_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"user_id": "veli", "name": "Veli", "password": "sifre456"}'
+  -d '{"user_id": "veli", "name": "Veli", "password": "pass456"}'
 ```
 
 #### Rate Limiting
 
-Varsayilan: 60 istek/dakika. Ayarlamak icin:
+Default: 60 requests/minute. Configure in `config.yaml`:
 
 ```yaml
 auth:
@@ -379,222 +339,205 @@ auth:
     requests_per_minute: 120
 ```
 
-### Ozet
+### Tool System
 
-| Durum | jwt_secret_key | Erisim |
-|-------|----------------|--------|
-| Auth kapali | `""` (bos) | Herkese acik, `user_id` body'de |
-| Auth aktif | `"secret..."` | JWT token veya API key gerekli |
+9 tool groups, enabled via `tools: ["*"]` in config:
 
----
-
-## Kullanici Yonetimi
-
-GraphBot **owner-based** erisim kontrolu kullanir:
-
-```yaml
-# config.yaml
-assistant:
-  owner:
-    username: "ali"     # Varsayilan kullanici
-    name: "Ali"
-```
-
-- **Owner** tanimlanirsa: sadece DB'de kayitli kullanicilar erisebilir (owner startup'ta otomatik olusturulur)
-- **Owner** tanimlanmazsa: legacy mod — `allow_from` listesi + otomatik kullanici olusturma
-
-Kullanici ekleme:
-```bash
-gbot user add veli --name "Veli" --password "sifre123" --telegram "BOT_TOKEN"
-```
-
-## Tool Sistemi
-
-9 tool grubu, `config.yaml`'da `tools: ["*"]` ile hepsi aktif:
-
-| Grup | Toollar | Aciklama |
-|------|---------|----------|
-| Memory | save_user_note, get_user_context, log_activity, get_recent_activities, add/get/remove_favorite | Kullanici hafizasi |
-| Filesystem | read_file, write_file, edit_file, list_dir | Workspace dosya islemleri |
-| Shell | exec_command | Guvenli shell (rm -rf, format vb. engelli) |
-| Web | web_search, web_fetch | Brave Search + sayfa cekme |
-| RAG | search_items, get_item_detail | Semantik arama (FAISS) |
-| Cron | add/list/remove_cron_job, create_alert | Tekrarlanan gorevler + NOTIFY/SKIP alert |
-| Reminder | create/list/cancel_reminder | Tek seferlik hatirlatma |
+| Group | Tools | Description |
+|-------|-------|-------------|
+| Memory | save_user_note, get_user_context, log_activity, favorites | User memory |
+| Filesystem | read_file, write_file, edit_file, list_dir | Workspace files |
+| Shell | exec_command | Safe shell (destructive commands blocked) |
+| Web | web_search, web_fetch | Brave Search + page fetch |
+| RAG | search_items, get_item_detail | Semantic search (FAISS) |
+| Cron | add/list/remove_cron_job, create_alert | Recurring tasks + NOTIFY/SKIP |
+| Reminder | create/list/cancel_reminder | One-shot delayed messages |
 | Delegate | delegate | Background subagent spawn |
 
-### Tool Kullanim Ornekleri (Chat Uzerinden)
+### Skill System
 
-Tool'lari dogal dille kullanirsiniz — LLM uygun tool'u otomatik secer:
+Markdown-based skills in `workspace/skills/` (override built-in ones):
 
-```
-"Su notu kaydet: yarin toplanti var"              → save_user_note
-"Notlarimi listele"                                → get_user_context
-"5 dakika sonra hatirlatma kur: ilac ic"           → create_reminder
-"Her sabah 9'da hava durumu kontrol et"            → add_cron_job
-"Altin 2000$ ustuyse bildir seklinde alert kur"    → create_alert (NOTIFY/SKIP)
-"Su gorevi arka planda yap: X konusunu arastir"    → delegate (subagent)
-"Hatirlatmalarimi listele"                         → list_reminders
-"Cron job'larimi goster"                           → list_cron_jobs
-```
-
-## Skill Sistemi
-
-Markdown-based, genisletilebilir beceri sistemi:
-
-```
-workspace/skills/         # Kullanici skill'leri (oncelikli)
-graphbot/agent/skills/builtin/  # Yerlesik skill'ler
-```
-
-Her skill bir `SKILL.md` dosyasi:
 ```markdown
 ---
 name: weather
-description: Hava durumu sorgula
+description: Query weather information
 always: false
 metadata:
   requires:
     bins: [curl]
 ---
 # Weather Skill
-...talimatlar...
+...instructions...
 ```
 
-- `always: true` → her zaman system prompt'a dahil
-- Workspace skill'leri builtin'leri override eder
-- `requirements` kontrolu: gerekli binary/env var eksikse skill devre disi
+- `always: true` → always included in system prompt
+- Requirements check: skill disabled if binary/env var is missing
 
-## Background Servisler
+### Background Services
 
-| Servis | Aciklama | Config |
-|--------|----------|--------|
-| CronScheduler | APScheduler ile cron + date trigger'lar | `background.cron.enabled` |
-| LightAgent | Hafif, izole agent — cron alert'leri icin (NOTIFY/SKIP) | Cron job'da `agent_prompt` set edilince |
-| Reminder | Tek seferlik geciktirilmis mesajlar (LLM yok, direkt gonderim) | CronScheduler uzerinden |
-| Heartbeat | Periyodik uyandirma, HEARTBEAT.md okur | `background.heartbeat.enabled/interval_s` |
-| SubagentWorker | Async background task spawn + DB persistence + system_event | Otomatik |
+| Service | Description |
+|---------|-------------|
+| CronScheduler | APScheduler with cron expressions |
+| LightAgent | Lightweight isolated agent for cron alerts (NOTIFY/SKIP) |
+| Reminder | One-shot delayed messages (no LLM, direct delivery) |
+| Heartbeat | Periodic wake-up, reads HEARTBEAT.md |
+| SubagentWorker | Async background task spawn with DB persistence |
 
-### Akis: delegate → SubagentWorker → Bildirim
-
+**Delegate flow:**
 ```
-User: "Su gorevi arka planda yap: ..."
-  → LLM delegate tool cagirir
-  → SubagentWorker.spawn() → background_tasks tablosuna yazar
-  → Arka planda runner.process() calisir
-  → Tamamlaninca: background_tasks = completed + system_events olusur
-  → User sonraki mesaj gonderdiginde: ContextBuilder event'i prompt'a inject eder
-  → LLM: "Arka plandaki gorev tamamlandi: ..."
+User: "Do this in the background: ..."
+  → delegate tool → SubagentWorker → background_tasks table
+  → On completion: system_event created
+  → Next user message: ContextBuilder injects result into prompt
 ```
 
-## Konfigurasyon
-
-Oncelik sirasi: `.env` > ortam degiskenleri > `config.yaml` > varsayilanlar
-
-```bash
-# .env (GRAPHBOT_ prefix, __ ayirici)
-GRAPHBOT_ASSISTANT__MODEL=openai/gpt-4o-mini
-GRAPHBOT_PROVIDERS__OPENAI__API_KEY=sk-...
-GRAPHBOT_BACKGROUND__CRON__ENABLED=true
-```
-
-Tam config yapisi icin: [`config.yaml`](./config.yaml)
-
-## Workspace
-
-`workspace/` dizini bot'un calisma alani:
-
-```
-workspace/
-├── AGENT.md              # Bot kimligi (system prompt)
-├── HEARTBEAT.md          # Heartbeat talimatlari (opsiyonel)
-└── skills/               # Kullanici skill'leri (opsiyonel)
-```
-
-`AGENT.md` bot'un kimligini tanimlar — system prompt olarak kullanilir.
-`config.yaml`'daki `system_prompt` daha yuksek onceliklidir.
-
-## RAG (Opsiyonel)
-
-```yaml
-# config.yaml
-rag:
-  embedding_model: "intfloat/multilingual-e5-small"
-  data_source: "./data/items.json"
-  index_path: "./data/faiss_index"
-  text_template: "{title}. {description}. Kategori: {category}."
-  id_field: "id"
-```
+### RAG (Optional)
 
 ```bash
 uv sync --extra rag   # FAISS + sentence-transformers
 ```
 
-Aktif edildiginde `search_items` ve `get_item_detail` tool'lari otomatik eklenir.
+```yaml
+rag:
+  embedding_model: "intfloat/multilingual-e5-small"
+  data_source: "./data/items.json"
+  index_path: "./data/faiss_index"
+```
+
+When enabled, `search_items` and `get_item_detail` tools are automatically added.
+
+### Telegram Bot
+
+Each user creates their own Telegram bot; the token is stored in the `user_channels` table.
+
+```bash
+# 1. Create a bot via @BotFather and get the token
+# 2. Enable telegram in config.yaml (channels.telegram.enabled: true)
+# 3. Add user and link the bot token
+gbot user add ali --name "Ali" --telegram "123456:ABC_TOKEN"
+# 4. Create a public URL (e.g. ngrok http 8000)
+# 5. Register webhook
+curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://xxxx.ngrok-free.app/webhooks/telegram/ali"
+# 6. Start the server
+gbot run
+```
+
+---
 
 ## Docker
 
 ```bash
-docker compose up -d                   # Container baslat
-docker compose logs -f                 # Log izle
-docker compose down                    # Durdur
+docker compose up -d         # start
+docker compose logs -f       # follow logs
+docker compose down          # stop
 ```
 
-`docker-compose.yml` named volume'lar (`graphbot_data`, `graphbot_workspace`) kullanir, `config.yaml` read-only bind mount ile baglanir.
+Uses named volumes (`graphbot_data`, `graphbot_workspace`) and `config.yaml` as read-only bind mount.
 
-## SQLite Tablolari (15)
+---
 
-| Tablo | Amac |
-|-------|------|
-| `users` | Kullanici kayitlari |
-| `user_channels` | Kanal baglantilari (telegram, discord, ...) |
-| `sessions` | Konusma session'lari (token takibi) |
-| `messages` | Chat mesajlari |
-| `agent_memory` | Key-value uzun sureli hafiza |
-| `user_notes` | Kullanici hakkinda ogrenilen bilgiler |
-| `activity_logs` | Aktivite kayitlari |
-| `favorites` | Favoriler |
-| `preferences` | Tercihler (JSON) |
-| `cron_jobs` | Zamanlanmis gorevler (+ agent_prompt, notify_condition) |
-| `cron_execution_log` | Cron calisma gecmisi (result, status, duration_ms) |
-| `reminders` | Tek seferlik hatirlatmalar (status: pending/sent/failed) |
-| `system_events` | Background → agent bildirim kuyrugu |
-| `background_tasks` | Subagent gorev kayitlari (status, result) |
-| `api_keys` | API key yonetimi (hash, expiry) |
+## Project Structure
 
-## Gelistirme
+```
+graphbot/                          # Core framework
+├── agent/
+│   ├── context.py                 # ContextBuilder (6-layer system prompt)
+│   ├── graph.py                   # StateGraph compile
+│   ├── nodes.py                   # 4 nodes: load_context, reason, execute_tools, respond
+│   ├── runner.py                  # GraphRunner orchestrator
+│   ├── light.py                   # LightAgent (background tasks)
+│   ├── state.py                   # AgentState(MessagesState)
+│   ├── skills/                    # Skill loader + built-ins
+│   └── tools/                     # 9 tool groups
+├── api/
+│   ├── app.py                     # FastAPI app + lifespan
+│   ├── routes.py                  # Chat, health, sessions, user endpoints
+│   ├── admin.py                   # Admin endpoints (owner-only)
+│   ├── auth.py                    # JWT + API key auth
+│   ├── ws.py                      # WebSocket chat
+│   └── deps.py                    # Dependency injection
+├── core/
+│   ├── config/                    # YAML + BaseSettings + .env
+│   ├── providers/                 # LiteLLM wrapper
+│   ├── channels/                  # Telegram, base channel
+│   ├── cron/                      # APScheduler + types
+│   └── background/                # Heartbeat + subagent worker
+├── memory/
+│   ├── store.py                   # MemoryStore — SQLite 15 tables
+│   └── models.py                  # Pydantic models
+└── rag/                           # Optional FAISS retriever
+
+gbot_cli/                          # CLI package (separate module)
+├── commands.py                    # Typer CLI entry points
+├── client.py                      # GraphBotClient (httpx)
+├── credentials.py                 # Token storage (~/.graphbot/)
+├── repl.py                        # Interactive REPL
+├── slash_commands.py              # Slash command router
+└── output.py                      # Rich formatters
+```
+
+## SQLite Tables (15)
+
+| Table | Purpose |
+|-------|---------|
+| `users` | User records |
+| `user_channels` | Channel links (telegram, discord, ...) |
+| `sessions` | Chat sessions with token tracking |
+| `messages` | Chat messages |
+| `agent_memory` | Key-value long-term memory |
+| `user_notes` | Learned information about users |
+| `activity_logs` | Activity records |
+| `favorites` | User favorites |
+| `preferences` | User preferences (JSON) |
+| `cron_jobs` | Scheduled tasks |
+| `cron_execution_log` | Cron execution history |
+| `reminders` | One-shot reminders |
+| `system_events` | Background notification queue |
+| `background_tasks` | Subagent task records |
+| `api_keys` | API key management |
+
+## Workspace
+
+```
+workspace/
+├── AGENT.md              # Bot identity (system prompt)
+├── HEARTBEAT.md          # Heartbeat instructions (optional)
+└── skills/               # User skills (optional)
+```
+
+`AGENT.md` defines the bot's personality and behavior. `system_prompt` in config takes higher priority.
+
+---
+
+## Development
 
 ```bash
-uv sync --extra dev                    # Bagimlik kurulumu
-uv run pytest tests/ -v                # Testler
-uv run ruff check graphbot/ gbot_cli/  # Lint
-uv run ruff format graphbot/ gbot_cli/ # Format
-gbot run --reload                      # Dev server
+uv sync --extra dev                    # install dependencies
+uv run pytest tests/ -v                # run tests
+uv run ruff check graphbot/ gbot_cli/  # lint
+uv run ruff format graphbot/ gbot_cli/ # format
+gbot run --reload                      # dev server with auto-reload
 ```
 
-226 test (206 unit + 20 integration), 15 test dosyasi.
+226 tests (206 unit + 20 integration), 15 test files.
 
-## Teknolojiler
+## Technologies
 
-| Bilesen | Teknoloji |
-|---------|-----------|
+| Component | Technology |
+|-----------|------------|
 | Agent | LangGraph StateGraph |
 | LLM | LiteLLM (multi-provider) |
 | API | FastAPI + Uvicorn |
-| WebSocket | FastAPI WebSocket |
 | Memory | SQLite (WAL mode) |
-| RAG | FAISS + sentence-transformers |
 | Config | YAML + pydantic-settings + .env |
 | Background | APScheduler |
 | CLI | Typer + Rich + prompt_toolkit |
-| Lint | Ruff |
-| Paket | uv |
+| RAG | FAISS + sentence-transformers |
 | Container | Docker + docker-compose |
+| Lint | Ruff |
+| Package | uv |
 
-## Dokumantasyon
+## License
 
-- [`mimari_kararlar.md`](./mimari_kararlar.md) — 9 mimari karar ve gerekceleri
-- [`howtowork-development-plan.md`](./howtowork-development-plan.md) — Detayli implementasyon plani
-- [`todo.md`](./todo.md) — Faz ilerleme takibi
-- [`CHANGELOG.md`](./CHANGELOG.md) — Versiyon gecmisi
-- [`CLAUDE.md`](./CLAUDE.md) — AI asistan kurallari
+MIT — see [LICENSE](./LICENSE) for details.

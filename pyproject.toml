@@ -5,6 +5,18 @@ description = "LangGraph-based AI assistant framework"
 license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.11"
+authors = [{name = "GraphBot Contributors"}]
+keywords = ["langgraph", "agent", "llm", "fastapi", "ai-assistant", "chatbot", "sqlite"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
 dependencies = [
     # LangGraph & LangChain
     "langgraph>=0.2.0",
@@ -40,6 +52,10 @@ dependencies = [
     "rich>=13.0.0",
     "prompt_toolkit>=3.0.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/omrylcn/graphbot"
+Changelog = "https://github.com/omrylcn/graphbot/blob/main/CHANGELOG.md"
 
 [project.scripts]
 gbot = "gbot_cli.commands:app"
