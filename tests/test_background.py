@@ -86,7 +86,7 @@ async def test_cron_execute_job(store, mock_runner):
     await sched._execute_job(job)
 
     mock_runner.process.assert_called_once_with(
-        user_id="u1", channel="api", message="hi"
+        user_id="u1", channel="api", message="hi", skip_context=True,
     )
 
 
@@ -163,12 +163,12 @@ def test_cron_tools_none():
 
 
 def test_cron_tools_created(store, mock_runner):
-    """With scheduler → 3 tools."""
+    """With scheduler → 4 tools."""
     sched = CronScheduler(store, mock_runner)
     tools = make_cron_tools(sched)
-    assert len(tools) == 3
+    assert len(tools) == 4
     names = {t.name for t in tools}
-    assert names == {"add_cron_job", "list_cron_jobs", "remove_cron_job"}
+    assert names == {"add_cron_job", "list_cron_jobs", "remove_cron_job", "create_alert"}
 
 
 def test_cron_tool_add_job(store, mock_runner):

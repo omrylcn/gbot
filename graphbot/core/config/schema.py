@@ -49,6 +49,32 @@ class OwnerConfig(BaseModel):
     name: str = ""
 
 
+class PersonaConfig(BaseModel):
+    """Agent persona definition (tone, language, constraints)."""
+
+    name: str = "GraphBot"
+    tone: str = ""
+    language: str = ""
+    constraints: list[str] = Field(default_factory=list)
+
+
+class RolesConfig(BaseModel):
+    """Agent role definitions."""
+
+    default: str = ""
+    available: dict[str, str] = Field(default_factory=dict)
+
+
+class ContextPrioritiesConfig(BaseModel):
+    """Token budget per context layer (approximate — 1 token ~ 4 chars)."""
+
+    identity: int = 500
+    agent_memory: int = 500
+    user_context: int = 1500
+    session_summary: int = 500
+    skills: int = 1000
+
+
 class AssistantConfig(BaseModel):
     """Main assistant (assistant.*)."""
 
@@ -62,6 +88,12 @@ class AssistantConfig(BaseModel):
     tools: list[str] = Field(default_factory=lambda: ["*"])
     system_prompt: str | None = None
     agents: dict[str, AgentConfig] = Field(default_factory=dict)
+    persona: PersonaConfig = Field(default_factory=PersonaConfig)
+    roles: RolesConfig = Field(default_factory=RolesConfig)
+    context_priorities: ContextPrioritiesConfig = Field(
+        default_factory=ContextPrioritiesConfig
+    )
+    prompt_template: str | None = None
 
 
 # Channels
@@ -136,6 +168,22 @@ class BackgroundConfig(BaseModel):
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 
+# Auth
+class RateLimitConfig(BaseModel):
+    enabled: bool = True
+    requests_per_minute: int = 60
+    burst: int = 10
+
+
+class AuthConfig(BaseModel):
+    """Auth & API security. Empty jwt_secret_key = auth disabled (backward compatible)."""
+
+    jwt_secret_key: str = ""
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 1440  # 24 hours
+    rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
+
+
 # Database
 class DatabaseConfig(BaseModel):
     path: str = "data/graphbot.db"
@@ -172,9 +220,15 @@ class Config(BaseSettings):
     rag: RagConfig | None = None
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     background: BackgroundConfig = Field(default_factory=BackgroundConfig)
+    auth: AuthConfig = Field(default_factory=AuthConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
 
     # ── Computed properties ─────────────────────────────────
+
+    @property
+    def auth_enabled(self) -> bool:
+        """True when JWT secret is set (auth active)."""
+        return bool(self.auth.jwt_secret_key)
 
     @property
     def owner_user_id(self) -> str | None:

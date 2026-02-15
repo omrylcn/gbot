@@ -42,15 +42,15 @@ def test_store_channel_metadata(store):
     assert meta["chat_id"] == 99999
 
 
-# ── Store: reminders ───────────────────────────────────────
+# ── Store: reminders (standalone table) ───────────────────
 
 
 def test_store_add_reminder(store):
     store.add_reminder("r1", "u1", "2026-12-31T10:00:00", "Wake up!", "telegram")
-    jobs = store.get_cron_jobs("u1")
-    assert len(jobs) == 1
-    assert jobs[0]["run_at"] == "2026-12-31T10:00:00"
-    assert jobs[0]["cron_expr"] == ""
+    reminders = store.get_pending_reminders("u1")
+    assert len(reminders) == 1
+    assert reminders[0]["run_at"] == "2026-12-31T10:00:00"
+    assert reminders[0]["reminder_id"] == "r1"
 
 
 def test_store_pending_reminders(store):
@@ -59,7 +59,34 @@ def test_store_pending_reminders(store):
 
     reminders = store.get_pending_reminders("u1")
     assert len(reminders) == 1
-    assert reminders[0]["job_id"] == "r1"
+    assert reminders[0]["reminder_id"] == "r1"
+
+
+def test_store_mark_reminder_sent(store):
+    store.add_reminder("r1", "u1", "2026-12-31T10:00:00", "Test", "telegram")
+    store.mark_reminder_sent("r1")
+    assert len(store.get_pending_reminders("u1")) == 0
+
+
+def test_store_mark_reminder_failed(store):
+    store.add_reminder("r1", "u1", "2026-12-31T10:00:00", "Test", "telegram")
+    store.mark_reminder_failed("r1", "Network error")
+    # Still pending after first failure (retry_count < 3)
+    reminders = store.get_pending_reminders("u1")
+    assert len(reminders) == 1
+
+    # After 2 more failures → status becomes 'failed'
+    store.mark_reminder_failed("r1", "Network error")
+    store.mark_reminder_failed("r1", "Network error")
+    assert len(store.get_pending_reminders("u1")) == 0
+
+
+def test_store_cancel_reminder(store):
+    store.add_reminder("r1", "u1", "2026-12-31T10:00:00", "Test", "telegram")
+    assert store.cancel_reminder("r1") is True
+    assert len(store.get_pending_reminders("u1")) == 0
+    # Cancel again → False (already cancelled)
+    assert store.cancel_reminder("r1") is False
 
 
 # ── Scheduler: add_reminder ────────────────────────────────
@@ -70,11 +97,11 @@ async def test_scheduler_add_reminder(store, mock_runner, cfg):
     sched = CronScheduler(store, mock_runner, config=cfg)
 
     with patch.object(sched, "_scheduler"):
-        job = sched.add_reminder("u1", "telegram", 3600, "Test reminder")
+        row = sched.add_reminder("u1", "telegram", 3600, "Test reminder")
 
-    assert job.job_id
-    assert job.run_at is not None
-    assert job.message == "Test reminder"
+    assert row["reminder_id"]
+    assert row["run_at"] is not None
+    assert row["message"] == "Test reminder"
 
     reminders = sched.list_reminders("u1")
     assert len(reminders) == 1
@@ -92,25 +119,36 @@ async def test_scheduler_execute_reminder(store, mock_runner, cfg):
     sched = CronScheduler(store, mock_runner, config=cfg)
     store.add_reminder("r1", "u1", "2026-12-31T10:00:00", "Time to wake up", "telegram")
 
-    from graphbot.core.cron.types import CronJob
-
-    job = CronJob(
-        job_id="r1", user_id="u1", message="Time to wake up",
-        channel="telegram", run_at="2026-12-31T10:00:00",
-    )
+    row = {
+        "reminder_id": "r1",
+        "user_id": "u1",
+        "message": "Time to wake up",
+        "channel": "telegram",
+        "run_at": "2026-12-31T10:00:00",
+    }
 
     with patch(
         "graphbot.core.channels.telegram.send_message", new_callable=AsyncMock
     ) as mock_send:
-        await sched._execute_reminder(job)
+        await sched._execute_reminder(row)
         mock_send.assert_called_once()
         call_args = mock_send.call_args
         assert call_args[0][0] == "fake-token"
         assert call_args[0][1] == 99999
         assert "Time to wake up" in call_args[0][2]
 
-    # Job should be cleaned up from SQLite
-    assert len(store.get_pending_reminders("u1")) == 0
+
+@pytest.mark.asyncio
+async def test_scheduler_cancel_reminder(store, mock_runner, cfg):
+    sched = CronScheduler(store, mock_runner, config=cfg)
+    with patch.object(sched, "_scheduler"):
+        sched.add_reminder("u1", "telegram", 3600, "Cancel me")
+    reminders = sched.list_reminders("u1")
+    rid = reminders[0]["reminder_id"]
+
+    result = sched.cancel_reminder(rid)
+    assert result is True
+    assert len(sched.list_reminders("u1")) == 0
 
 
 # ── Reminder tools ─────────────────────────────────────────
@@ -121,7 +159,6 @@ def test_reminder_tool_create(store, mock_runner, cfg):
     with patch.object(sched, "_scheduler"):
         tools = make_reminder_tools(sched)
         create = next(t for t in tools if t.name == "create_reminder")
-        # Simulate channel injection (normally done by execute_tools node)
         result = create.invoke({
             "user_id": "u1", "delay_seconds": 600, "message": "Check oven",
             "channel": "telegram",

@@ -25,9 +25,17 @@ def make_nodes(config: Config, db: MemoryStore, tools: list | None = None):
     tool_map = {t.name: t for t in tools} if tools else {}
 
     async def load_context(state: AgentState) -> dict[str, Any]:
-        """Build system prompt from SQLite + workspace."""
-        prompt = ctx_builder.build(state["user_id"])
-        logger.debug(f"Context built for user {state['user_id']}")
+        """Build system prompt from SQLite + workspace.
+
+        When skip_context is True, only the identity layer is loaded
+        (no user context, memory, skills, etc.). Used by background tasks.
+        """
+        if state.get("skip_context"):
+            prompt = ctx_builder._get_identity()
+            logger.debug(f"Lightweight context (identity only) for user {state['user_id']}")
+        else:
+            prompt = ctx_builder.build(state["user_id"])
+            logger.debug(f"Full context built for user {state['user_id']}")
         return {"system_prompt": prompt}
 
     async def reason(state: AgentState) -> dict[str, Any]:

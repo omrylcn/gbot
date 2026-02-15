@@ -1,4 +1,4 @@
-"""Delegate tool — sync subagent delegation via SubagentWorker."""
+"""Delegate tool — async subagent delegation via SubagentWorker."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ def make_delegate_tools(worker: SubagentWorker | None = None) -> list:
         return []
 
     @tool
-    def delegate(user_id: str, task: str, channel: str = "api") -> str:
+    async def delegate(user_id: str, task: str, channel: str = "api") -> str:
         """Delegate a task to a background subagent. Returns task_id for tracking."""
         try:
             task_id = worker.spawn(user_id, task, channel)

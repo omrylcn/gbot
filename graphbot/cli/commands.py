@@ -128,7 +128,7 @@ def status() -> None:
     with db._get_conn() as conn:
         user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         session_count = conn.execute(
-            "SELECT COUNT(*) FROM sessions WHERE status = 'active'"
+            "SELECT COUNT(*) FROM sessions WHERE ended_at IS NULL"
         ).fetchone()[0]
 
     table = Table(title="graphbot status")
@@ -213,9 +213,10 @@ app.add_typer(user_app, name="user")
 def user_add(
     username: str = typer.Argument(help="User ID (e.g. 'ali')"),
     name: str = typer.Option("", "--name", "-n", help="Display name"),
+    password: str | None = typer.Option(None, "--password", "-p", help="Password (for API auth)"),
     telegram: str | None = typer.Option(None, "--telegram", "-t", help="Telegram bot token"),
 ) -> None:
-    """Add a new user, optionally linking a Telegram account."""
+    """Add a new user, optionally with password and Telegram link."""
     from graphbot.core.config.loader import load_config
     from graphbot.memory.store import MemoryStore
 
@@ -229,9 +230,15 @@ def user_add(
     db.get_or_create_user(username, name=name or None)
     console.print(f"[green]User created:[/green] {username}")
 
+    if password:
+        from graphbot.api.auth import hash_password
+
+        db.set_password(username, hash_password(password))
+        console.print("  [dim]Password set[/dim]")
+
     if telegram:
         db.link_channel(username, "telegram", telegram)
-        console.print(f"  [dim]Linked telegram:{telegram}[/dim]")
+        console.print(f"  [dim]Linked telegram:{telegram[:15]}...[/dim]")
 
 
 @user_app.command("list")
@@ -278,6 +285,27 @@ def user_remove(
         console.print(f"[green]Removed user:[/green] {username}")
     else:
         console.print(f"[red]User not found:[/red] {username}")
+
+
+@user_app.command("set-password")
+def user_set_password(
+    username: str = typer.Argument(help="User ID"),
+    password: str = typer.Argument(help="New password"),
+) -> None:
+    """Set or change password for an existing user."""
+    from graphbot.api.auth import hash_password
+    from graphbot.core.config.loader import load_config
+    from graphbot.memory.store import MemoryStore
+
+    config = load_config()
+    db = MemoryStore(config.database.path)
+
+    if not db.user_exists(username):
+        console.print(f"[red]User not found:[/red] {username}")
+        raise typer.Exit(code=1)
+
+    db.set_password(username, hash_password(password))
+    console.print(f"[green]Password updated for[/green] {username}")
 
 
 @user_app.command("link")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
@@ -17,6 +18,19 @@ from graphbot.memory.store import MemoryStore
 if TYPE_CHECKING:
     from graphbot.agent.runner import GraphRunner
     from graphbot.core.config.schema import Config
+
+
+def _should_skip(response: str) -> bool:
+    """Check if LLM response should be suppressed (SKIP/NO_NOTIFY marker).
+
+    Used by cron jobs with NOTIFY/SKIP prompting. If the LLM determines
+    there is nothing to report, it includes a SKIP marker.
+    """
+    if not response or not response.strip():
+        return True
+    markers = {"SKIP", "[SKIP]", "[NO_NOTIFY]"}
+    upper = response.strip().upper()
+    return any(upper.startswith(m) or upper.endswith(m) for m in markers)
 
 
 class CronScheduler:
@@ -38,17 +52,24 @@ class CronScheduler:
         )
 
     async def start(self) -> None:
-        """Load jobs and reminders from SQLite and start the scheduler."""
+        """Load cron jobs and reminders from SQLite and start the scheduler."""
+        # Load cron jobs
         jobs = self.db.get_cron_jobs()
         for row in jobs:
             if row.get("enabled", 1):
                 job = CronJob(**row)
-                if job.run_at:
-                    self._register_reminder(job)
-                elif job.cron_expr:
+                if job.cron_expr:
                     self._register_job(job)
+
+        # Load pending reminders from standalone table
+        reminders = self.db.get_pending_reminders()
+        for row in reminders:
+            self._register_reminder_from_row(row)
+
         self._scheduler.start()
-        logger.info(f"CronScheduler started with {len(jobs)} jobs")
+        logger.info(
+            f"CronScheduler started with {len(jobs)} jobs, {len(reminders)} reminders"
+        )
 
     async def stop(self) -> None:
         """Shutdown the scheduler gracefully."""
@@ -56,17 +77,32 @@ class CronScheduler:
         logger.info("CronScheduler stopped")
 
     def add_job(
-        self, user_id: str, cron_expr: str, message: str, channel: str = "api"
+        self,
+        user_id: str,
+        cron_expr: str,
+        message: str,
+        channel: str = "api",
+        agent_prompt: str | None = None,
+        agent_model: str | None = None,
+        notify_condition: str = "always",
     ) -> CronJob:
         """Create a new cron job (SQLite + APScheduler)."""
         job_id = str(uuid.uuid4())[:8]
-        self.db.add_cron_job(job_id, user_id, cron_expr, message, channel)
+        self.db.add_cron_job(
+            job_id, user_id, cron_expr, message, channel,
+            agent_prompt=agent_prompt,
+            agent_model=agent_model,
+            notify_condition=notify_condition,
+        )
         job = CronJob(
             job_id=job_id,
             user_id=user_id,
             cron_expr=cron_expr,
             message=message,
             channel=channel,
+            agent_prompt=agent_prompt,
+            agent_model=agent_model,
+            notify_condition=notify_condition,
         )
         self._register_job(job)
         logger.info(f"Cron job added: {job_id} ({cron_expr})")
@@ -89,25 +125,34 @@ class CronScheduler:
 
     def add_reminder(
         self, user_id: str, channel: str, delay_seconds: int, message: str
-    ) -> CronJob:
+    ) -> dict:
         """Create a one-shot reminder that fires after delay_seconds."""
         run_at = (datetime.now() + timedelta(seconds=delay_seconds)).isoformat()
-        job_id = str(uuid.uuid4())[:8]
-        self.db.add_reminder(job_id, user_id, run_at, message, channel)
-        job = CronJob(
-            job_id=job_id,
-            user_id=user_id,
-            message=message,
-            channel=channel,
-            run_at=run_at,
-        )
-        self._register_reminder(job)
-        logger.info(f"Reminder added: {job_id} (fires at {run_at})")
-        return job
+        reminder_id = str(uuid.uuid4())[:8]
+        self.db.add_reminder(reminder_id, user_id, run_at, message, channel)
+        row = {
+            "reminder_id": reminder_id,
+            "user_id": user_id,
+            "message": message,
+            "channel": channel,
+            "run_at": run_at,
+        }
+        self._register_reminder_from_row(row)
+        logger.info(f"Reminder added: {reminder_id} (fires at {run_at})")
+        return row
 
     def list_reminders(self, user_id: str | None = None) -> list[dict]:
         """List pending reminders from SQLite."""
         return self.db.get_pending_reminders(user_id)
+
+    def cancel_reminder(self, reminder_id: str) -> bool:
+        """Cancel a pending reminder. Returns True if cancelled."""
+        result = self.db.cancel_reminder(reminder_id)
+        try:
+            self._scheduler.remove_job(reminder_id)
+        except Exception:
+            pass
+        return result
 
     def _register_job(self, job: CronJob) -> None:
         """Register a CronJob with APScheduler."""
@@ -123,26 +168,28 @@ class CronScheduler:
         except Exception as e:
             logger.error(f"Failed to register cron job {job.job_id}: {e}")
 
-    def _register_reminder(self, job: CronJob) -> None:
-        """Register a one-shot reminder with APScheduler DateTrigger."""
-        if not job.run_at:
+    def _register_reminder_from_row(self, row: dict) -> None:
+        """Register a reminder with APScheduler DateTrigger."""
+        run_at = row.get("run_at")
+        if not run_at:
             return
+        reminder_id = row["reminder_id"]
         try:
-            run_date = datetime.fromisoformat(job.run_at)
+            run_date = datetime.fromisoformat(run_at)
             # Skip past reminders
             if run_date < datetime.now():
-                self.db.remove_cron_job(job.job_id)
+                self.db.remove_reminder(reminder_id)
                 return
             trigger = DateTrigger(run_date=run_date)
             self._scheduler.add_job(
                 self._execute_reminder,
                 trigger=trigger,
-                id=job.job_id,
-                args=[job],
+                id=reminder_id,
+                args=[row],
                 replace_existing=True,
             )
         except Exception as e:
-            logger.error(f"Failed to register reminder {job.job_id}: {e}")
+            logger.error(f"Failed to register reminder {reminder_id}: {e}")
 
     # ── Channel delivery ─────────────────────────────────────
 
@@ -169,14 +216,40 @@ class CronScheduler:
     # ── Execution ─────────────────────────────────────────────
 
     async def _execute_job(self, job: CronJob) -> None:
-        """Execute a cron job: run through LLM, deliver response to channel."""
+        """Execute a cron job via LightAgent or full runner.
+
+        If job.agent_prompt is set, uses LightAgent (cheap, isolated).
+        Otherwise falls back to full GraphRunner with skip_context=True.
+        Supports NOTIFY/SKIP markers and tracks consecutive failures.
+        """
         logger.info(f"Cron trigger: {job.job_id} → user={job.user_id}")
+        start = time.time()
         try:
-            response, session_id = await self.runner.process(
-                user_id=job.user_id,
-                channel=job.channel,
-                message=job.message,
+            if job.agent_prompt and self.config:
+                response, _ = await self._run_light(job)
+            else:
+                response, _ = await self.runner.process(
+                    user_id=job.user_id,
+                    channel=job.channel,
+                    message=job.message,
+                    skip_context=True,
+                )
+            duration_ms = int((time.time() - start) * 1000)
+
+            # NOTIFY/SKIP: suppress silent responses
+            if _should_skip(response):
+                logger.debug(f"Cron {job.job_id} skipped (SKIP marker in response)")
+                self.db.log_cron_execution(
+                    job.job_id, response, "skipped", duration_ms=duration_ms,
+                )
+                return
+
+            # Log success + reset failures
+            self.db.log_cron_execution(
+                job.job_id, response, "success", duration_ms=duration_ms,
             )
+            self.db.reset_cron_failures(job.job_id)
+
             # Deliver LLM response to the user's channel
             sent = await self._send_to_channel(job.user_id, job.channel, response)
             if sent:
@@ -184,21 +257,69 @@ class CronScheduler:
             else:
                 logger.info(f"Cron job {job.job_id} completed: {response[:100]}")
         except Exception as e:
+            duration_ms = int((time.time() - start) * 1000)
             logger.error(f"Cron job {job.job_id} failed: {e}")
+            self.db.log_cron_execution(
+                job.job_id, str(e), "error", duration_ms=duration_ms,
+            )
+            count = self.db.increment_cron_failures(job.job_id, str(e))
+            if count >= 3:
+                self._pause_job(job.job_id)
 
-    async def _execute_reminder(self, job: CronJob) -> None:
-        """Execute a one-shot reminder: send message directly, then clean up."""
-        logger.info(f"Reminder trigger: {job.job_id} → user={job.user_id}")
+    async def _run_light(self, job: CronJob) -> tuple[str, int]:
+        """Run a cron job through LightAgent."""
+        from graphbot.agent.light import LightAgent
+
+        tools = self._parse_tools(job.agent_tools)
+        agent = LightAgent(
+            config=self.config,
+            prompt=job.agent_prompt,
+            tools=tools,
+            model=job.agent_model,
+        )
+        return await agent.run(job.message)
+
+    def _parse_tools(self, agent_tools: str | None) -> list:
+        """Parse JSON tool name list into actual tool objects.
+
+        Returns empty list if agent_tools is None or empty.
+        Tool filtering is a future enhancement — for now returns empty.
+        """
+        # TODO: resolve tool names to actual tool objects from a registry
+        return []
+
+    def _pause_job(self, job_id: str) -> None:
+        """Pause a job after consecutive failures by disabling it."""
+        logger.warning(f"Pausing cron job {job_id} after 3+ consecutive failures")
+        with self.db._get_conn() as conn:
+            conn.execute(
+                "UPDATE cron_jobs SET enabled = 0 WHERE job_id = ?", (job_id,),
+            )
+            conn.commit()
         try:
-            text = f"Hatirlatma: {job.message}"
-            sent = await self._send_to_channel(job.user_id, job.channel, text)
-            if not sent:
-                # Fallback: process through LLM
-                await self.runner.process(
-                    job.user_id, job.channel, f"Reminder: {job.message}"
-                )
+            self._scheduler.remove_job(job_id)
+        except Exception:
+            pass
+
+    async def _execute_reminder(self, row: dict) -> None:
+        """Execute a one-shot reminder: send message directly, no LLM.
+
+        On failure, marks as failed (retry_count incremented).
+        After 3 failures, status becomes 'failed' permanently.
+        """
+        reminder_id = row["reminder_id"]
+        user_id = row["user_id"]
+        channel = row.get("channel", "telegram")
+        logger.info(f"Reminder trigger: {reminder_id} → user={user_id}")
+        try:
+            text = f"Hatirlatma: {row['message']}"
+            sent = await self._send_to_channel(user_id, channel, text)
+            if sent:
+                self.db.mark_reminder_sent(reminder_id)
+                logger.info(f"Reminder {reminder_id} sent")
+            else:
+                self.db.mark_reminder_failed(reminder_id, "Channel delivery failed")
+                logger.warning(f"Reminder {reminder_id} delivery failed")
         except Exception as e:
-            logger.error(f"Reminder {job.job_id} failed: {e}")
-        finally:
-            # One-shot: remove from SQLite
-            self.db.remove_cron_job(job.job_id)
+            self.db.mark_reminder_failed(reminder_id, str(e))
+            logger.error(f"Reminder {reminder_id} failed: {e}")

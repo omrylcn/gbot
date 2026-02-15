@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import time
+from collections import defaultdict
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from graphbot import __version__
 from graphbot.agent.runner import GraphRunner
@@ -23,6 +28,52 @@ from graphbot.core.channels.whatsapp import router as whatsapp_router
 from graphbot.core.config.loader import load_config
 from graphbot.core.cron.scheduler import CronScheduler
 from graphbot.memory.store import MemoryStore
+
+
+# ── Rate Limiting Middleware ─────────────────────────────────
+
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """In-memory sliding window rate limiter (IP-based)."""
+
+    # Paths exempt from rate limiting
+    _EXEMPT = frozenset({"/health", "/docs", "/openapi.json", "/redoc"})
+
+    def __init__(self, app: FastAPI) -> None:
+        super().__init__(app)
+        self._requests: dict[str, list[float]] = defaultdict(list)
+
+    async def dispatch(self, request: Request, call_next):
+        # Skip if no config loaded yet or rate limiting disabled
+        config = getattr(request.app.state, "config", None)
+        if not config or not config.auth.rate_limit.enabled:
+            return await call_next(request)
+
+        # Exempt paths
+        path = request.url.path
+        if path in self._EXEMPT or path.startswith("/webhook"):
+            return await call_next(request)
+
+        rpm = config.auth.rate_limit.requests_per_minute
+        ip = request.client.host if request.client else "unknown"
+        now = time.time()
+        window = 60.0
+
+        # Clean old entries
+        self._requests[ip] = [t for t in self._requests[ip] if now - t < window]
+
+        if len(self._requests[ip]) >= rpm:
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Too many requests"},
+                headers={"Retry-After": "60"},
+            )
+
+        self._requests[ip].append(now)
+        return await call_next(request)
+
+
+# ── App Factory ──────────────────────────────────────────────
 
 
 def _ensure_owner(config, db) -> None:
@@ -49,7 +100,7 @@ async def lifespan(app: FastAPI):
     # Background services (need runner)
     cron_scheduler = CronScheduler(db, runner, config=config)
     heartbeat = HeartbeatService(config, runner)
-    worker = SubagentWorker(runner)
+    worker = SubagentWorker(runner, db=db)
 
     # Now build tools with scheduler+worker, and rebuild graph
     from graphbot.agent.graph import create_graph
@@ -96,6 +147,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(RateLimitMiddleware)
 
     # Routers
     app.include_router(core_router)
