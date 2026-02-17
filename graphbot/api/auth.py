@@ -145,8 +145,19 @@ async def token(
 
 
 @router.get("/user/{user_id}")
-async def user_profile(user_id: str, db: MemoryStore = Depends(get_db)):
-    """Get user profile."""
+async def user_profile(
+    user_id: str,
+    current_user: str = Depends(get_current_user),
+    db: MemoryStore = Depends(get_db),
+    config: Config = Depends(get_config),
+):
+    """Get user profile. Users can only view their own profile, unless they are the owner."""
+    # Authorization: only allow viewing own profile or owner can view all
+    if current_user != user_id and current_user != config.owner_user_id:
+        raise HTTPException(
+            status_code=403, detail="You can only view your own profile"
+        )
+
     user = db.get_user(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
