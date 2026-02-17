@@ -89,14 +89,17 @@ class CronScheduler:
         message: str,
         channel: str = "api",
         agent_prompt: str | None = None,
+        agent_tools: list[str] | None = None,
         agent_model: str | None = None,
         notify_condition: str = "always",
     ) -> CronJob:
         """Create a new cron job (SQLite + APScheduler)."""
+        agent_tools_json = json.dumps(agent_tools) if agent_tools else None
         job_id = str(uuid.uuid4())[:8]
         self.db.add_cron_job(
             job_id, user_id, cron_expr, message, channel,
             agent_prompt=agent_prompt,
+            agent_tools=agent_tools_json,
             agent_model=agent_model,
             notify_condition=notify_condition,
         )
@@ -107,6 +110,7 @@ class CronScheduler:
             message=message,
             channel=channel,
             agent_prompt=agent_prompt,
+            agent_tools=agent_tools_json,
             agent_model=agent_model,
             notify_condition=notify_condition,
         )
@@ -136,6 +140,8 @@ class CronScheduler:
         delay_seconds: int,
         message: str,
         cron_expr: str | None = None,
+        agent_prompt: str | None = None,
+        agent_tools: list[str] | None = None,
     ) -> dict:
         """Create a reminder.
 
@@ -143,13 +149,17 @@ class CronScheduler:
         ----------
         cron_expr : str, optional
             When provided, creates a *recurring* reminder using CronTrigger.
-            ``delay_seconds`` is ignored for recurring reminders (run_at is
-            stored as creation time for reference only).
+        agent_prompt : str, optional
+            If set, LightAgent runs with this prompt on trigger.
+        agent_tools : list[str], optional
+            Tool names for the LightAgent (e.g. ["send_message_to_user"]).
         """
+        agent_tools_json = json.dumps(agent_tools) if agent_tools else None
         run_at = (datetime.now() + timedelta(seconds=delay_seconds)).isoformat()
         reminder_id = str(uuid.uuid4())[:8]
         self.db.add_reminder(
             reminder_id, user_id, run_at, message, channel, cron_expr=cron_expr,
+            agent_prompt=agent_prompt, agent_tools=agent_tools_json,
         )
         row = {
             "reminder_id": reminder_id,
@@ -158,6 +168,8 @@ class CronScheduler:
             "channel": channel,
             "run_at": run_at,
             "cron_expr": cron_expr,
+            "agent_prompt": agent_prompt,
+            "agent_tools": agent_tools_json,
         }
         self._register_reminder_from_row(row)
         kind = f"recurring ({cron_expr})" if cron_expr else f"one-shot at {run_at}"
@@ -357,7 +369,7 @@ class CronScheduler:
             pass
 
     async def _execute_reminder(self, row: dict) -> None:
-        """Execute a reminder: send message directly, no LLM.
+        """Execute a reminder: LightAgent if agent_prompt set, else static text.
 
         One-shot reminders are marked 'sent' after delivery.
         Recurring reminders stay 'pending' so they keep firing.
@@ -374,7 +386,20 @@ class CronScheduler:
             f" ({'recurring' if is_recurring else 'one-shot'})"
         )
         try:
-            text = f"Hatirlatma: {row['message']}"
+            agent_prompt = row.get("agent_prompt")
+            if agent_prompt and self.config:
+                from graphbot.agent.light import LightAgent
+                tools = self._parse_tools(row.get("agent_tools"))
+                agent = LightAgent(
+                    config=self.config,
+                    prompt=agent_prompt,
+                    tools=tools,
+                    model=self.config.assistant.model,
+                )
+                text, _ = await agent.run(row["message"])
+                logger.info(f"Reminder {reminder_id} executed via LightAgent")
+            else:
+                text = f"Hatirlatma: {row['message']}"
             sent = await self._send_to_channel(user_id, channel, text)
             if sent:
                 if not is_recurring:

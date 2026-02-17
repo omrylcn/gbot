@@ -7,11 +7,7 @@ services:
     env_file:
       - .env
     volumes:
-      - graphbot_data:/app/data
-      - graphbot_workspace:/app/workspace
+      - ./data:/app/data
+      - ./workspace:/app/workspace
       - ./config.yaml:/app/config.yaml:ro
     restart: unless-stopped
-
-volumes:
-  graphbot_data:
-  graphbot_workspace:

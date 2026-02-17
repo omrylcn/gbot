@@ -11,6 +11,7 @@ from graphbot.agent.tools.delegate import make_delegate_tools
 from graphbot.agent.tools.reminder import make_reminder_tools
 from graphbot.agent.tools.filesystem import make_filesystem_tools
 from graphbot.agent.tools.memory_tools import make_memory_tools
+from graphbot.agent.tools.messaging import make_messaging_tools
 from graphbot.agent.tools.search import make_search_tools
 from graphbot.agent.tools.shell import make_shell_tools
 from graphbot.agent.tools.web import make_web_tools
@@ -49,6 +50,7 @@ def make_tools(
     tools += make_delegate_tools(worker, planner)
     tools += make_cron_tools(scheduler)
     tools += make_reminder_tools(scheduler)
+    tools += make_messaging_tools(config, db)
     return tools
 
 

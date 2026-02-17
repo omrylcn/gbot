@@ -69,12 +69,17 @@ class MemoryStore:
             if col not in cron_cols:
                 conn.execute(f"ALTER TABLE cron_jobs ADD COLUMN {col} {ddl}")
 
-        # Reminders: recurring support (cron_expr column)
+        # Reminders: recurring + agent support
         rem_cols = {
             row[1] for row in conn.execute("PRAGMA table_info(reminders)").fetchall()
         }
-        if "cron_expr" not in rem_cols:
-            conn.execute("ALTER TABLE reminders ADD COLUMN cron_expr TEXT")
+        for col, ddl in [
+            ("cron_expr", "TEXT"),
+            ("agent_prompt", "TEXT"),
+            ("agent_tools", "TEXT"),
+        ]:
+            if col not in rem_cols:
+                conn.execute(f"ALTER TABLE reminders ADD COLUMN {col} {ddl}")
 
     # ════════════════════════════════════════════════════════════
     # USERS
@@ -658,21 +663,28 @@ class MemoryStore:
         message: str,
         channel: str = "telegram",
         cron_expr: str | None = None,
+        agent_prompt: str | None = None,
+        agent_tools: str | None = None,
     ) -> None:
         """Add a reminder to the reminders table.
 
         Parameters
         ----------
         cron_expr : str, optional
-            Cron expression for recurring reminders.  When set, the reminder
-            fires periodically (run_at is ignored by the scheduler).
+            Cron expression for recurring reminders.
+        agent_prompt : str, optional
+            If set, LightAgent runs with this prompt instead of sending static text.
+        agent_tools : str, optional
+            JSON list of tool names for the LightAgent (e.g. '["send_message_to_user"]').
         """
         with self._get_conn() as conn:
             conn.execute(
                 """INSERT INTO reminders
-                   (reminder_id, user_id, run_at, message, channel, cron_expr)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (reminder_id, user_id, run_at, message, channel, cron_expr),
+                   (reminder_id, user_id, run_at, message, channel, cron_expr,
+                    agent_prompt, agent_tools)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (reminder_id, user_id, run_at, message, channel, cron_expr,
+                 agent_prompt, agent_tools),
             )
             conn.commit()
 

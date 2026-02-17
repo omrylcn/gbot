@@ -22,19 +22,42 @@ def make_cron_tools(scheduler: CronScheduler | None = None) -> list:
         message: str,
         channel: str = "api",
         agent_prompt: str | None = None,
+        agent_tools: list[str] | None = None,
         agent_model: str | None = None,
         notify_condition: str = "always",
     ) -> str:
-        """Schedule a recurring task.
+        """Schedule a recurring task using a cron expression.
 
         Uses cron expressions (e.g. '0 9 * * *' = every day at 9am).
-        Optionally provide agent_prompt to use LightAgent (cheaper, isolated).
-        Set notify_condition='notify_skip' to suppress SKIP responses.
+
+        When the task involves executing an action (e.g. sending a message to
+        another user, fetching data), always set agent_prompt and agent_tools:
+        - agent_prompt: clear instruction for the background agent
+        - agent_tools: list of tool names the agent needs, e.g. ["send_message_to_user"]
+        - message: short task description (NOT the user's original sentence)
+
+        Available agent_tools: send_message_to_user, web_search, web_fetch,
+        save_memory, search_memory.
+
+        Examples:
+        - "Her 10 dakikada Murat'a 'naber' yaz":
+            message="Send 'naber' to user Murat"
+            agent_prompt="Send the specified message to the target user using send_message_to_user tool."
+            agent_tools=["send_message_to_user"]
+            cron_expr="*/10 * * * *"
+        - "Her sabah 9'da hava durumunu kontrol et":
+            message="Check today's weather and report"
+            agent_prompt="Fetch current weather and summarize."
+            agent_tools=["web_search"]
+            cron_expr="0 9 * * *"
+
+        Set notify_condition='notify_skip' to suppress SKIP responses (for alerts).
         """
         try:
             job = scheduler.add_job(
                 user_id, cron_expr, message, channel,
                 agent_prompt=agent_prompt,
+                agent_tools=agent_tools,
                 agent_model=agent_model,
                 notify_condition=notify_condition,
             )

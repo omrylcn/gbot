@@ -158,12 +158,17 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Middleware
+    # Middleware - CORS restricted to known origins
+    allowed_origins = [
+        "https://gbot-assistant.cloud",
+        "https://www.gbot-assistant.cloud",
+        # Add your frontend domains here if needed
+    ]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=allowed_origins,
         allow_credentials=True,
-        allow_methods=["*"],
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
     app.add_middleware(RateLimitMiddleware)

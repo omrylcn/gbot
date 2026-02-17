@@ -14,6 +14,7 @@ RUN uv pip install --system --no-cache ".[channels]"
 
 # Kaynak kodu kopyala ve kur
 COPY graphbot/ graphbot/
+COPY gbot_cli/ gbot_cli/
 RUN uv pip install --system --no-cache .
 
 # Runtime dizinleri

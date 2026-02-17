@@ -17,50 +17,48 @@ def make_reminder_tools(scheduler: CronScheduler | None = None) -> list:
 
     @tool
     def create_reminder(
-        user_id: str, delay_seconds: int, message: str, channel: str = "telegram"
+        user_id: str,
+        delay_seconds: int,
+        message: str,
+        channel: str = "telegram",
+        agent_prompt: str | None = None,
+        agent_tools: list[str] | None = None,
     ) -> str:
-        """Create a one-shot reminder that sends a message after delay_seconds.
+        """Create a one-shot reminder that fires after delay_seconds.
 
-        Use this when the user asks to be reminded about something later.
-        Examples: "2 saat sonra hatırlat" → delay_seconds=7200
+        Two modes — decide based on the task:
 
-        Note: channel is auto-injected from session context, do not set manually.
-        """
-        try:
-            row = scheduler.add_reminder(user_id, channel, delay_seconds, message)
-            minutes = delay_seconds // 60
-            return (
-                f"Reminder set: '{message}' in {minutes} minutes "
-                f"(id: {row['reminder_id']})"
-            )
-        except Exception as e:
-            return f"Failed to create reminder: {e}"
+        Static (remind ME about something):
+          agent_prompt=None, message is sent as-is.
+          Example: "2 saat sonra toplantı var diye hatırlat"
+            → message="Toplantı hatırlatması!", delay_seconds=7200
 
-    @tool
-    def create_recurring_reminder(
-        user_id: str, cron_expr: str, message: str, channel: str = "telegram"
-    ) -> str:
-        """Create a recurring reminder that sends a message periodically.
+        Agent (execute an action after delay):
+          Set agent_prompt + agent_tools. LightAgent runs the task.
+          Example: "5 dakika sonra Murat'a 'naber' diye mesaj at"
+            → message="Send 'naber' to user Murat"
+            → agent_prompt="Use send_message_to_user tool to send the message."
+            → agent_tools=["send_message_to_user"]
+            → delay_seconds=300
 
-        Uses cron expressions — no LLM processing, message is sent as-is.
-        Examples:
-          "her 5 dakikada hatırlat" → cron_expr="*/5 * * * *"
-          "her gün saat 9'da hatırlat" → cron_expr="0 9 * * *"
-          "her saat başı hatırlat" → cron_expr="0 * * * *"
+        Available agent_tools: send_message_to_user, web_search, web_fetch,
+        save_memory, search_memory.
 
         Note: channel is auto-injected from session context, do not set manually.
         """
         try:
             row = scheduler.add_reminder(
-                user_id, channel, delay_seconds=0, message=message,
-                cron_expr=cron_expr,
+                user_id, channel, delay_seconds, message,
+                agent_prompt=agent_prompt, agent_tools=agent_tools,
             )
+            minutes = delay_seconds // 60
+            mode = "agent" if agent_prompt else "static"
             return (
-                f"Recurring reminder set: '{message}' ({cron_expr}) "
+                f"Reminder set ({mode}): '{message}' in {minutes} minutes "
                 f"(id: {row['reminder_id']})"
             )
         except Exception as e:
-            return f"Failed to create recurring reminder: {e}"
+            return f"Failed to create reminder: {e}"
 
     @tool
     def list_reminders(user_id: str) -> str:
@@ -87,4 +85,4 @@ def make_reminder_tools(scheduler: CronScheduler | None = None) -> list:
         except Exception as e:
             return f"Failed to cancel reminder: {e}"
 
-    return [create_reminder, create_recurring_reminder, list_reminders, cancel_reminder]
+    return [create_reminder, list_reminders, cancel_reminder]

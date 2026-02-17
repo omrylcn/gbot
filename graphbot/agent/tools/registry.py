@@ -17,7 +17,7 @@ def build_background_tool_registry(
 ) -> dict[str, BaseTool]:
     """Build name -> tool object mapping for background agents.
 
-    Includes web, memory, and search tools.
+    Includes web, memory, search, and messaging tools.
     Excludes meta/unsafe tools (delegate, cron, reminder, filesystem, shell).
     """
     from graphbot.agent.tools.web import make_web_tools
@@ -28,11 +28,14 @@ def build_background_tool_registry(
 
     if db:
         from graphbot.agent.tools.memory_tools import make_memory_tools
+        from graphbot.agent.tools.messaging import make_messaging_tools
         from graphbot.agent.tools.search import make_search_tools
 
         for t in make_memory_tools(db):
             registry[t.name] = t
         for t in make_search_tools():
+            registry[t.name] = t
+        for t in make_messaging_tools(config, db):
             registry[t.name] = t
 
     return registry

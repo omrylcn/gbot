@@ -44,16 +44,16 @@ channels:
 tools:
   shell:
       timeout: 60
-      restrict_to_workspace: false
+      restrict_to_workspace: true  # Security: limit to workspace only
   # web:
   #   search_api_key: ""
 
 auth:
-  jwt_secret_key: ""                 # Empty = auth disabled; set 32+ char secret to enable
-  # access_token_expire_minutes: 1440  # 24 hours (default)
-  # rate_limit:
-  #   enabled: true
-  #   requests_per_minute: 60
+  jwt_secret_key: "graphbot-secure-jwt-secret-key-2026-production-vps"  # 32+ chars
+  access_token_expire_minutes: 1440  # 24 hours
+  rate_limit:
+    enabled: true
+    requests_per_minute: 60
 
 background:
   cron:
