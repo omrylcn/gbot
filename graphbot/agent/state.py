@@ -15,6 +15,9 @@ class AgentState(MessagesState):
     user_id: str
     session_id: str
     channel: str
+    role: str = "guest"
+    allowed_tools: set[str] | None = None
+    context_layers: set[str] | None = None
     system_prompt: str = ""
     token_count: int = 0
     iteration: int = 0

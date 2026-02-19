@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from graphbot import __version__
 from graphbot.api.deps import get_config, get_current_user, get_db
 from graphbot.core.config.schema import Config
 from graphbot.memory.store import MemoryStore
+
+_VALID_ROLES = {"owner", "member", "guest"}
+
+
+class RoleUpdate(BaseModel):
+    """Request body for role update."""
+
+    role: str
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -93,6 +102,27 @@ async def admin_users(
     _require_owner(current_user, config)
     users = db.list_users()
     return [dict(u) for u in users]
+
+
+@router.put("/users/{user_id}/role")
+async def set_user_role(
+    user_id: str,
+    body: RoleUpdate,
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    db: MemoryStore = Depends(get_db),
+):
+    """Set user role (owner only)."""
+    _require_owner(current_user, config)
+    if body.role not in _VALID_ROLES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid role '{body.role}'. Must be one of: {_VALID_ROLES}",
+        )
+    if not db.user_exists(user_id):
+        raise HTTPException(status_code=404, detail=f"User '{user_id}' not found")
+    db.set_user_role(user_id, body.role)
+    return {"user_id": user_id, "role": body.role}
 
 
 @router.get("/crons")

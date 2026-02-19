@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from loguru import logger
 
 from graphbot.agent.graph import create_graph
+from graphbot.agent.permissions import get_allowed_tools, get_context_layers, get_max_sessions
 from graphbot.agent.tools import make_tools
 from graphbot.core.config.schema import Config
 from graphbot.core.providers.litellm import setup_provider
@@ -62,9 +63,24 @@ class GraphRunner:
         tuple[str, str]
             (assistant_response, session_id).
         """
+        # 0. RBAC — resolve user role and permissions
+        user = self.db.get_user(user_id)
+        role = (user.get("role") or "guest") if user else "guest"
+        allowed_tools = get_allowed_tools(role)
+        context_layers = get_context_layers(role)
+
         # 1. Session — client provides session_id, or we create one
+        #    Guest users: enforce single session limit
+        max_sess = get_max_sessions(role)
         if session_id is None:
-            session_id = self.db.create_session(user_id, channel)
+            if max_sess == 1:
+                active = self.db.get_active_session(user_id)
+                session_id = (
+                    active["session_id"] if active
+                    else self.db.create_session(user_id, channel)
+                )
+            else:
+                session_id = self.db.create_session(user_id, channel)
         elif not self.db.get_session(session_id):
             self.db.create_session(user_id, channel, session_id=session_id)
 
@@ -77,6 +93,9 @@ class GraphRunner:
                 "user_id": user_id,
                 "session_id": session_id,
                 "channel": channel,
+                "role": role,
+                "allowed_tools": allowed_tools,
+                "context_layers": context_layers,
                 "messages": history + [HumanMessage(content=message)],
                 "iteration": 0,
                 "token_count": 0,

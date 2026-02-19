@@ -1,0 +1,89 @@
+# GraphBot — Role-Based Access Control
+# Tool groups define which tools belong to each category.
+# Roles define which groups, context layers, and session limits apply.
+
+tool_groups:
+  memory:
+    - save_user_note
+    - get_user_context
+    - log_activity
+    - get_recent_activities
+    - add_favorite
+    - get_favorites
+    - remove_favorite
+  search:
+    - search_items
+    - get_item_detail
+  web:
+    - web_search
+    - web_fetch
+  filesystem:
+    - read_file
+    - write_file
+    - edit_file
+    - list_dir
+  shell:
+    - exec_command
+  scheduling:
+    - add_cron_job
+    - list_cron_jobs
+    - remove_cron_job
+    - create_alert
+    - create_reminder
+    - list_reminders
+    - cancel_reminder
+  messaging:
+    - send_message_to_user
+  delegation:
+    - delegate
+
+roles:
+  owner:
+    tool_groups:
+      - memory
+      - search
+      - web
+      - filesystem
+      - shell
+      - scheduling
+      - messaging
+      - delegation
+    context_layers:
+      - identity
+      - runtime
+      - role
+      - agent_memory
+      - user_context
+      - events
+      - session_summary
+      - skills
+    max_sessions: 0  # unlimited
+
+  member:
+    tool_groups:
+      - memory
+      - search
+      - web
+      - scheduling
+      - messaging
+    context_layers:
+      - identity
+      - runtime
+      - role
+      - agent_memory
+      - user_context
+      - events
+      - session_summary
+      - skills
+    max_sessions: 0
+
+  guest:
+    tool_groups:
+      - web
+    context_layers:
+      - identity
+      - runtime
+      - role
+    max_sessions: 1
+
+default_role: guest

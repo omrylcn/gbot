@@ -3,11 +3,12 @@ services:
     build: .
     container_name: graphbot
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     env_file:
       - .env
     volumes:
       - ./data:/app/data
       - ./workspace:/app/workspace
       - ./config.yaml:/app/config.yaml:ro
+      - ./roles.yaml:/app/roles.yaml:ro
     restart: unless-stopped

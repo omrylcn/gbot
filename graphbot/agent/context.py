@@ -33,7 +33,12 @@ class ContextBuilder:
             builtin_dir=Path(__file__).parent / "skills" / "builtin",
         )
 
-    def build(self, user_id: str, role: str | None = None) -> str:
+    def build(
+        self,
+        user_id: str,
+        role: str | None = None,
+        context_layers: set[str] | None = None,
+    ) -> str:
         """Build full system prompt for a user.
 
         Parameters
@@ -42,89 +47,102 @@ class ContextBuilder:
             Target user ID.
         role : str, optional
             Override role name. Falls back to config default.
+        context_layers : set[str], optional
+            Allowed context layers from RBAC. None = all layers.
         """
         parts: list[str] = []
         priorities = self.config.assistant.context_priorities
 
-        # 1. Identity
-        identity = self._get_identity()
-        if identity:
-            parts.append(self._truncate(identity, priorities.identity))
+        def _allowed(layer: str) -> bool:
+            return context_layers is None or layer in context_layers
+
+        # 1. Identity (always included)
+        if _allowed("identity"):
+            identity = self._get_identity()
+            if identity:
+                parts.append(self._truncate(identity, priorities.identity))
 
         # 2. Runtime info (user_id, datetime)
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
-        user = self.db.get_user(user_id)
-        user_name = user["name"] if user and user.get("name") else user_id
-        parts.append(
-            f"# Runtime\n\n"
-            f"- Current user_id: {user_id}\n"
-            f"- Current user_name: {user_name}\n"
-            f"- Current time: {now}\n"
-            f"- Use this user_id when calling tools that require it."
-        )
+        if _allowed("runtime"):
+            now = datetime.now().strftime("%Y-%m-%d %H:%M")
+            user = self.db.get_user(user_id)
+            user_name = user["name"] if user and user.get("name") else user_id
+            parts.append(
+                f"# Runtime\n\n"
+                f"- Current user_id: {user_id}\n"
+                f"- Current user_name: {user_name}\n"
+                f"- Current time: {now}\n"
+                f"- Use this user_id when calling tools that require it."
+            )
 
         # 3. Current role
-        role_text = self._get_role(role)
-        if role_text:
-            parts.append(f"# Current Role\n\n{role_text}")
+        if _allowed("role"):
+            role_text = self._get_role(role)
+            if role_text:
+                parts.append(f"# Current Role\n\n{role_text}")
 
         # 4. Agent memory
-        memory = self.db.read_memory("long_term")
-        if memory:
-            parts.append(
-                self._truncate(f"# Agent Memory\n\n{memory}", priorities.agent_memory)
-            )
+        if _allowed("agent_memory"):
+            memory = self.db.read_memory("long_term")
+            if memory:
+                parts.append(
+                    self._truncate(f"# Agent Memory\n\n{memory}", priorities.agent_memory)
+                )
 
         # 5. User context
-        user_ctx = self.db.get_user_context(user_id)
-        if user_ctx:
-            parts.append(
-                self._truncate(
-                    f"# User Context\n\n{user_ctx}", priorities.user_context
-                )
-            )
-
-        # 6. Undelivered system events (background notifications)
-        events = self.db.get_undelivered_events(user_id, limit=5)
-        if events:
-            lines = [
-                f"- [{e['source']}] {e['payload']}" for e in events
-            ]
-            parts.append(
-                "# Background Notifications\n\n" + "\n".join(lines)
-            )
-            self.db.mark_events_delivered([e["id"] for e in events])
-
-        # 7. Previous session summary
-        summary = self.db.get_last_session_summary(user_id)
-        if summary:
-            parts.append(
-                self._truncate(
-                    f"# Previous Conversation\n\n{summary}",
-                    priorities.session_summary,
-                )
-            )
-
-        # 7. Active skills (always-on, full content)
-        always_on = self.skills.get_always_on()
-        if always_on:
-            skill_texts = [self.skills.load_content(s.name) for s in always_on]
-            active = "\n\n---\n\n".join(t for t in skill_texts if t)
-            if active:
+        if _allowed("user_context"):
+            user_ctx = self.db.get_user_context(user_id)
+            if user_ctx:
                 parts.append(
                     self._truncate(
-                        f"# Active Skills\n\n{active}", priorities.skills
+                        f"# User Context\n\n{user_ctx}", priorities.user_context
                     )
                 )
 
-        # 8. Skills index
-        index = self.skills.build_index()
-        if index:
-            parts.append(
-                "# Available Skills\n\n"
-                "Use read_file to load a skill's full instructions when needed.\n\n"
-                + index
-            )
+        # 6. Undelivered system events (background notifications)
+        if _allowed("events"):
+            events = self.db.get_undelivered_events(user_id, limit=5)
+            if events:
+                lines = [
+                    f"- [{e['source']}] {e['payload']}" for e in events
+                ]
+                parts.append(
+                    "# Background Notifications\n\n" + "\n".join(lines)
+                )
+                self.db.mark_events_delivered([e["id"] for e in events])
+
+        # 7. Previous session summary
+        if _allowed("session_summary"):
+            summary = self.db.get_last_session_summary(user_id)
+            if summary:
+                parts.append(
+                    self._truncate(
+                        f"# Previous Conversation\n\n{summary}",
+                        priorities.session_summary,
+                    )
+                )
+
+        # 8. Active skills (always-on, full content)
+        if _allowed("skills"):
+            always_on = self.skills.get_always_on()
+            if always_on:
+                skill_texts = [self.skills.load_content(s.name) for s in always_on]
+                active = "\n\n---\n\n".join(t for t in skill_texts if t)
+                if active:
+                    parts.append(
+                        self._truncate(
+                            f"# Active Skills\n\n{active}", priorities.skills
+                        )
+                    )
+
+            # Skills index
+            index = self.skills.build_index()
+            if index:
+                parts.append(
+                    "# Available Skills\n\n"
+                    "Use read_file to load a skill's full instructions when needed.\n\n"
+                    + index
+                )
 
         return "\n\n---\n\n".join(parts)
 

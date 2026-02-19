@@ -53,6 +53,8 @@ class MemoryStore:
             conn.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
         if "role" not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")
+        # Migrate legacy role='user' → 'member'
+        conn.execute("UPDATE users SET role = 'member' WHERE role = 'user'")
 
         # Cron jobs: LightAgent columns (Faz 13)
         cron_cols = {
@@ -107,6 +109,16 @@ class MemoryStore:
                 (user_id,),
             ).fetchone()
         return dict(row) if row else None
+
+    def set_user_role(self, user_id: str, role: str) -> None:
+        """Update user role (owner, member, guest)."""
+        with self._get_conn() as conn:
+            conn.execute(
+                "UPDATE users SET role = ? WHERE user_id = ?",
+                (role, user_id),
+            )
+            conn.commit()
+        logger.info(f"User {user_id} role set to: {role}")
 
     def user_exists(self, user_id: str) -> bool:
         with self._get_conn() as conn:

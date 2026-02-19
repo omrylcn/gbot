@@ -78,12 +78,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
 
 def _ensure_owner(config, db) -> None:
-    """Create owner user in DB at startup if configured."""
+    """Create owner user in DB at startup and ensure role='owner'."""
     if config.assistant.owner is None:
         return
     owner = config.assistant.owner
     db.get_or_create_user(owner.username, name=owner.name)
-    logger.info(f"Owner user ensured: {owner.username}")
+    db.set_user_role(owner.username, "owner")
+    logger.info(f"Owner user ensured: {owner.username} (role=owner)")
 
 
 @asynccontextmanager

@@ -145,7 +145,7 @@ def test_web_tools_created(cfg):
 
 def test_make_tools_all(cfg, store):
     tools = make_tools(cfg, store)
-    assert len(tools) == 16  # 7+2+4+1+2+0+0
+    assert len(tools) == 17  # 7+2+4+1+2+0+0+1(messaging)
     names = {t.name for t in tools}
     assert "save_user_note" in names
     assert "search_items" in names
