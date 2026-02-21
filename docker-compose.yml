@@ -12,3 +12,25 @@ services:
       - ./config.yaml:/app/config.yaml:ro
       - ./roles.yaml:/app/roles.yaml:ro
     restart: unless-stopped
+
+  waha:
+    image: devlikeapro/waha
+    container_name: waha
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - WHATSAPP_DEFAULT_ENGINE=NOWEB
+      - WAHA_API_KEY=2275f9a154174f18a912644829b8dad4
+      - WAHA_API_KEY_EXCLUDE_PATH=health,ping
+      - TZ=Europe/Istanbul
+    volumes:
+      - waha_sessions:/app/.sessions
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  waha_sessions:

@@ -112,8 +112,13 @@ class DiscordChannelConfig(BaseModel):
 
 class WhatsAppChannelConfig(BaseModel):
     enabled: bool = False
-    bridge_url: str = "ws://localhost:3001"
+    waha_url: str = "http://localhost:3000"
+    session: str = "default"
+    api_key: str = ""
     allow_from: list[str] = Field(default_factory=list)
+    allowed_groups: list[str] = Field(default_factory=list)
+    respond_to_dm: bool = False
+    monitor_dm: bool = False
 
 
 class FeishuChannelConfig(BaseModel):

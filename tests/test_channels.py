@@ -231,7 +231,7 @@ async def test_telegram_non_message_update(tmp_path):
 
 @pytest.mark.asyncio
 async def test_stub_endpoints(tmp_path):
-    """Discord, WhatsApp, Feishu stubs return 501."""
+    """Discord, Feishu stubs return 501."""
     from graphbot.api.app import create_app
 
     app = create_app()
@@ -241,6 +241,6 @@ async def test_stub_endpoints(tmp_path):
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        for path in ["/webhooks/discord", "/webhooks/whatsapp", "/webhooks/feishu"]:
+        for path in ["/webhooks/discord", "/webhooks/feishu"]:
             resp = await client.post(path)
             assert resp.status_code == 501, f"{path} should return 501"

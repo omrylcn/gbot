@@ -6,6 +6,30 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.10.0] - 2026-02-21
+
+### Added (WhatsApp Channel — WAHA Integration)
+
+- **WAHA REST API client:** `WAHAClient` async client — `send_text()`, `get_session_status()`, phone↔chat_id conversion helpers
+- **WhatsApp webhook handler:** `POST /webhooks/whatsapp/{user_id}` — full message processing pipeline (like Telegram)
+- **Global webhook:** `POST /webhooks/whatsapp` — auto-routes by sender phone via `user_channels` table, only processes allowed groups
+- **Allowed groups:** `allowed_groups` config list — bot only sees and responds to messages in specified groups
+- **`[gbot]` response prefix:** All bot responses prefixed with `[gbot]` to distinguish from real messages
+- **Loop prevention:** Bot's own `[gbot]` messages (fromMe) are skipped to prevent infinite loops
+- **DM config flags:** `respond_to_dm` and `monitor_dm` — configurable DM behavior (both default `false`)
+- **Duplicate event filtering:** `message.any` only used for `fromMe` messages, `message` for regular incoming (prevents double processing)
+- **Non-chat filtering:** Newsletter (`@newsletter`), broadcast (`@broadcast`) messages ignored — only `@c.us` and `@g.us` accepted
+- **Message splitting:** `split_message()` splits long responses at paragraph boundaries (WhatsApp 4096 char limit)
+- **Scheduler integration:** `_send_to_channel()` supports WhatsApp — proactive messaging via WAHA for cron/reminders
+- **WhatsApp send tool:** `send_whatsapp_message` in messaging tools — send messages to saved WhatsApp contacts
+- **WAHA Docker service:** `docker-compose.yml` includes WAHA container with health check
+- **35 tests:** WAHAClient helpers, message splitting, webhook handler (group/DM/filtering/session), global webhook routing
+
+### Changed
+
+- **`WhatsAppChannelConfig`:** Replaced Baileys fields (`bridge_url`) with WAHA fields (`waha_url`, `session`, `api_key`, `allowed_groups`, `respond_to_dm`, `monitor_dm`)
+- **Session isolation:** WhatsApp messages stored in WhatsApp-specific sessions, never leak to Telegram/API sessions
+
 ## [1.9.0] - 2026-02-21
 
 ### Added (Web Tools & Multi-Provider)

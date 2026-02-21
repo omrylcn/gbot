@@ -257,6 +257,23 @@ class CronScheduler:
                 logger.warning(f"No telegram link for user {user_id}")
             return False
 
+        if channel == "whatsapp":
+            link = self.db.get_channel_link(user_id, "whatsapp")
+            if link:
+                chat_id = link["metadata"].get("chat_id")
+                if chat_id and self.config:
+                    from graphbot.core.channels.whatsapp import send_whatsapp_message
+
+                    logger.debug(f"Sending to WhatsApp: chat_id={chat_id}")
+                    await send_whatsapp_message(
+                        self.config.channels.whatsapp, chat_id, text
+                    )
+                    return True
+                logger.warning(f"No chat_id for WhatsApp user {user_id}")
+            else:
+                logger.warning(f"No whatsapp link for user {user_id}")
+            return False
+
         # API/WS channel: try WebSocket push, fallback to system_event
         ws_manager = getattr(self, "ws_manager", None)
         if ws_manager and ws_manager.is_connected(user_id):

@@ -69,10 +69,17 @@ def make_messaging_tools(config: Config, db: MemoryStore) -> list:
         target_user_id = target_user_obj["user_id"]
         target_name = target_user_obj["name"] or target_user_id
 
-        # Get channel link
+        # Get channel link — try specified, then fallback to any available
         link = db.get_channel_link(target_user_id, channel)
         if not link:
-            return f"User '{target_name}' has no {channel} channel configured."
+            # Auto-detect: try whatsapp, then telegram
+            for fallback in ("whatsapp", "telegram"):
+                link = db.get_channel_link(target_user_id, fallback)
+                if link:
+                    channel = fallback
+                    break
+        if not link:
+            return f"User '{target_name}' has no messaging channel configured."
 
         # Send via Telegram
         if channel == "telegram":
@@ -85,7 +92,6 @@ def make_messaging_tools(config: Config, db: MemoryStore) -> list:
 
                 from graphbot.core.channels.telegram import send_message
 
-                # Run async function in sync context
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
@@ -98,13 +104,46 @@ def make_messaging_tools(config: Config, db: MemoryStore) -> list:
                 logger.info(
                     f"Message sent to {target_name} ({target_user_id}) via {channel}: {message[:50]}"
                 )
-                return f"✓ Message sent to {target_name} via {channel}."
+                return f"Message sent to {target_name} via {channel}."
 
             except Exception as e:
                 logger.error(f"Failed to send message to {target_name}: {e}")
                 return f"Failed to send message to {target_name}: {e}"
 
-        # Other channels (API, Discord, etc.) can be added here
+        # Send via WhatsApp
+        if channel == "whatsapp":
+            from graphbot.core.channels.waha_client import WAHAClient
+
+            chat_id = link["metadata"].get("chat_id")
+            if not chat_id:
+                # Fallback: build chat_id from channel_user_id (phone number)
+                chat_id = WAHAClient.phone_to_chat_id(link["channel_user_id"])
+
+            try:
+                import asyncio
+
+                from graphbot.core.channels.whatsapp import send_whatsapp_message
+
+                wa_config = config.channels.whatsapp
+
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(
+                        send_whatsapp_message(wa_config, chat_id, message)
+                    )
+                finally:
+                    loop.close()
+
+                logger.info(
+                    f"Message sent to {target_name} ({target_user_id}) via whatsapp: {message[:50]}"
+                )
+                return f"Message sent to {target_name} via WhatsApp."
+
+            except Exception as e:
+                logger.error(f"Failed to send WhatsApp message to {target_name}: {e}")
+                return f"Failed to send WhatsApp message to {target_name}: {e}"
+
         return f"Channel '{channel}' not supported for direct messaging yet."
 
     return [send_message_to_user]
