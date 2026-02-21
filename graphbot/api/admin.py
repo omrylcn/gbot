@@ -167,6 +167,85 @@ async def admin_tools(
     }
 
 
+@router.get("/stats")
+async def admin_stats(
+    request: Request,
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    db: MemoryStore = Depends(get_db),
+):
+    """Comprehensive system stats: context, tools, sessions, tokens."""
+    _require_owner(current_user, config)
+
+    from graphbot.agent.context import ContextBuilder
+
+    # Context stats for owner
+    ctx = ContextBuilder(config, db)
+    context_stats = ctx.get_context_stats(config.owner_user_id)
+
+    # Tool stats
+    registry = request.app.state.runner.registry
+    tool_groups = registry.get_groups_summary()
+    tool_total = len(registry)
+    tool_available = len(registry.get_all_tools())
+
+    # Session & token stats
+    with db._get_conn() as conn:
+        user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        active_sessions = conn.execute(
+            "SELECT COUNT(*) FROM sessions WHERE ended_at IS NULL"
+        ).fetchone()[0]
+        total_sessions = conn.execute(
+            "SELECT COUNT(*) FROM sessions"
+        ).fetchone()[0]
+        total_tokens = conn.execute(
+            "SELECT COALESCE(SUM(token_count), 0) FROM sessions"
+        ).fetchone()[0]
+        total_messages = conn.execute(
+            "SELECT COUNT(*) FROM messages"
+        ).fetchone()[0]
+        cron_count = conn.execute(
+            "SELECT COUNT(*) FROM cron_jobs WHERE enabled = 1"
+        ).fetchone()[0]
+        reminder_count = conn.execute(
+            "SELECT COUNT(*) FROM reminders WHERE status = 'pending'"
+        ).fetchone()[0]
+        note_count = conn.execute(
+            "SELECT COUNT(*) FROM user_notes"
+        ).fetchone()[0]
+        memory_count = conn.execute(
+            "SELECT COUNT(*) FROM agent_memory"
+        ).fetchone()[0]
+
+    return {
+        "system": {
+            "version": __version__,
+            "model": config.assistant.model,
+            "session_token_limit": config.assistant.session_token_limit,
+            "thinking": config.assistant.thinking,
+        },
+        "context": context_stats,
+        "tools": {
+            "total": tool_total,
+            "available": tool_available,
+            "groups": tool_groups,
+        },
+        "sessions": {
+            "active": active_sessions,
+            "total": total_sessions,
+            "total_tokens": total_tokens,
+        },
+        "data": {
+            "users": user_count,
+            "messages": total_messages,
+            "notes": note_count,
+            "memories": memory_count,
+            "cron_jobs": cron_count,
+            "reminders": reminder_count,
+        },
+    }
+
+
 @router.get("/logs")
 async def admin_logs(
     limit: int = Query(default=50, ge=1, le=500),

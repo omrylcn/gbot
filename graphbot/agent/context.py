@@ -236,6 +236,77 @@ class ContextBuilder:
             return f"Role: {roles.default}"
         return None
 
+    def get_context_stats(
+        self,
+        user_id: str,
+        role: str | None = None,
+        context_layers: set[str] | None = None,
+    ) -> dict:
+        """Measure each context layer's size without building the full prompt.
+
+        Returns a dict with per-layer char/token counts and totals.
+        """
+        priorities = self.config.assistant.context_priorities
+        layers: list[dict] = []
+
+        def _allowed(layer: str) -> bool:
+            return context_layers is None or layer in context_layers
+
+        def _add(name: str, text: str, budget: int = 0) -> None:
+            chars = len(text)
+            tokens_approx = chars // 4
+            layers.append({
+                "layer": name,
+                "chars": chars,
+                "tokens": tokens_approx,
+                "budget": budget,
+                "truncated": chars > budget * 4 if budget else False,
+            })
+
+        if _allowed("identity"):
+            identity = self._get_identity()
+            _add("identity", identity or "", priorities.identity)
+
+        if _allowed("runtime"):
+            _add("runtime", "~runtime~", 0)  # small, constant
+
+        if _allowed("role"):
+            role_text = self._get_role(role) or ""
+            _add("role", role_text, 0)
+
+        if _allowed("agent_memory"):
+            memory = self.db.read_memory("long_term") or ""
+            _add("agent_memory", memory, priorities.agent_memory)
+
+        if _allowed("user_context"):
+            user_ctx = self.db.get_user_context(user_id) or ""
+            _add("user_context", user_ctx, priorities.user_context)
+
+        if _allowed("events"):
+            events = self.db.get_undelivered_events(user_id, limit=5)
+            text = "\n".join(e.get("payload", "") for e in events) if events else ""
+            _add("events", text, 0)
+
+        if _allowed("session_summary"):
+            summary = self.db.get_last_session_summary(user_id) or ""
+            _add("session_summary", summary, priorities.session_summary)
+
+        if _allowed("skills"):
+            always_on = self.skills.get_always_on()
+            skill_texts = [self.skills.load_content(s.name) for s in always_on]
+            active = "\n".join(t for t in skill_texts if t)
+            index = self.skills.build_index() or ""
+            _add("skills", active + index, priorities.skills)
+
+        total_chars = sum(l["chars"] for l in layers)
+        total_tokens = sum(l["tokens"] for l in layers)
+
+        return {
+            "layers": layers,
+            "total_chars": total_chars,
+            "total_tokens": total_tokens,
+        }
+
     # ── Helpers ───────────────────────────────────────────────
 
     @staticmethod

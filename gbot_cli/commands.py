@@ -218,32 +218,167 @@ def logout() -> None:
 
 
 @app.command()
-def status() -> None:
-    """Show configuration and database status."""
+def status(
+    channel: str | None = typer.Option(None, "--channel", "-c", help="Filter active session by channel (api, telegram, ...)"),
+    user: str | None = typer.Option(None, "--user", "-u", help="User ID for session info (default: owner)"),
+) -> None:
+    """Show comprehensive system stats: context, tools, sessions, tokens."""
+    from rich.panel import Panel
+    from rich.text import Text
+
+    from graphbot.agent.context import ContextBuilder
+    from graphbot.agent.tools import make_tools
     from graphbot.core.config.loader import load_config
     from graphbot.memory.store import MemoryStore
 
     config = load_config()
     db = MemoryStore(config.database.path)
+    target_user = user or config.owner_user_id
 
-    # Count users
+    # ── System info ──
+    sys_table = Table(show_header=False, box=None, padding=(0, 2))
+    sys_table.add_column(style="dim")
+    sys_table.add_column(style="bold")
+    sys_table.add_row("Version", __version__)
+    sys_table.add_row("Model", config.assistant.model)
+    sys_table.add_row("Thinking", "on" if config.assistant.thinking else "off")
+    sys_table.add_row("Token Limit", f"{config.assistant.session_token_limit:,}")
+    console.print(Panel(sys_table, title="System", border_style="blue"))
+
+    # ── Context layers ──
+    ctx = ContextBuilder(config, db)
+    stats = ctx.get_context_stats(target_user)
+
+    ctx_table = Table(box=None, padding=(0, 2))
+    ctx_table.add_column("Layer", style="cyan")
+    ctx_table.add_column("Tokens", justify="right", style="green")
+    ctx_table.add_column("Chars", justify="right", style="dim")
+    ctx_table.add_column("Budget", justify="right", style="yellow")
+    ctx_table.add_column("", style="dim")
+
+    for layer in stats["layers"]:
+        bar_len = min(layer["tokens"] // 20, 30)  # scale: 20 tokens = 1 char
+        bar = Text("█" * bar_len, style="green" if not layer["truncated"] else "red")
+        budget_str = str(layer["budget"]) if layer["budget"] else "-"
+        ctx_table.add_row(
+            layer["layer"],
+            f"{layer['tokens']:,}",
+            f"{layer['chars']:,}",
+            budget_str,
+            bar,
+        )
+
+    ctx_table.add_section()
+    ctx_table.add_row(
+        "TOTAL",
+        f"{stats['total_tokens']:,}",
+        f"{stats['total_chars']:,}",
+        "",
+        "",
+    )
+    console.print(Panel(ctx_table, title="Context Layers", border_style="green"))
+
+    # ── Tools ──
+    registry = make_tools(config, db)
+    tool_table = Table(box=None, padding=(0, 2))
+    tool_table.add_column("Group", style="cyan")
+    tool_table.add_column("Tools", justify="right", style="green")
+    tool_table.add_column("Names", style="dim")
+
+    groups = registry.get_groups_summary()
+    for group, names in sorted(groups.items()):
+        tool_table.add_row(group, str(len(names)), ", ".join(sorted(names)))
+
+    tool_table.add_section()
+    tool_table.add_row(
+        "TOTAL",
+        str(len(registry.get_all_tools())),
+        f"({len(registry)} registered)",
+    )
+    console.print(Panel(tool_table, title="Tools", border_style="yellow"))
+
+    # ── Data ──
     with db._get_conn() as conn:
         user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-        session_count = conn.execute(
+        active_sessions = conn.execute(
             "SELECT COUNT(*) FROM sessions WHERE ended_at IS NULL"
         ).fetchone()[0]
+        total_sessions = conn.execute(
+            "SELECT COUNT(*) FROM sessions"
+        ).fetchone()[0]
+        total_tokens = conn.execute(
+            "SELECT COALESCE(SUM(token_count), 0) FROM sessions"
+        ).fetchone()[0]
+        total_messages = conn.execute(
+            "SELECT COUNT(*) FROM messages"
+        ).fetchone()[0]
+        cron_count = conn.execute(
+            "SELECT COUNT(*) FROM cron_jobs WHERE enabled = 1"
+        ).fetchone()[0]
+        reminder_count = conn.execute(
+            "SELECT COUNT(*) FROM reminders WHERE status = 'pending'"
+        ).fetchone()[0]
+        note_count = conn.execute(
+            "SELECT COUNT(*) FROM user_notes"
+        ).fetchone()[0]
 
-    table = Table(title="gbot status")
-    table.add_column("Key", style="cyan")
-    table.add_column("Value", style="green")
+    data_table = Table(show_header=False, box=None, padding=(0, 2))
+    data_table.add_column(style="dim")
+    data_table.add_column(justify="right", style="bold")
 
-    table.add_row("Version", __version__)
-    table.add_row("Model", config.assistant.model)
-    table.add_row("DB Path", config.database.path)
-    table.add_row("Users", str(user_count))
-    table.add_row("Active Sessions", str(session_count))
+    data_table.add_row("Users", str(user_count))
+    data_table.add_row("Sessions", f"{active_sessions} active / {total_sessions} total")
+    data_table.add_row("Total Tokens", f"{total_tokens:,}")
+    data_table.add_row("Messages", f"{total_messages:,}")
+    data_table.add_row("Notes", str(note_count))
+    data_table.add_row("Cron Jobs", str(cron_count))
+    data_table.add_row("Reminders", str(reminder_count))
+    console.print(Panel(data_table, title="Data", border_style="magenta"))
 
-    console.print(table)
+    # ── Active Session (optionally filtered by user and/or channel) ──
+    if channel:
+        with db._get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM sessions WHERE user_id = ? AND channel = ? "
+                "AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1",
+                (target_user, channel),
+            ).fetchone()
+            active_session = dict(row) if row else None
+    else:
+        active_session = db.get_active_session(target_user)
+    session_title = f"Active Session ({target_user})" if user else "Active Session"
+    if active_session:
+        sid = active_session["session_id"]
+        msgs = db.get_session_messages(sid)
+        user_msgs = sum(1 for m in msgs if m["role"] == "user")
+        asst_msgs = sum(1 for m in msgs if m["role"] == "assistant")
+        tool_msgs = sum(1 for m in msgs if m["role"] == "tool")
+        tok = active_session.get("token_count", 0)
+        tok_limit = config.assistant.session_token_limit
+        tok_pct = tok / tok_limit * 100 if tok_limit else 0
+
+        bar_width = 30
+        filled = int(bar_width * tok_pct / 100)
+        bar_color = "green" if tok_pct < 60 else ("yellow" if tok_pct < 85 else "red")
+        bar = Text(
+            "█" * filled + "░" * (bar_width - filled),
+            style=bar_color,
+        )
+
+        sess_table = Table(show_header=False, box=None, padding=(0, 2))
+        sess_table.add_column(style="dim")
+        sess_table.add_column(style="bold")
+
+        sess_table.add_row("Session", sid[:12] + "...")
+        sess_table.add_row("Channel", active_session.get("channel", "?"))
+        sess_table.add_row(
+            "Messages",
+            f"{len(msgs)} ({user_msgs} user, {asst_msgs} assistant, {tool_msgs} tool)",
+        )
+        sess_table.add_row("Tokens", f"{tok:,} / {tok_limit:,} ({tok_pct:.0f}%)")
+        sess_table.add_row("Progress", bar)
+        sess_table.add_row("Started", active_session.get("started_at", "?"))
+        console.print(Panel(sess_table, title=session_title, border_style="cyan"))
 
 
 # ════════════════════════════════════════════════════════════

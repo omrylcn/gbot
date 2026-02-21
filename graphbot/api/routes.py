@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 
 from graphbot import __version__
@@ -86,6 +86,65 @@ async def session_history(
         raise HTTPException(status_code=403, detail="Access denied")
     messages = db.get_session_messages(session_id)
     return {"session_id": session_id, "messages": messages}
+
+
+@router.get("/session/{session_id}/stats")
+async def session_stats(
+    session_id: str,
+    request: Request,
+    current_user: str = Depends(get_current_user),
+    db: MemoryStore = Depends(get_db),
+    config: Config = Depends(get_config),
+):
+    """Session-level stats: messages, tokens, context breakdown, tools."""
+    session = db.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if config.auth_enabled and session.get("user_id") != current_user:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    user_id = session["user_id"]
+
+    # Message counts
+    messages = db.get_session_messages(session_id)
+    user_msgs = sum(1 for m in messages if m["role"] == "user")
+    assistant_msgs = sum(1 for m in messages if m["role"] == "assistant")
+    tool_msgs = sum(1 for m in messages if m["role"] == "tool")
+
+    # Context stats
+    from graphbot.agent.context import ContextBuilder
+    ctx = ContextBuilder(config, db)
+    context_stats = ctx.get_context_stats(user_id)
+
+    # Tool stats
+    registry = request.app.state.runner.registry
+    tool_total = len(registry.get_all_tools())
+
+    token_count = session.get("token_count", 0)
+    token_limit = config.assistant.session_token_limit
+    token_pct = round(token_count / token_limit * 100, 1) if token_limit else 0
+
+    return {
+        "session_id": session_id,
+        "user_id": user_id,
+        "channel": session.get("channel", "api"),
+        "started_at": session.get("started_at"),
+        "active": session.get("ended_at") is None,
+        "messages": {
+            "total": len(messages),
+            "user": user_msgs,
+            "assistant": assistant_msgs,
+            "tool_calls": tool_msgs,
+        },
+        "tokens": {
+            "used": token_count,
+            "limit": token_limit,
+            "percent": token_pct,
+        },
+        "context": context_stats,
+        "tools": tool_total,
+        "model": config.assistant.model,
+    }
 
 
 @router.post("/session/{session_id}/end")

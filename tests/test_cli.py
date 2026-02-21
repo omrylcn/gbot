@@ -47,10 +47,19 @@ def test_chat_single_message(tmp_path):
 
 
 def test_status_output(tmp_path):
-    """status shows model name and DB path."""
+    """status shows model name and system panels."""
     fake_config = MagicMock()
     fake_config.assistant.model = "anthropic/claude-test"
+    fake_config.assistant.thinking = False
+    fake_config.assistant.session_token_limit = 30000
+    fake_config.assistant.context_priorities.identity = 500
+    fake_config.assistant.context_priorities.agent_memory = 500
+    fake_config.assistant.context_priorities.user_context = 1500
+    fake_config.assistant.context_priorities.session_summary = 500
+    fake_config.assistant.context_priorities.skills = 1000
     fake_config.database.path = str(tmp_path / "test.db")
+    fake_config.workspace_path = tmp_path
+    fake_config.owner_user_id = "test_owner"
 
     fake_conn = MagicMock()
     fake_conn.execute.return_value.fetchone.return_value = [0]
@@ -59,16 +68,28 @@ def test_status_output(tmp_path):
 
     fake_db = MagicMock()
     fake_db._get_conn.return_value = fake_conn
+    fake_db.read_memory.return_value = ""
+    fake_db.get_user_context.return_value = ""
+    fake_db.get_undelivered_events.return_value = []
+    fake_db.get_last_session_summary.return_value = ""
+    fake_db.get_user.return_value = None
+    fake_db.get_active_session.return_value = None
+
+    fake_registry = MagicMock()
+    fake_registry.get_groups_summary.return_value = {"web": ["web_fetch"]}
+    fake_registry.get_all_tools.return_value = [MagicMock()]
+    fake_registry.__len__ = MagicMock(return_value=1)
 
     with (
         patch(_PATCH_CONFIG, return_value=fake_config),
         patch(_PATCH_STORE, return_value=fake_db),
+        patch("graphbot.agent.tools.make_tools", return_value=fake_registry),
     ):
         result = runner.invoke(app, ["status"])
 
     assert result.exit_code == 0
     assert "claude-test" in result.output
-    assert "DB Path" in result.output
+    assert "System" in result.output
 
 
 def test_cron_list_empty(tmp_path):
