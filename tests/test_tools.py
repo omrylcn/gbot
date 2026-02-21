@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from graphbot.agent.tools import make_tools
+from graphbot.agent.tools import ToolRegistry, make_tools
 from graphbot.agent.tools.filesystem import make_filesystem_tools
 from graphbot.agent.tools.memory_tools import make_memory_tools
 from graphbot.agent.tools.search import make_search_tools
@@ -30,11 +30,14 @@ def cfg(tmp_path):
 
 def test_memory_tools_created(store):
     tools = make_memory_tools(store)
-    assert len(tools) == 7
+    assert len(tools) == 10
     names = {t.name for t in tools}
     assert "save_user_note" in names
     assert "get_user_context" in names
     assert "add_favorite" in names
+    assert "set_user_preference" in names
+    assert "get_user_preferences" in names
+    assert "remove_user_preference" in names
 
 
 def test_save_and_get_note(store):
@@ -143,12 +146,35 @@ def test_web_tools_created(cfg):
 
 # --- Integration ---
 
-def test_make_tools_all(cfg, store):
-    tools = make_tools(cfg, store)
-    assert len(tools) == 17  # 7+2+4+1+2+0+0+1(messaging)
+def test_make_tools_returns_registry(cfg, store):
+    registry = make_tools(cfg, store)
+    assert isinstance(registry, ToolRegistry)
+
+    # Static tools should be available (no scheduler/worker)
+    tools = registry.get_all_tools()
     names = {t.name for t in tools}
     assert "save_user_note" in names
     assert "search_items" in names
     assert "read_file" in names
     assert "exec_command" in names
     assert "web_search" in names
+
+    # Groups should be registered
+    summary = registry.get_groups_summary()
+    assert "memory" in summary
+    assert "search" in summary
+    assert "filesystem" in summary
+    assert "shell" in summary
+    assert "web" in summary
+    assert "messaging" in summary
+    assert "scheduling" in summary  # registered as unavailable
+    assert "delegation" in summary  # registered as unavailable
+
+    # Scheduling tools unavailable (no scheduler)
+    sched_tools = registry.get_tools_for_groups(["scheduling"])
+    assert len(sched_tools) == 0  # registered but not available
+
+    # Catalog for admin introspection
+    catalog = registry.get_catalog()
+    assert len(catalog) == len(tools)
+    assert all("name" in item and "group" in item for item in catalog)

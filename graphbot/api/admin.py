@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from graphbot import __version__
@@ -148,6 +148,23 @@ async def admin_remove_cron(
     _require_owner(current_user, config)
     db.remove_cron_job(job_id)
     return {"status": "removed", "job_id": job_id}
+
+
+@router.get("/tools")
+async def admin_tools(
+    request: Request,
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+):
+    """List all registered tools with metadata, groups, and availability."""
+    _require_owner(current_user, config)
+    registry = request.app.state.runner.registry
+    return {
+        "tools": registry.get_catalog(),
+        "groups": registry.get_groups_summary(),
+        "total": len(registry),
+        "available": len(registry.get_all_tools()),
+    }
 
 
 @router.get("/logs")

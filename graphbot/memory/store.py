@@ -620,6 +620,24 @@ class MemoryStore:
             )
             conn.commit()
 
+    def remove_preference(self, user_id: str, key: str) -> bool:
+        """Remove a single key from user preferences. Returns True if removed."""
+        current = self.get_preferences(user_id)
+        if key not in current:
+            return False
+        del current[key]
+        with self._get_conn() as conn:
+            conn.execute(
+                """INSERT INTO preferences (user_id, data)
+                   VALUES (?, ?)
+                   ON CONFLICT(user_id) DO UPDATE SET
+                       data = excluded.data,
+                       updated_at = CURRENT_TIMESTAMP""",
+                (user_id, json.dumps(current, ensure_ascii=False)),
+            )
+            conn.commit()
+        return True
+
     # ════════════════════════════════════════════════════════════
     # CRON JOBS
     # ════════════════════════════════════════════════════════════

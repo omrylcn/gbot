@@ -40,6 +40,9 @@ dependencies = [
     "apscheduler>=3.10.0",
     "croniter>=1.3.0",
 
+    # Web search
+    "duckduckgo-search>=8.0.0",
+
     # Logging
     "loguru>=0.7.0",
 

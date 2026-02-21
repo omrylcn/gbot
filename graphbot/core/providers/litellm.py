@@ -24,6 +24,7 @@ def setup_provider(config: Config) -> None:
     _set_key("DEEPSEEK_API_KEY", config.providers.deepseek.api_key)
     _set_key("GROQ_API_KEY", config.providers.groq.api_key)
     _set_key("GEMINI_API_KEY", config.providers.gemini.api_key)
+    _set_key("MOONSHOT_API_KEY", config.providers.moonshot.api_key)
 
 
 async def achat(
@@ -33,6 +34,7 @@ async def achat(
     temperature: float = 0.7,
     max_tokens: int = 4096,
     api_base: str | None = None,
+    thinking: bool = False,
 ) -> AIMessage:
     """Call LiteLLM and return a LangChain AIMessage."""
     kwargs: dict[str, Any] = {
@@ -46,6 +48,16 @@ async def achat(
         kwargs["tool_choice"] = "auto"
     if api_base:
         kwargs["api_base"] = api_base
+
+    _is_moonshot = "moonshot/" in model and "k2" in model
+
+    # Thinking mode: force temperature=1 (required by reasoning models).
+    # Non-thinking mode: disable thinking for Moonshot, use config temperature.
+    if thinking:
+        kwargs["temperature"] = 1.0
+        kwargs["reasoning_effort"] = "medium"
+    elif _is_moonshot:
+        kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
 
     try:
         response = await litellm.acompletion(**kwargs)
@@ -73,9 +85,16 @@ def _to_ai_message(response: Any) -> AIMessage:
                 {"id": tc.id, "name": tc.function.name, "args": args}
             )
 
+    # Preserve reasoning_content for thinking models (Kimi K2.5, DeepSeek R1, etc.)
+    additional_kwargs: dict[str, Any] = {}
+    reasoning = getattr(msg, "reasoning_content", None)
+    if reasoning:
+        additional_kwargs["reasoning_content"] = reasoning
+
     return AIMessage(
         content=msg.content or "",
         tool_calls=tool_calls,
+        additional_kwargs=additional_kwargs,
         response_metadata={
             "finish_reason": choice.finish_reason or "stop",
             "usage": {
@@ -85,6 +104,122 @@ def _to_ai_message(response: Any) -> AIMessage:
             },
         },
     )
+
+
+async def asummarize(
+    messages: list[dict[str, Any]],
+    model: str = "openai/gpt-4o-mini",
+    max_tokens: int = 500,
+) -> str:
+    """Summarize a conversation for session transition.
+
+    Uses a cheap model to produce a concise summary preserving user preferences,
+    ongoing topics, and important decisions.
+
+    Parameters
+    ----------
+    messages : list[dict]
+        Conversation messages in LiteLLM format.
+    model : str
+        Model to use (default: cheap model).
+    max_tokens : int
+        Max tokens for summary output.
+
+    Returns
+    -------
+    str
+        Summary text, or empty string on failure.
+    """
+    system_prompt = (
+        "You are a conversation summarizer. Produce a concise summary in this format:\n\n"
+        "First, write a brief narrative summary (2-4 sentences) capturing the main flow "
+        "of the conversation, key decisions, and context.\n\n"
+        "Then add structured bullets:\n"
+        "- TOPICS: Main subjects discussed\n"
+        "- DECISIONS: Choices made or preferences expressed\n"
+        "- PENDING: Unresolved questions or next steps\n"
+        "- USER_INFO: New personal information learned about the user\n\n"
+        "Write in the same language as the conversation. "
+        "Keep total output under 300 words. Skip sections with no content. "
+        "Do NOT include greetings or filler."
+    )
+
+    summary_messages = [
+        {"role": "system", "content": system_prompt},
+        *messages,
+        {"role": "user", "content": "Summarize this conversation concisely."},
+    ]
+
+    try:
+        response = await litellm.acompletion(
+            model=model,
+            messages=summary_messages,
+            temperature=0.3,
+            max_tokens=max_tokens,
+        )
+        return response.choices[0].message.content or ""
+    except Exception as e:
+        logger.error(f"Summarization failed: {e}")
+        return ""
+
+
+async def aextract_facts(
+    messages: list[dict[str, Any]],
+    model: str = "openai/gpt-4o-mini",
+    max_tokens: int = 300,
+) -> dict[str, Any]:
+    """Extract structured facts from a conversation for persistent storage.
+
+    Uses a cheap model with JSON output mode to identify user preferences
+    and notable facts. Results are saved to DB by the caller.
+
+    Parameters
+    ----------
+    messages : list[dict]
+        Conversation messages in LiteLLM format.
+    model : str
+        Model to use (default: cheap model).
+    max_tokens : int
+        Max tokens for extraction output.
+
+    Returns
+    -------
+    dict[str, Any]
+        Dict with optional keys ``preferences`` (list of key/value dicts)
+        and ``notes`` (list of strings). Empty dict on failure.
+    """
+    system_prompt = (
+        "Analyze this conversation and extract structured facts as JSON.\n"
+        "Return a JSON object with these optional keys:\n"
+        '- "preferences": user preferences as [{"key": "...", "value": "..."}]\n'
+        '- "notes": important facts about the user as ["..."]\n\n'
+        "Rules:\n"
+        "- Only extract clearly stated facts, not assumptions\n"
+        "- Preferences = explicit likes/dislikes/settings (e.g. language, style)\n"
+        "- Notes = personal facts (job, interests, ongoing projects)\n"
+        "- Skip greetings, filler, and technical tool details\n"
+        "- Return {} if nothing worth extracting"
+    )
+
+    extraction_messages = [
+        {"role": "system", "content": system_prompt},
+        *messages,
+        {"role": "user", "content": "Extract facts as JSON."},
+    ]
+
+    try:
+        response = await litellm.acompletion(
+            model=model,
+            messages=extraction_messages,
+            temperature=0.1,
+            max_tokens=max_tokens,
+            response_format={"type": "json_object"},
+        )
+        raw = response.choices[0].message.content or "{}"
+        return json.loads(raw)
+    except (json.JSONDecodeError, Exception) as e:
+        logger.warning(f"Fact extraction failed: {e}")
+        return {}
 
 
 def _set_key(env_name: str, value: str) -> None:

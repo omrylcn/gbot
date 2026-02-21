@@ -6,8 +6,9 @@ assistant:
     username: "owner"
     name: "Owner"
   workspace: ./workspace
-  model: "openai/gpt-4o-mini"
+  model: "openrouter/minimax/minimax-m2.5"
   temperature: 0.7
+  thinking: true
   session_token_limit: 30000
   max_iterations: 20
   tools: ["*"]
@@ -24,6 +25,8 @@ assistant:
 providers:
   anthropic:
     api_key: ""                      # Set via .env or here
+  openrouter:
+    api_key: ""                      # Set via OPENROUTER_API_KEY in .env
   # openai:
   #   api_key: ""
 
@@ -45,8 +48,15 @@ tools:
   shell:
       timeout: 60
       restrict_to_workspace: true  # Security: limit to workspace only
-  # web:
-  #   search_api_key: ""
+  web:
+    fetch_shortcuts:
+      gold: "https://api.genelpara.com/json/?list=altin&sembol=GA,C,Q,Y"
+      currency: "https://api.genelpara.com/json/?list=doviz&sembol=USD,EUR,GBP"
+      "weather:istanbul": "https://api.open-meteo.com/v1/forecast?latitude=41.01&longitude=28.98&current=temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m&timezone=auto"
+      "weather:ankara": "https://api.open-meteo.com/v1/forecast?latitude=39.93&longitude=32.86&current=temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m&timezone=auto"
+      "weather:izmir": "https://api.open-meteo.com/v1/forecast?latitude=38.42&longitude=27.13&current=temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m&timezone=auto"
+      earthquake: "https://api.orhanaydogdu.com.tr/deprem/kandilli/live"
+      news: "https://news.google.com/rss?hl=tr&gl=TR&ceid=TR:tr"
 
 auth:
   jwt_secret_key: "graphbot-secure-jwt-secret-key-2026-production-vps"  # 32+ chars

@@ -29,6 +29,7 @@ class ProvidersConfig(BaseModel):
     deepseek: ProviderConfig = Field(default_factory=ProviderConfig)
     groq: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
+    moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
 
 
 class AgentConfig(BaseModel):
@@ -83,6 +84,7 @@ class AssistantConfig(BaseModel):
     workspace: str = "./workspace"
     model: str = "anthropic/claude-sonnet-4-5-20250929"
     temperature: float = 0.7
+    thinking: bool = False
     session_token_limit: int = 30_000
     max_iterations: int = 20
     tools: list[str] = Field(default_factory=lambda: ["*"])
@@ -146,6 +148,7 @@ class ShellToolConfig(BaseModel):
 class WebToolConfig(BaseModel):
     search_api_key: str = ""
     max_results: int = 5
+    fetch_shortcuts: dict[str, str] = Field(default_factory=dict)
 
 
 class ToolsConfig(BaseModel):

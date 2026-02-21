@@ -1,4 +1,4 @@
-"""Shared tool registry for background agents (subagent + cron)."""
+"""Shared tool registry utilities for background agents."""
 
 from __future__ import annotations
 
@@ -8,17 +8,52 @@ from langchain_core.tools import BaseTool
 from loguru import logger
 
 if TYPE_CHECKING:
+    from graphbot.agent.tools import ToolRegistry
     from graphbot.core.config.schema import Config
     from graphbot.memory.store import MemoryStore
 
 
-def build_background_tool_registry(
-    config: Config, db: MemoryStore | None = None
-) -> dict[str, BaseTool]:
+# Groups excluded from background agents (unsafe or meta-tools)
+_UNSAFE_GROUPS = frozenset({"filesystem", "shell", "delegation", "scheduling"})
+
+
+def build_background_registry(registry: ToolRegistry) -> dict[str, BaseTool]:
     """Build name -> tool object mapping for background agents.
 
-    Includes web, memory, search, and messaging tools.
-    Excludes meta/unsafe tools (delegate, cron, reminder, filesystem, shell).
+    Extracts a safe subset from the main ToolRegistry,
+    excluding filesystem, shell, delegation, and scheduling tools.
+
+    Parameters
+    ----------
+    registry : ToolRegistry
+        Main tool registry.
+
+    Returns
+    -------
+    dict[str, BaseTool]
+        Background-safe tool name to object mapping.
+    """
+    result: dict[str, BaseTool] = {}
+    for name, info in registry._tools.items():
+        if info.group not in _UNSAFE_GROUPS and info.available:
+            result[name] = info.tool
+    return result
+
+
+def build_background_tool_registry(
+    config: "Config", db: "MemoryStore | None" = None,
+) -> dict[str, BaseTool]:
+    """Build name -> tool mapping for background agents (standalone).
+
+    This creates tools independently, without requiring the main ToolRegistry.
+    Used by SubagentWorker which is initialized before the main registry.
+
+    Parameters
+    ----------
+    config : Config
+        Application config.
+    db : MemoryStore, optional
+        Database store. If provided, memory/search/messaging tools included.
     """
     from graphbot.agent.tools.web import make_web_tools
 
@@ -51,9 +86,9 @@ def resolve_tools(
     Parameters
     ----------
     tool_names : list[str] or None
-        None with default → default tools.
-        None without default → empty list.
-        Explicit list → resolve from registry.
+        None with default -> default tools.
+        None without default -> empty list.
+        Explicit list -> resolve from registry.
     """
     if tool_names is None:
         if default:

@@ -92,10 +92,8 @@ async def lifespan(app: FastAPI):
     """Startup: init Config → MemoryStore → GraphRunner → Background Services. Shutdown: cleanup."""
     from graphbot.agent.delegation import DelegationPlanner
     from graphbot.agent.tools import make_tools
-    from graphbot.agent.tools.registry import (
-        build_background_tool_registry,
-        get_tool_catalog,
-    )
+    from graphbot.agent.tools.delegate import make_delegate_tools
+    from graphbot.agent.tools.registry import build_background_registry, get_tool_catalog
 
     config = load_config()
     db = MemoryStore(str(config.db_path))
@@ -109,17 +107,37 @@ async def lifespan(app: FastAPI):
     heartbeat = HeartbeatService(config, runner)
     worker = SubagentWorker(config, db=db)
 
-    # Delegation planner — plans subagent execution via LLM
-    bg_registry = build_background_tool_registry(config, db)
+    # Build registry without delegation (planner doesn't exist yet)
+    registry = make_tools(config, db, scheduler=cron_scheduler, worker=None)
+
+    # Delegation planner uses background-safe subset of registry
+    bg_registry = build_background_registry(registry)
     tool_catalog = get_tool_catalog(bg_registry)
     planner = DelegationPlanner(config, tool_catalog)
 
-    # Now build tools with scheduler+worker+planner, and rebuild graph
+    # Now add delegation tools (worker + planner ready)
+    delegate_tools = make_delegate_tools(worker, planner)
+    if delegate_tools:
+        registry.register_group("delegation", delegate_tools, requires=["worker"])
+
+    # Rebuild runner with full registry
     from graphbot.agent.graph import create_graph
 
-    tools = make_tools(config, db, scheduler=cron_scheduler, worker=worker, planner=planner)
-    runner.tools = tools
-    runner._graph = create_graph(config, db, tools)
+    runner.registry = registry
+    runner.tools = registry.get_all_tools()
+    runner._graph = create_graph(config, db, runner.tools)
+
+    # Startup validation: check roles.yaml groups against registry
+    from graphbot.agent.permissions import _load_roles_yaml
+
+    roles_data = _load_roles_yaml()
+    if roles_data:
+        for w in registry.validate_roles(roles_data):
+            logger.warning(f"RBAC config: {w}")
+    logger.info(
+        f"ToolRegistry: {len(registry)} tools in "
+        f"{len(registry.get_groups_summary())} groups"
+    )
 
     await cron_scheduler.start()
     heartbeat_task = asyncio.create_task(heartbeat.start())

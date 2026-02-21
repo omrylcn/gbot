@@ -6,6 +6,76 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.9.0] - 2026-02-21
+
+### Added (Web Tools & Multi-Provider)
+
+- **Web search 4-provider fallback:** DuckDuckGo (free) → Tavily (free 1000/mo) → Moonshot $web_search → Brave Search API
+- **DuckDuckGo search:** Primary free search provider, no API key needed, `asyncio.to_thread()` wrapper
+- **Tavily search:** AI-optimized search as second fallback, free tier 1000 requests/month
+- **Moonshot $web_search:** Kimi built-in web search as third fallback ($0.005/call)
+- **`web_fetch` shortcut system:** Tag-based data access — `web_fetch("gold")` resolves to API URL from config
+- **`fetch_shortcuts` in config.yaml:** Configurable shortcut → URL mapping, no hardcoded URLs in code
+- **7 default shortcuts:** gold, currency, weather:istanbul, weather:ankara, weather:izmir, earthquake, news
+- **`WebToolConfig.fetch_shortcuts`:** New config field (`dict[str, str]`) for deployment-specific shortcuts
+- **Tool call debug logging:** `reason` node logs tool call names, `execute_tools` logs execution and results
+- **`reasoning_content` preservation:** Thinking model output saved in `AIMessage.additional_kwargs`, restored in conversation history for tool call round-trips
+
+### Changed
+
+- **Model switched to MiniMax M2.5:** `openrouter/minimax/minimax-m2.5` — output 3x cheaper than Kimi K2.5 ($1.10 vs $3.00 per 1M tokens)
+- **OpenRouter provider activated:** `OPENROUTER_API_KEY` in `.env`, provider config in `config.yaml`
+- **`reasoning_effort` parameter:** Added to `litellm.achat()` for thinking models via OpenRouter
+- **`web_fetch` docstring dynamic:** Tool description auto-generated from config shortcuts at startup
+- **`.env` key renamed:** `OPEN_ROUTER_KEY` → `OPENROUTER_API_KEY` (LiteLLM convention)
+
+### Removed
+
+- **$web_search injection from litellm.py:** Moonshot-specific code moved to `_moonshot_search()` in web.py
+- **`crypto` and `bist` shortcuts:** Removed (user preference + broken API)
+
+## [1.8.0] - 2026-02-19
+
+### Added (Tool Registry & Management)
+
+- **ToolRegistry class:** Central tool registry — single source of truth for tool metadata, groups, and availability
+- **ToolInfo dataclass:** Per-tool metadata (group, requires, available) for introspection
+- **`register_group()`:** Factory functions register tools under named groups automatically
+- **`register_unavailable()`:** Dynamic tools (scheduling, delegation) registered as known-but-unavailable when dependencies missing
+- **`validate_roles()`:** Startup validation — detects unknown groups in roles.yaml, logs warnings
+- **`GET /admin/tools`:** New admin endpoint for tool catalog introspection (names, groups, availability, dependencies)
+- **2 new tests:** `test_registry_validate_roles`, `test_registry_groups_summary`
+
+### Changed
+
+- **`make_tools()` returns `ToolRegistry`** instead of `list[BaseTool]` — all consumers updated
+- **`roles.yaml` simplified:** Tool names completely removed; only role → groups + context_layers + max_sessions remain. Tool-to-group mapping now comes from code (ToolRegistry)
+- **`permissions.py`:** `get_allowed_tools()` accepts optional `registry` parameter — resolves tool names from registry groups instead of YAML
+- **`GraphRunner`:** Uses ToolRegistry for RBAC resolution; accepts `list | ToolRegistry | None` for backward compatibility
+- **`app.py` lifespan:** Startup validates roles.yaml groups against registry, logs warnings for unknown groups
+- **`build_background_registry()`:** New function extracts background-safe subset from main ToolRegistry
+- **Test updates:** `test_make_tools_all` → `test_make_tools_returns_registry` (dynamic assertions, no hardcoded counts)
+
+### Improved
+
+- **Adding a new tool now requires 1 file change** (was 5): add function to factory, it's auto-registered in the correct group
+- **No more tool name sync between code and YAML** — ToolRegistry is the single source of truth
+
+## [1.7.0] - 2026-02-19
+
+### Added (Session Summarization & Fact Extraction)
+
+- **`asummarize()`:** Hybrid format session summary (narrative paragraph + structured bullets: TOPICS/DECISIONS/PENDING/USER_INFO)
+- **`aextract_facts()`:** Structured JSON extraction (preferences + notes) from conversation, saved to DB
+- **`_rotate_session()` rewrite:** LLM-based summary + fact extraction + robust fallback on errors
+- **3 preference tools:** `set_user_preference`, `get_user_preferences`, `remove_user_preference` in memory group
+- **`remove_preference()`:** New MemoryStore method for preference deletion
+- **Session summarization policy doc:** `docs/session_summarization.md`
+
+### Fixed
+
+- **Closed session reuse bug:** When a closed session_id is sent, a new session is created instead of reusing the dead one
+
 ## [1.6.0] - 2026-02-15
 
 ### Added (CLI Enhancement — API Client + Rich REPL)

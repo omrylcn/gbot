@@ -65,7 +65,16 @@ def make_nodes(config: Config, db: MemoryStore, tools: list | None = None):
             tools=filtered_defs or None,
             temperature=config.assistant.temperature,
             api_base=config.get_api_base(),
+            thinking=config.assistant.thinking,
         )
+
+        # Log tool calls for debugging
+        if ai_message.tool_calls:
+            names = [tc["name"] for tc in ai_message.tool_calls]
+            logger.debug(f"LLM tool calls: {names}")
+        else:
+            snippet = (ai_message.content or "")[:80]
+            logger.debug(f"LLM response (no tools): {snippet!r}")
 
         return {
             "messages": [ai_message],
@@ -93,6 +102,7 @@ def make_nodes(config: Config, db: MemoryStore, tools: list | None = None):
                 )
             elif (tool := tool_map.get(call["name"])) is None:
                 result = f"Tool '{call['name']}' not found"
+                logger.warning(f"Tool not found: {call['name']}")
             else:
                 try:
                     args = call["args"].copy()
@@ -105,9 +115,12 @@ def make_nodes(config: Config, db: MemoryStore, tools: list | None = None):
                             f"Channel inject: tool={call['name']}, "
                             f"{original!r} → {state['channel']!r}"
                         )
+                    logger.debug(f"Executing tool: {call['name']}({args})")
                     result = await tool.ainvoke(args)
+                    logger.debug(f"Tool result: {call['name']} → {str(result)[:100]}")
                 except Exception as e:
                     result = f"Tool error: {e}"
+                    logger.error(f"Tool error: {call['name']} → {e}")
 
             results.append(
                 ToolMessage(content=str(result), tool_call_id=call["id"])
@@ -154,6 +167,10 @@ def _langchain_to_dict(msg: Any) -> dict[str, Any]:
         return {"role": "user", "content": msg.content}
     elif isinstance(msg, AIMessage):
         d: dict[str, Any] = {"role": "assistant", "content": msg.content}
+        # Preserve reasoning_content for thinking models
+        reasoning = msg.additional_kwargs.get("reasoning_content")
+        if reasoning:
+            d["reasoning_content"] = reasoning
         if msg.tool_calls:
             d["tool_calls"] = [
                 {

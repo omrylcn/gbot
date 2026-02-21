@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 from loguru import logger
+
+if TYPE_CHECKING:
+    from graphbot.agent.tools import ToolRegistry
 
 _ROLES_DATA: dict[str, Any] | None = None
 
@@ -45,14 +48,28 @@ def get_default_role(path: str | Path | None = None) -> str:
     return data.get("default_role", "guest")
 
 
-def get_allowed_tools(role: str, path: str | Path | None = None) -> set[str] | None:
+def get_allowed_tools(
+    role: str,
+    registry: ToolRegistry | None = None,
+    path: str | Path | None = None,
+) -> set[str] | None:
     """Resolve allowed tool names for a role.
+
+    Parameters
+    ----------
+    role : str
+        User role (e.g. 'owner', 'member', 'guest').
+    registry : ToolRegistry, optional
+        If provided, tool names are resolved from registry groups.
+        If None, falls back to legacy roles.yaml tool_groups section.
+    path : str or Path, optional
+        Path to roles.yaml (default: ./roles.yaml).
 
     Returns
     -------
     set[str] | None
         Set of allowed tool names, or None if RBAC is disabled
-        (roles.yaml missing → no filtering).
+        (roles.yaml missing -> no filtering).
     """
     data = _load_roles_yaml(path)
     if not data:
@@ -64,12 +81,18 @@ def get_allowed_tools(role: str, path: str | Path | None = None) -> set[str] | N
         logger.warning(f"Unknown role '{role}', denying all tools")
         return set()
 
+    groups = role_def.get("tool_groups", [])
+
+    # Registry-based resolution (new approach)
+    if registry is not None:
+        return registry.get_tools_for_groups(groups)
+
+    # Legacy fallback: resolve from roles.yaml tool_groups section
     tool_groups = data.get("tool_groups", {})
     allowed: set[str] = set()
-    for group_name in role_def.get("tool_groups", []):
+    for group_name in groups:
         tools_in_group = tool_groups.get(group_name, [])
         allowed.update(tools_in_group)
-
     return allowed
 
 
