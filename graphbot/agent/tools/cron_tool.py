@@ -91,23 +91,59 @@ def make_cron_tools(scheduler: CronScheduler | None = None) -> list:
         cron_expr: str,
         check_message: str,
         channel: str = "api",
+        agent_tools: list[str] | None = None,
         agent_model: str | None = None,
     ) -> str:
-        """Create a monitoring alert that only notifies when something needs attention.
+        """Create a monitoring alert that only notifies when a condition is met.
 
-        Uses NOTIFY/SKIP: LLM checks the condition and only sends a message
-        if there is something to report. Silent otherwise.
-        Example: create_alert('u1', '*/10 * * * *', 'Check gold price, notify if > $2000')
+        IMPORTANT: check_message is a TASK INSTRUCTION, not a notification text.
+        The background agent will execute check_message as a task. It must
+        describe what to check and when to notify vs when to stay silent.
+
+        Wrong: check_message="Gold price exceeded $2000!"  (this is a result)
+        Right: check_message="Use web_fetch with 'gold' shortcut to check gold
+               prices. If gram gold > 7500 TL, report the price. Otherwise
+               respond with [SKIP]."
+
+        The agent will use the provided tools to check the condition on each
+        trigger. If there is something to report, user gets notified. If the
+        agent responds with [SKIP], the notification is silently suppressed.
+
+        agent_tools: list of tool names the agent needs to check the condition.
+        Available: web_search, web_fetch, save_memory, search_memory.
+        Default (if None): ["web_search", "web_fetch"]
+
+        Examples:
+        - Monitor gold price:
+            check_message="Use web_fetch('gold') to check gold prices. If gram
+                gold exceeds 7500 TL, report the current price. Otherwise [SKIP]."
+            agent_tools=["web_fetch"]
+            cron_expr="*/30 * * * *"
+
+        - Monitor earthquake activity:
+            check_message="Use web_fetch('earthquake') to check recent earthquakes.
+                If there is a quake above 4.0 magnitude in the last hour, report
+                details. Otherwise [SKIP]."
+            agent_tools=["web_fetch"]
+            cron_expr="*/15 * * * *"
+
+        Note: channel is auto-injected from session context, do not set manually.
         """
         prompt = (
-            "You are a monitoring agent. Check the given condition.\n"
-            "If there is something to report, respond with the notification.\n"
-            "If everything is normal and nothing to report, respond with: [SKIP]"
+            "You are a monitoring agent. Execute the task described below.\n"
+            "Use the provided tools to check the condition.\n"
+            "If the condition is met and there is something to report, "
+            "respond with a clear notification message.\n"
+            "If the condition is NOT met and nothing needs attention, "
+            "respond ONLY with: [SKIP]"
         )
+        # Default to web tools if no specific tools requested
+        tools = agent_tools or ["web_search", "web_fetch"]
         try:
             job = scheduler.add_job(
                 user_id, cron_expr, check_message, channel,
                 agent_prompt=prompt,
+                agent_tools=tools,
                 agent_model=agent_model,
                 notify_condition="notify_skip",
             )
