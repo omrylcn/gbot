@@ -42,10 +42,14 @@ reference files/
 ui/
 gbot/
 
+# Personal notes (credentials, local setup)
+notes.md
+todo_solution.md
+
 # Internal docs (not for public)
 CLAUDE.md
 todo.md
-mimari_kararlar.md
+/mimari_kararlar.md
 howtowork-development-plan.md
 development-plan2.md
 development-guide.md
