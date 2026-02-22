@@ -70,7 +70,7 @@ def build_background_tool_registry(
             registry[t.name] = t
         for t in make_search_tools():
             registry[t.name] = t
-        for t in make_messaging_tools(config, db):
+        for t in make_messaging_tools(config, db, background=True):
             registry[t.name] = t
 
     return registry

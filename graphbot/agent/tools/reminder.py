@@ -44,7 +44,9 @@ def make_reminder_tools(scheduler: CronScheduler | None = None) -> list:
         Available agent_tools: send_message_to_user, web_search, web_fetch,
         save_memory, search_memory.
 
-        Note: channel is auto-injected from session context, do not set manually.
+        Note: channel is auto-injected from session context by default.
+        Only set channel explicitly if user requests a DIFFERENT channel
+        (e.g., user is on WhatsApp but says "send via telegram").
         """
         try:
             row = scheduler.add_reminder(

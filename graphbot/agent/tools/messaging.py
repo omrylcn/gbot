@@ -12,8 +12,21 @@ if TYPE_CHECKING:
     from graphbot.memory.store import MemoryStore
 
 
-def make_messaging_tools(config: Config, db: MemoryStore) -> list:
-    """Create messaging tools for inter-user communication."""
+BOT_PREFIX = "[gbot] "
+
+
+def make_messaging_tools(
+    config: Config, db: MemoryStore, *, background: bool = False,
+) -> list:
+    """Create messaging tools for inter-user communication.
+
+    Parameters
+    ----------
+    background : bool
+        When True, messages are auto-prefixed with ``[gbot]`` to indicate
+        the bot is acting autonomously (cron, reminder, delegation).
+        When False (default), no prefix — the user is the sender.
+    """
 
     @tool
     def send_message_to_user(
@@ -92,11 +105,12 @@ def make_messaging_tools(config: Config, db: MemoryStore) -> list:
 
                 from graphbot.core.channels.telegram import send_message
 
+                text = f"{BOT_PREFIX}{message}" if background else message
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
                     loop.run_until_complete(
-                        send_message(link["channel_user_id"], int(chat_id), message)
+                        send_message(link["channel_user_id"], int(chat_id), text)
                     )
                 finally:
                     loop.close()
@@ -125,12 +139,13 @@ def make_messaging_tools(config: Config, db: MemoryStore) -> list:
                 from graphbot.core.channels.whatsapp import send_whatsapp_message
 
                 wa_config = config.channels.whatsapp
+                text = f"{BOT_PREFIX}{message}" if background else message
 
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
                     loop.run_until_complete(
-                        send_whatsapp_message(wa_config, chat_id, message)
+                        send_whatsapp_message(wa_config, chat_id, text)
                     )
                 finally:
                     loop.close()

@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 
 from graphbot.agent.runner import GraphRunner
+from graphbot.agent.tools.messaging import BOT_PREFIX
 from graphbot.api.deps import get_db, get_runner
 from graphbot.core.channels.waha_client import WAHAClient
 from graphbot.core.config.schema import WhatsAppChannelConfig
@@ -72,16 +73,15 @@ async def whatsapp_webhook(
             # DM processing completely disabled
             return JSONResponse({"ok": True})
 
-        # Save chat_id for proactive messaging
-        db.update_channel_metadata_by_user(
-            user_id, "whatsapp", {"chat_id": chat_id}
-        )
+        # Check allowed_dms whitelist — only process DMs from listed numbers
+        sender_phone = WAHAClient.chat_id_to_phone(chat_id)
+        if wa_config.allowed_dms and sender_phone not in wa_config.allowed_dms:
+            return JSONResponse({"ok": True})
 
         if is_from_me:
             return JSONResponse({"ok": True})
 
         # Resolve sender name
-        sender_phone = WAHAClient.chat_id_to_phone(chat_id)
         sender_name = sender_phone
         sender_user_id = db.resolve_user("whatsapp", sender_phone)
         if sender_user_id:
@@ -110,7 +110,7 @@ async def whatsapp_webhook(
                 logger.error(f"WhatsApp DM processing error: {e}")
                 response = "An error occurred while processing your message."
             await send_whatsapp_message(
-                wa_config, chat_id, f"[gbot] {response}"
+                wa_config, chat_id, f"{BOT_PREFIX}{response}"
             )
         else:
             # monitor_dm=true → store DM in session but do NOT respond.
@@ -123,8 +123,8 @@ async def whatsapp_webhook(
     if allowed_groups and chat_id not in allowed_groups:
         return JSONResponse({"ok": True})
 
-    # Skip bot's own responses (they start with [gbot]) to prevent loops
-    if is_from_me and text.startswith("[gbot]"):
+    # Skip bot's own responses (they start with BOT_PREFIX) to prevent loops
+    if is_from_me and text.startswith(BOT_PREFIX.strip()):
         return JSONResponse({"ok": True})
 
     # Session management (channel-isolated)
@@ -148,7 +148,7 @@ async def whatsapp_webhook(
         response = "An error occurred while processing your message."
 
     await send_whatsapp_message(
-        config.channels.whatsapp, chat_id, f"[gbot] {response}"
+        config.channels.whatsapp, chat_id, f"{BOT_PREFIX}{response}"
     )
 
     return JSONResponse({"ok": True})

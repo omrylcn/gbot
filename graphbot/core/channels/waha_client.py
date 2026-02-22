@@ -40,7 +40,7 @@ class WAHAClient:
         }
         async with httpx.AsyncClient(timeout=httpx.Timeout(30.0), headers=self._headers()) as client:
             resp = await client.post(url, json=payload)
-            if resp.status_code != 200:
+            if resp.status_code not in (200, 201):
                 logger.warning(
                     f"WAHA sendText failed ({resp.status_code}): {resp.text[:200]}"
                 )

@@ -110,11 +110,19 @@ def make_nodes(config: Config, db: MemoryStore, tools: list | None = None):
                     tool_fields = set(tool.args_schema.model_fields) if tool.args_schema else set()
                     if "channel" in tool_fields:
                         original = args.get("channel")
-                        args["channel"] = state["channel"]
-                        logger.debug(
-                            f"Channel inject: tool={call['name']}, "
-                            f"{original!r} → {state['channel']!r}"
-                        )
+                        if original:
+                            # LLM explicitly set channel → keep it
+                            logger.debug(
+                                f"Channel keep: tool={call['name']}, "
+                                f"LLM set {original!r}"
+                            )
+                        else:
+                            # No channel provided → inject from session
+                            args["channel"] = state["channel"]
+                            logger.debug(
+                                f"Channel inject: tool={call['name']}, "
+                                f"None → {state['channel']!r}"
+                            )
                     logger.debug(f"Executing tool: {call['name']}({args})")
                     result = await tool.ainvoke(args)
                     logger.debug(f"Tool result: {call['name']} → {str(result)[:100]}")
