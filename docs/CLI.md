@@ -113,13 +113,14 @@ Show comprehensive system stats with Rich panels: System, Context Layers, Tools,
 ```bash
 gbot status                       # owner's latest session
 gbot status -c telegram           # owner's telegram session
+gbot status -c whatsapp           # owner's whatsapp session
 gbot status -u murat              # murat's latest session
 gbot status -u murat -c telegram  # murat's telegram session
 ```
 
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
-| `--channel` | `-c` | | Filter session by channel (api, telegram) |
+| `--channel` | `-c` | | Filter session by channel (api, telegram, whatsapp) |
 | `--user` | `-u` | owner | User ID for session/context info |
 
 **Output panels:**
@@ -160,7 +161,8 @@ gbot user remove ali
 gbot user set-password ali newpassword
 
 # Link channel
-gbot user link ali telegram 123456789
+gbot user link ali telegram 123456789:AAF...   # Telegram bot token
+gbot user link ali whatsapp 905551234567       # WhatsApp phone number
 ```
 
 | Subcommand | Description |
@@ -169,7 +171,7 @@ gbot user link ali telegram 123456789
 | `list` | List all users with channels |
 | `remove <username>` | Delete user |
 | `set-password <user> <pass>` | Update password |
-| `link <user> <channel> <id>` | Link channel identity |
+| `link <user> <channel> <id>` | Link channel identity (telegram: bot token, whatsapp: phone) |
 
 ---
 
@@ -276,14 +278,16 @@ gbot user list
 ### Docker usage
 
 ```bash
-# Start with Docker
+# Start with Docker (includes WAHA for WhatsApp)
 docker compose up -d
 
 # Use CLI commands against the container
 docker compose exec graphbot gbot user add ali --name "Ali"
+docker compose exec graphbot gbot user link ali whatsapp 905551234567
 docker compose exec graphbot gbot cron list
 
 # Or connect from host (if port exposed)
 gbot login owner -p mypassword
 gbot status
+gbot status -c whatsapp
 ```
