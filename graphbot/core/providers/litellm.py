@@ -35,6 +35,7 @@ async def achat(
     max_tokens: int = 4096,
     api_base: str | None = None,
     thinking: bool = False,
+    response_format: dict[str, Any] | None = None,
 ) -> AIMessage:
     """Call LiteLLM and return a LangChain AIMessage."""
     kwargs: dict[str, Any] = {
@@ -48,6 +49,8 @@ async def achat(
         kwargs["tool_choice"] = "auto"
     if api_base:
         kwargs["api_base"] = api_base
+    if response_format:
+        kwargs["response_format"] = response_format
 
     _is_moonshot = "moonshot/" in model and "k2" in model
 

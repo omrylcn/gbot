@@ -4,6 +4,8 @@ services:
     container_name: graphbot
     ports:
       - "127.0.0.1:8000:8000"
+    environment:
+      - TZ=Europe/Istanbul
     env_file:
       - .env
     volumes:
@@ -22,11 +24,12 @@ services:
       - WHATSAPP_DEFAULT_ENGINE=NOWEB
       - WAHA_API_KEY=2275f9a154174f18a912644829b8dad4
       - WAHA_API_KEY_EXCLUDE_PATH=health,ping
+      - WHATSAPP_RESTART_ALL_SESSIONS=true
       - TZ=Europe/Istanbul
     volumes:
       - waha_sessions:/app/.sessions
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000/ping"]
       interval: 10s
       timeout: 5s
       retries: 3

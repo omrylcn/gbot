@@ -6,6 +6,41 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.11.0] - 2026-02-23
+
+### Added (Delegation Refactor & WhatsApp DM)
+
+- **Unified `delegate` tool:** Single tool replaces old delegate/reminder/cron split — routes to worker (immediate), scheduler (delayed/recurring/monitor)
+- **3 processor types:** `static` (plain text), `function` (direct tool call, no LLM), `agent` (LightAgent with tools)
+- **json_schema structured output:** `response_format` forces valid JSON from planner LLM — eliminates parse failures
+- **`list_scheduled_tasks` tool:** Lists active cron jobs and pending reminders
+- **`cancel_scheduled_task` tool:** Cancel by `cron:<id>` or `reminder:<id>` prefix
+- **`LightAgent.run_with_meta()`:** Returns `(response, tokens, called_tools)` for observability
+- **`delegation_log` table:** Records every planner decision (execution, processor, reference_id)
+- **WhatsApp DM respond:** `respond_to_dm=true` + `allowed_dms` whitelist — bot responds to DMs from listed numbers
+- **DM sender context:** `[WhatsApp DM from {sender_name}]` prefix so LLM knows who it's chatting with
+- **Tool catalog full description:** `get_tool_catalog()` now includes full description (up to 300 chars) with shortcuts visible to planner
+- **Test scenarios doc:** `senaryolar.md` — 10 delegation test scenarios with architecture overview
+- **36 delegation tests:** Planner parse, delegate routing, processor execution, list/cancel tools, delegation log
+
+### Changed
+
+- **Planner prompt examples:** Weather scenarios use `web_fetch` with shortcuts instead of `web_search`
+- **Agent processor channel injection:** Scheduler appends `IMPORTANT: set channel='{channel}'` to prompt for non-telegram channels
+- **Function processor channel injection:** Scheduler injects `channel` into `tool_args` when missing
+- **Agent delivery model:** Agent processor returns `(text, False)` — agent delivers via `send_message_to_user`, scheduler does NOT double-send
+- **`_parse_tools()` no filter:** All tools including `send_message_to_user` pass through to LightAgent
+- **`send_message_to_user` channel fallback:** Tries specified channel → whatsapp → telegram
+- **Background task channel:** `SubagentWorker` passes `fallback_channel` to `create_background_task`
+- **`CronJob` model:** Added `processor` and `plan_json` fields
+- **`roles.yaml`:** Added `delegation` group for delegate/list/cancel tools
+
+### Fixed
+
+- **WhatsApp channel routing:** LightAgent now uses correct channel (was defaulting to telegram)
+- **Double message bug:** Each processor type has exactly one delivery path — no duplicates
+- **Tool catalog truncation:** Planner couldn't see `web_fetch` shortcuts (was showing only first line of description)
+
 ## [1.10.0] - 2026-02-21
 
 ### Added (WhatsApp Channel — WAHA Integration)

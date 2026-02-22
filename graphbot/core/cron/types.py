@@ -20,5 +20,7 @@ class CronJob(BaseModel):
     agent_tools: str | None = None    # JSON list of tool names; None = all tools
     agent_model: str | None = None    # Override model; None = config default
     notify_condition: str = "always"  # 'always' | 'notify_skip'
+    processor: str = "agent"          # 'static' | 'function' | 'agent'
+    plan_json: str | None = None      # JSON with processor-specific config
     consecutive_failures: int = 0
     last_error: str | None = None

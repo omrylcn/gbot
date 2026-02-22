@@ -60,12 +60,6 @@ def test_notes(store):
     assert len(store.get_notes("u1")) == 2
 
 
-def test_activities(store):
-    store.log_activity("u1", "Pasta", item_id="r1")
-    acts = store.get_recent_activities("u1")
-    assert acts[0]["item_title"] == "Pasta"
-
-
 def test_favorites(store):
     store.add_favorite("u1", "i1", "Item 1")
     assert store.is_favorite("u1", "i1")

@@ -11,7 +11,6 @@ roles:
       - web
       - filesystem
       - shell
-      - scheduling
       - messaging
       - delegation
     context_layers:
@@ -30,8 +29,8 @@ roles:
       - memory
       - search
       - web
-      - scheduling
       - messaging
+      - delegation
     context_layers:
       - identity
       - runtime

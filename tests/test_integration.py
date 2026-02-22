@@ -510,7 +510,7 @@ def test_store_tables_exist(store):
     """All 15 tables created in fresh MemoryStore."""
     expected_tables = {
         "users", "user_channels", "sessions", "messages",
-        "agent_memory", "user_notes", "activity_logs", "favorites",
+        "agent_memory", "user_notes", "favorites",
         "preferences", "cron_jobs", "cron_execution_log", "reminders",
         "system_events", "background_tasks", "api_keys",
     }

@@ -30,7 +30,7 @@ def cfg(tmp_path):
 
 def test_memory_tools_created(store):
     tools = make_memory_tools(store)
-    assert len(tools) == 10
+    assert len(tools) == 8
     names = {t.name for t in tools}
     assert "save_user_note" in names
     assert "get_user_context" in names
@@ -50,16 +50,6 @@ def test_save_and_get_note(store):
 
     ctx = get_ctx.invoke({"user_id": "u1"})
     assert "coffee" in ctx
-
-
-def test_activity_logging(store):
-    tools = make_memory_tools(store)
-    log = next(t for t in tools if t.name == "log_activity")
-    recent = next(t for t in tools if t.name == "get_recent_activities")
-
-    log.invoke({"user_id": "u1", "item_title": "Python Tutorial", "item_id": "i1"})
-    result = recent.invoke({"user_id": "u1"})
-    assert "Python Tutorial" in result
 
 
 def test_favorites_crud(store):
@@ -167,12 +157,11 @@ def test_make_tools_returns_registry(cfg, store):
     assert "shell" in summary
     assert "web" in summary
     assert "messaging" in summary
-    assert "scheduling" in summary  # registered as unavailable
     assert "delegation" in summary  # registered as unavailable
 
-    # Scheduling tools unavailable (no scheduler)
-    sched_tools = registry.get_tools_for_groups(["scheduling"])
-    assert len(sched_tools) == 0  # registered but not available
+    # Delegation tools unavailable (no worker/scheduler)
+    deleg_tools = registry.get_tools_for_groups(["delegation"])
+    assert len(deleg_tools) == 0  # registered but not available
 
     # Catalog for admin introspection
     catalog = registry.get_catalog()

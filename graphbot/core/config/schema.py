@@ -177,6 +177,7 @@ class DelegationConfig(BaseModel):
 
     model: str = ""  # empty → falls back to assistant.model
     temperature: float = 0.3
+    examples: list[str] = Field(default_factory=list)
 
 
 class BackgroundConfig(BaseModel):

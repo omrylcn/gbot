@@ -2,9 +2,9 @@ FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim
 
 WORKDIR /app
 
-# Healthcheck için curl
+# Healthcheck için curl + timezone desteği
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl && \
+    apt-get install -y --no-install-recommends curl tzdata && \
     rm -rf /var/lib/apt/lists/*
 
 # Bağımlılıkları önce kopyala (Docker cache)

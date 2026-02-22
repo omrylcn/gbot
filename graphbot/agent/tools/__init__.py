@@ -8,9 +8,6 @@ from typing import TYPE_CHECKING, Any
 from langchain_core.tools import BaseTool
 from loguru import logger
 
-from graphbot.agent.tools.cron_tool import make_cron_tools
-from graphbot.agent.tools.delegate import make_delegate_tools
-from graphbot.agent.tools.reminder import make_reminder_tools
 from graphbot.agent.tools.filesystem import make_filesystem_tools
 from graphbot.agent.tools.memory_tools import make_memory_tools
 from graphbot.agent.tools.messaging import make_messaging_tools
@@ -21,9 +18,7 @@ from graphbot.core.config.schema import Config
 from graphbot.memory.store import MemoryStore
 
 if TYPE_CHECKING:
-    from graphbot.agent.delegation import DelegationPlanner
-    from graphbot.core.background.worker import SubagentWorker
-    from graphbot.core.cron.scheduler import CronScheduler
+    pass
 
 
 @dataclass
@@ -139,41 +134,16 @@ class ToolRegistry:
         return name in self._tools
 
 
-# ── Scheduling tool names (for unavailable registration) ──────
+# ── Delegation tool names (for unavailable registration) ──────
 
-_SCHEDULING_TOOLS = [
-    "add_cron_job", "list_cron_jobs", "remove_cron_job", "create_alert",
-    "create_reminder", "list_reminders", "cancel_reminder",
-]
-_DELEGATION_TOOLS = ["delegate"]
+_DELEGATION_TOOLS = ["delegate", "list_scheduled_tasks", "cancel_scheduled_task"]
 
 
-def make_tools(
-    config: Config,
-    db: MemoryStore,
-    scheduler: CronScheduler | None = None,
-    worker: SubagentWorker | None = None,
-    planner: DelegationPlanner | None = None,
-) -> ToolRegistry:
+def make_tools(config: Config, db: MemoryStore) -> ToolRegistry:
     """Create all agent tools and return a ToolRegistry.
 
-    Parameters
-    ----------
-    config : Config
-        Application config.
-    db : MemoryStore
-        Database store.
-    scheduler : CronScheduler, optional
-        If provided, scheduling tools are available.
-    worker : SubagentWorker, optional
-        If provided, delegation tool is available.
-    planner : DelegationPlanner, optional
-        Delegation planner for the delegate tool.
-
-    Returns
-    -------
-    ToolRegistry
-        Registry with all tools registered under their groups.
+    Delegation tools are registered separately in lifespan (needs worker +
+    scheduler + planner, which are created after make_tools).
     """
     registry = ToolRegistry()
 
@@ -195,28 +165,10 @@ def make_tools(
     registry.register_group("web", make_web_tools(config))
     registry.register_group("messaging", make_messaging_tools(config, db))
 
-    # Dynamic tools (conditionally available)
-    if scheduler:
-        registry.register_group(
-            "scheduling",
-            make_cron_tools(scheduler) + make_reminder_tools(scheduler),
-            requires=["scheduler"],
-        )
-    else:
-        registry.register_unavailable(
-            "scheduling", _SCHEDULING_TOOLS, requires=["scheduler"],
-        )
-
-    if worker:
-        registry.register_group(
-            "delegation",
-            make_delegate_tools(worker, planner),
-            requires=["worker"],
-        )
-    else:
-        registry.register_unavailable(
-            "delegation", _DELEGATION_TOOLS, requires=["worker"],
-        )
+    # Delegation registered as unavailable until lifespan wires it up
+    registry.register_unavailable(
+        "delegation", _DELEGATION_TOOLS, requires=["worker", "scheduler"],
+    )
 
     return registry
 

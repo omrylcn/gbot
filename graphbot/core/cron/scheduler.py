@@ -92,6 +92,8 @@ class CronScheduler:
         agent_tools: list[str] | None = None,
         agent_model: str | None = None,
         notify_condition: str = "always",
+        processor: str = "agent",
+        plan_json: str | None = None,
     ) -> CronJob:
         """Create a new cron job (SQLite + APScheduler)."""
         agent_tools_json = json.dumps(agent_tools) if agent_tools else None
@@ -102,6 +104,8 @@ class CronScheduler:
             agent_tools=agent_tools_json,
             agent_model=agent_model,
             notify_condition=notify_condition,
+            processor=processor,
+            plan_json=plan_json,
         )
         job = CronJob(
             job_id=job_id,
@@ -113,6 +117,8 @@ class CronScheduler:
             agent_tools=agent_tools_json,
             agent_model=agent_model,
             notify_condition=notify_condition,
+            processor=processor,
+            plan_json=plan_json,
         )
         self._register_job(job)
         logger.info(f"Cron job added: {job_id} ({cron_expr})")
@@ -142,6 +148,8 @@ class CronScheduler:
         cron_expr: str | None = None,
         agent_prompt: str | None = None,
         agent_tools: list[str] | None = None,
+        processor: str = "static",
+        plan_json: str | None = None,
     ) -> dict:
         """Create a reminder.
 
@@ -152,7 +160,11 @@ class CronScheduler:
         agent_prompt : str, optional
             If set, LightAgent runs with this prompt on trigger.
         agent_tools : list[str], optional
-            Tool names for the LightAgent (e.g. ["send_message_to_user"]).
+            Tool names for the LightAgent.
+        processor : str
+            Processor type: "static", "function", or "agent".
+        plan_json : str, optional
+            JSON with processor-specific config.
         """
         agent_tools_json = json.dumps(agent_tools) if agent_tools else None
         run_at = (datetime.now() + timedelta(seconds=delay_seconds)).isoformat()
@@ -160,6 +172,7 @@ class CronScheduler:
         self.db.add_reminder(
             reminder_id, user_id, run_at, message, channel, cron_expr=cron_expr,
             agent_prompt=agent_prompt, agent_tools=agent_tools_json,
+            processor=processor, plan_json=plan_json,
         )
         row = {
             "reminder_id": reminder_id,
@@ -170,6 +183,8 @@ class CronScheduler:
             "cron_expr": cron_expr,
             "agent_prompt": agent_prompt,
             "agent_tools": agent_tools_json,
+            "processor": processor,
+            "plan_json": plan_json,
         }
         self._register_reminder_from_row(row)
         kind = f"recurring ({cron_expr})" if cron_expr else f"one-shot at {run_at}"
@@ -291,31 +306,108 @@ class CronScheduler:
         logger.info(f"Event saved to DB for user={user_id} (no active WS)")
         return False
 
+    # ── Processor execution ──────────────────────────────────
+
+    async def _run_by_processor(
+        self,
+        processor: str,
+        plan: dict,
+        message: str,
+        user_id: str,
+        channel: str,
+        *,
+        agent_prompt: str | None = None,
+        agent_tools: str | None = None,
+        agent_model: str | None = None,
+    ) -> tuple[str | None, bool]:
+        """Execute based on processor type. Returns (response_text, should_deliver).
+
+        Processor types:
+        - static: plain text delivery, no LLM
+        - function: direct tool call, no LLM, no delivery
+        - agent: LightAgent with LLM + tools, delivers result
+
+        Falls back to legacy agent_prompt/agent_tools if plan is empty.
+        """
+        if processor == "static":
+            text = plan.get("message") or f"Hatirlatma: {message}"
+            return text, True
+
+        if processor == "function":
+            tool_name = plan.get("tool_name")
+            tool_args = plan.get("tool_args", {})
+            # Inject channel from context if tool accepts it
+            if "channel" not in tool_args and channel:
+                tool_args["channel"] = channel
+            tool = self._registry.get(tool_name)
+            if tool:
+                if hasattr(tool, "ainvoke"):
+                    await tool.ainvoke(tool_args)
+                else:
+                    tool.invoke(tool_args)
+                logger.info(f"Function processor: {tool_name}({tool_args})")
+            else:
+                logger.warning(f"Function processor: tool '{tool_name}' not found")
+            return None, False  # action itself is the goal, no delivery
+
+        # processor == "agent" (default)
+        from graphbot.agent.light import LightAgent
+
+        # New plan_json path
+        prompt = plan.get("prompt") or agent_prompt
+        tools_json = json.dumps(plan.get("tools")) if plan.get("tools") else agent_tools
+        model = plan.get("model") or agent_model
+
+        # Inject channel info into prompt so LightAgent uses the correct channel
+        if prompt and channel and channel != "telegram":
+            prompt += (
+                f"\n\nIMPORTANT: When calling send_message_to_user, "
+                f"you MUST set channel='{channel}'."
+            )
+
+        if prompt and self.config:
+            tools = self._parse_tools(tools_json)
+            resolved_model = model or self.config.assistant.model
+            agent = LightAgent(
+                config=self.config,
+                prompt=prompt,
+                tools=tools,
+                model=resolved_model,
+            )
+            text, _ = await agent.run(message)
+            # Agent handles its own delivery via send_message_to_user
+            return text, False
+
+        # Legacy fallback: no prompt → full runner
+        response, _ = await self.runner.process(
+            user_id=user_id, channel=channel, message=message, skip_context=True,
+        )
+        return response, True
+
     # ── Execution ─────────────────────────────────────────────
 
     async def _execute_job(self, job: CronJob) -> None:
-        """Execute a cron job via LightAgent or full runner.
+        """Execute a cron job based on its processor type.
 
-        If job.agent_prompt is set, uses LightAgent (cheap, isolated).
-        Otherwise falls back to full GraphRunner with skip_context=True.
+        Supports static/function/agent processors via plan_json.
+        Falls back to legacy agent_prompt if plan_json is empty.
         Supports NOTIFY/SKIP markers and tracks consecutive failures.
         """
         logger.info(f"Cron trigger: {job.job_id} → user={job.user_id}")
+        plan = json.loads(job.plan_json) if job.plan_json else {}
+        processor = job.processor or plan.get("processor", "agent")
         start = time.time()
         try:
-            if job.agent_prompt and self.config:
-                response, _ = await self._run_light(job)
-            else:
-                response, _ = await self.runner.process(
-                    user_id=job.user_id,
-                    channel=job.channel,
-                    message=job.message,
-                    skip_context=True,
-                )
+            response, should_deliver = await self._run_by_processor(
+                processor, plan, job.message, job.user_id, job.channel,
+                agent_prompt=job.agent_prompt,
+                agent_tools=job.agent_tools,
+                agent_model=job.agent_model,
+            )
             duration_ms = int((time.time() - start) * 1000)
 
             # NOTIFY/SKIP: suppress silent responses
-            if _should_skip(response):
+            if response and _should_skip(response):
                 logger.debug(f"Cron {job.job_id} skipped (SKIP marker in response)")
                 self.db.log_cron_execution(
                     job.job_id, response, "skipped", duration_ms=duration_ms,
@@ -324,16 +416,24 @@ class CronScheduler:
 
             # Log success + reset failures
             self.db.log_cron_execution(
-                job.job_id, response, "success", duration_ms=duration_ms,
+                job.job_id, response or "(no output)", "success",
+                duration_ms=duration_ms,
             )
             self.db.reset_cron_failures(job.job_id)
 
-            # Deliver LLM response to the user's channel
-            sent = await self._send_to_channel(job.user_id, job.channel, response)
-            if sent:
-                logger.info(f"Cron job {job.job_id} → sent to {job.channel}")
+            # Deliver response to user's channel
+            if should_deliver and response:
+                sent = await self._send_to_channel(
+                    job.user_id, job.channel, response,
+                )
+                if sent:
+                    logger.info(f"Cron job {job.job_id} → sent to {job.channel}")
+                else:
+                    logger.info(
+                        f"Cron job {job.job_id} completed: {response[:100]}"
+                    )
             else:
-                logger.info(f"Cron job {job.job_id} completed: {response[:100]}")
+                logger.info(f"Cron job {job.job_id} executed (no delivery)")
         except Exception as e:
             duration_ms = int((time.time() - start) * 1000)
             logger.error(f"Cron job {job.job_id} failed: {e}")
@@ -343,20 +443,6 @@ class CronScheduler:
             count = self.db.increment_cron_failures(job.job_id, str(e))
             if count >= 3:
                 self._pause_job(job.job_id)
-
-    async def _run_light(self, job: CronJob) -> tuple[str, int]:
-        """Run a cron job through LightAgent."""
-        from graphbot.agent.light import LightAgent
-
-        tools = self._parse_tools(job.agent_tools)
-        resolved_model = job.agent_model or self.config.assistant.model
-        agent = LightAgent(
-            config=self.config,
-            prompt=job.agent_prompt,
-            tools=tools,
-            model=resolved_model,
-        )
-        return await agent.run(job.message)
 
     def _parse_tools(self, agent_tools: str | None) -> list:
         """Parse JSON tool name list into actual tool objects.
@@ -385,50 +471,50 @@ class CronScheduler:
             pass
 
     async def _execute_reminder(self, row: dict) -> None:
-        """Execute a reminder: LightAgent if agent_prompt set, else static text.
+        """Execute a reminder based on its processor type.
 
+        Supports static/function/agent processors via plan_json.
+        Falls back to legacy agent_prompt if plan_json is empty.
         One-shot reminders are marked 'sent' after delivery.
         Recurring reminders stay 'pending' so they keep firing.
-
-        On failure, marks as failed (retry_count incremented).
-        After 3 failures, status becomes 'failed' permanently.
         """
         reminder_id = row["reminder_id"]
         user_id = row["user_id"]
         channel = row.get("channel", "telegram")
         is_recurring = bool(row.get("cron_expr"))
+        plan = json.loads(row.get("plan_json") or "{}") if row.get("plan_json") else {}
+        processor = row.get("processor") or plan.get("processor", "static")
+
         logger.info(
             f"Reminder trigger: {reminder_id} → user={user_id}"
-            f" ({'recurring' if is_recurring else 'one-shot'})"
+            f" ({'recurring' if is_recurring else 'one-shot'},"
+            f" processor={processor})"
         )
         try:
-            agent_prompt = row.get("agent_prompt")
-            if agent_prompt and self.config:
-                from graphbot.agent.light import LightAgent
-                tools = self._parse_tools(row.get("agent_tools"))
-                agent = LightAgent(
-                    config=self.config,
-                    prompt=agent_prompt,
-                    tools=tools,
-                    model=self.config.assistant.model,
-                )
-                text, _ = await agent.run(row["message"])
-                logger.info(f"Reminder {reminder_id} executed via LightAgent")
+            response, should_deliver = await self._run_by_processor(
+                processor, plan, row["message"], user_id, channel,
+                agent_prompt=row.get("agent_prompt"),
+                agent_tools=row.get("agent_tools"),
+            )
+
+            if should_deliver and response:
+                sent = await self._send_to_channel(user_id, channel, response)
+                if sent:
+                    logger.info(f"Reminder {reminder_id} sent to {channel}")
+                elif channel in ("api", "ws"):
+                    logger.info(f"Reminder {reminder_id} saved as system_event")
+                else:
+                    self.db.mark_reminder_failed(
+                        reminder_id, "Channel delivery failed",
+                    )
+                    logger.warning(f"Reminder {reminder_id} delivery failed")
+                    return
             else:
-                text = f"Hatirlatma: {row['message']}"
-            sent = await self._send_to_channel(user_id, channel, text)
-            if sent:
-                if not is_recurring:
-                    self.db.mark_reminder_sent(reminder_id)
-                logger.info(f"Reminder {reminder_id} sent directly")
-            elif channel in ("api", "ws"):
-                # Fallback: event saved to DB by _send_to_channel
-                if not is_recurring:
-                    self.db.mark_reminder_sent(reminder_id)
-                logger.info(f"Reminder {reminder_id} saved as system_event")
-            else:
-                self.db.mark_reminder_failed(reminder_id, "Channel delivery failed")
-                logger.warning(f"Reminder {reminder_id} delivery failed")
+                logger.info(f"Reminder {reminder_id} executed (no delivery)")
+
+            # Mark one-shot reminders as sent
+            if not is_recurring:
+                self.db.mark_reminder_sent(reminder_id)
         except Exception as e:
             self.db.mark_reminder_failed(reminder_id, str(e))
             logger.error(f"Reminder {reminder_id} failed: {e}")

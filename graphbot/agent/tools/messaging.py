@@ -29,7 +29,7 @@ def make_messaging_tools(
     """
 
     @tool
-    def send_message_to_user(
+    async def send_message_to_user(
         target_user: str,
         message: str,
         channel: str = "telegram",
@@ -94,6 +94,8 @@ def make_messaging_tools(
         if not link:
             return f"User '{target_name}' has no messaging channel configured."
 
+        text = f"{BOT_PREFIX}{message}" if background else message
+
         # Send via Telegram
         if channel == "telegram":
             chat_id = link["metadata"].get("chat_id")
@@ -101,20 +103,9 @@ def make_messaging_tools(
                 return f"User '{target_name}' has not started their Telegram bot yet. They need to send /start first."
 
             try:
-                import asyncio
-
                 from graphbot.core.channels.telegram import send_message
 
-                text = f"{BOT_PREFIX}{message}" if background else message
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    loop.run_until_complete(
-                        send_message(link["channel_user_id"], int(chat_id), text)
-                    )
-                finally:
-                    loop.close()
-
+                await send_message(link["channel_user_id"], int(chat_id), text)
                 logger.info(
                     f"Message sent to {target_name} ({target_user_id}) via {channel}: {message[:50]}"
                 )
@@ -130,26 +121,13 @@ def make_messaging_tools(
 
             chat_id = link["metadata"].get("chat_id")
             if not chat_id:
-                # Fallback: build chat_id from channel_user_id (phone number)
                 chat_id = WAHAClient.phone_to_chat_id(link["channel_user_id"])
 
             try:
-                import asyncio
-
                 from graphbot.core.channels.whatsapp import send_whatsapp_message
 
                 wa_config = config.channels.whatsapp
-                text = f"{BOT_PREFIX}{message}" if background else message
-
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    loop.run_until_complete(
-                        send_whatsapp_message(wa_config, chat_id, text)
-                    )
-                finally:
-                    loop.close()
-
+                await send_whatsapp_message(wa_config, chat_id, text)
                 logger.info(
                     f"Message sent to {target_name} ({target_user_id}) via whatsapp: {message[:50]}"
                 )

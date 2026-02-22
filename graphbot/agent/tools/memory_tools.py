@@ -23,23 +23,6 @@ def make_memory_tools(db: MemoryStore) -> list:
         return ctx if ctx else "No context found for this user."
 
     @tool
-    def log_activity(user_id: str, item_title: str, item_id: str = "") -> str:
-        """Log a user activity (e.g. used an item, completed a task)."""
-        db.log_activity(user_id, item_title, item_id=item_id or None)
-        return f"Activity logged: {item_title}"
-
-    @tool
-    def get_recent_activities(user_id: str, days: int = 7) -> str:
-        """Get user's recent activities from the last N days."""
-        rows = db.get_recent_activities(user_id, days=days)
-        if not rows:
-            return "No recent activities."
-        lines = []
-        for r in rows:
-            lines.append(f"- {r['item_title']} ({r['activity_date']})")
-        return "\n".join(lines)
-
-    @tool
     def add_favorite(user_id: str, item_id: str, item_title: str) -> str:
         """Add an item to user's favorites list."""
         if db.is_favorite(user_id, item_id):
@@ -98,8 +81,6 @@ def make_memory_tools(db: MemoryStore) -> list:
     return [
         save_user_note,
         get_user_context,
-        log_activity,
-        get_recent_activities,
         add_favorite,
         get_favorites,
         remove_favorite,

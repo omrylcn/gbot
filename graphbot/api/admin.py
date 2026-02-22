@@ -253,12 +253,12 @@ async def admin_logs(
     config: Config = Depends(get_config),
     db: MemoryStore = Depends(get_db),
 ):
-    """Recent activity logs."""
+    """Recent delegation logs."""
     _require_owner(current_user, config)
 
     with db._get_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM activity_logs ORDER BY created_at DESC LIMIT ?",
+            "SELECT * FROM delegation_log ORDER BY created_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
     return [dict(r) for r in rows]

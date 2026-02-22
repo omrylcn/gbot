@@ -39,11 +39,11 @@ channels:
     waha_url: "http://waha:3000"
     session: "default"
     api_key: "2275f9a154174f18a912644829b8dad4"  # WAHA API key
-    respond_to_dm: false  # true: allowed_dms listesindeki numaralara cevap ver
-    monitor_dm: false     # true: allowed_dms listesindeki DM'leri kaydet (cevap vermeden)
+    respond_to_dm: true  # true: allowed_dms listesindeki numaralara cevap ver
+    monitor_dm: true     # true: allowed_dms listesindeki DM'leri kaydet (cevap vermeden)
     allowed_groups:
       - "120363407143421687@g.us"  # gbot grubu
-    allowed_dms: []       # DM whitelist — sadece bu numaralardan gelen DM'ler işlenir
+    allowed_dms: ["905438003241"]       # DM whitelist — sadece bu numaralardan gelen DM'ler işlenir
   # discord:
   #   enabled: false
 
@@ -81,3 +81,39 @@ background:
   heartbeat:
     enabled: false
     interval_s: 1800
+  # delegation:
+  #   examples:  # Custom examples appended to planner prompt (optional)
+  #     - >-
+  #       "2 saat sonra toplanti var diye hatırlat"
+  #       → execution: "delayed", processor: "static", delay_seconds: 7200,
+  #       message: "Hatırlatma: toplantı var!"
+  #     - >-
+  #       "5 dk sonra Murat'a naber yaz"
+  #       → execution: "delayed", processor: "function", delay_seconds: 300,
+  #       tool_name: "send_message_to_user",
+  #       tool_args: {"target_user": "Murat", "message": "naber"}
+  #     - >-
+  #       "2 dk sonra hava durumunu bildir"
+  #       → execution: "delayed", processor: "agent", delay_seconds: 120,
+  #       tools: ["web_search"],
+  #       prompt: "Check current weather for Istanbul and report a brief summary."
+  #     - >-
+  #       "altın 3000 geçince haber ver"
+  #       → execution: "monitor", processor: "agent", cron_expr: "*/30 * * * *",
+  #       tools: ["web_fetch"],
+  #       prompt: "Check gold price. If above 3000 TL report the current price. Otherwise [SKIP]."
+  #     - >-
+  #       "her 10 dk'da Zeynep'e selam yaz"
+  #       → execution: "recurring", processor: "function", cron_expr: "*/10 * * * *",
+  #       tool_name: "send_message_to_user",
+  #       tool_args: {"target_user": "Zeynep", "message": "selam"}
+  #     - >-
+  #       "şu konuyu araştır"
+  #       → execution: "immediate", processor: "agent",
+  #       tools: ["web_search", "web_fetch"],
+  #       prompt: "Research the given topic thoroughly and return a clear summary."
+  #     - >-
+  #       "her sabah 9'da hava durumunu bildir"
+  #       → execution: "recurring", processor: "agent", cron_expr: "0 9 * * *",
+  #       tools: ["web_search"],
+  #       prompt: "Check current weather and provide a brief summary."

@@ -203,17 +203,9 @@ def _langchain_to_dict(msg: Any) -> dict[str, Any]:
 
 def _build_tool_definitions(tools: list) -> list[dict[str, Any]]:
     """Convert LangChain tools to OpenAI function format."""
-    defs = []
-    for tool in tools:
-        schema = tool.args_schema.model_json_schema() if tool.args_schema else {}
-        defs.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": tool.name,
-                    "description": tool.description or "",
-                    "parameters": schema,
-                },
-            }
-        )
-    return defs
+    from langchain_core.utils.function_calling import convert_to_openai_function
+
+    return [
+        {"type": "function", "function": convert_to_openai_function(t)}
+        for t in tools
+    ]

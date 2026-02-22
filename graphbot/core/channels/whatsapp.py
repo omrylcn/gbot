@@ -51,7 +51,7 @@ async def whatsapp_webhook(
     is_from_me = message.get("fromMe", False)
 
     # Extract text content
-    text = message.get("body", "").strip()
+    text = (message.get("body") or "").strip()
     logger.debug(
         f"WhatsApp raw: event={event_type}, fromMe={is_from_me}, "
         f"from={message.get('from','')}, text={text[:80]!r}"
@@ -99,11 +99,12 @@ async def whatsapp_webhook(
         if wa_config.respond_to_dm:
             # Bot phone mode — respond to DMs with [gbot] prefix
             logger.debug(f"WhatsApp DM (respond): {sender_name} → {user_id}: {text[:50]}")
+            dm_message = f"[WhatsApp DM from {sender_name}]: {text}"
             try:
                 response, _session_id = await runner.process(
                     user_id=user_id,
                     channel="whatsapp",
-                    message=text,
+                    message=dm_message,
                     session_id=sid,
                 )
             except Exception as e:

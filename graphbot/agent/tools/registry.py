@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 
 # Groups excluded from background agents (unsafe or meta-tools)
-_UNSAFE_GROUPS = frozenset({"filesystem", "shell", "delegation", "scheduling"})
+_UNSAFE_GROUPS = frozenset({"filesystem", "shell", "delegation"})
 
 
 def build_background_registry(registry: ToolRegistry) -> dict[str, BaseTool]:
@@ -110,10 +110,12 @@ def get_tool_catalog(registry: dict[str, BaseTool]) -> str:
     Returns
     -------
     str
-        One line per tool: ``- tool_name: first line of description``.
+        Tool name + full description (up to 300 chars).
     """
     lines = []
     for name, t in registry.items():
-        desc = (t.description or "").split("\n")[0]
+        desc = (t.description or "").strip()
+        if len(desc) > 300:
+            desc = desc[:300] + "..."
         lines.append(f"- {name}: {desc}")
     return "\n".join(lines)

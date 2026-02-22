@@ -2,7 +2,7 @@
 
 Generalized from ascibot's MemoryStore.  11 tables:
     users, user_channels, sessions, messages,
-    agent_memory, user_notes, activity_logs,
+    agent_memory, user_notes,
     favorites, preferences, cron_jobs, api_keys
 """
 
@@ -12,7 +12,6 @@ import json
 import sqlite3
 import uuid
 from contextlib import contextmanager
-from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -79,9 +78,36 @@ class MemoryStore:
             ("cron_expr", "TEXT"),
             ("agent_prompt", "TEXT"),
             ("agent_tools", "TEXT"),
+            ("processor", "TEXT DEFAULT 'static'"),
+            ("plan_json", "TEXT"),
         ]:
             if col not in rem_cols:
                 conn.execute(f"ALTER TABLE reminders ADD COLUMN {col} {ddl}")
+
+        # Cron jobs: processor + plan_json (delegation refactor)
+        for col, ddl in [
+            ("processor", "TEXT DEFAULT 'agent'"),
+            ("plan_json", "TEXT"),
+        ]:
+            if col not in cron_cols:
+                conn.execute(f"ALTER TABLE cron_jobs ADD COLUMN {col} {ddl}")
+
+        # Delegation log table (may not exist in older DBs)
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS delegation_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                task_description TEXT NOT NULL,
+                execution_type TEXT NOT NULL,
+                processor_type TEXT NOT NULL,
+                reference_id TEXT,
+                plan_json TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(user_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_delegation_user
+                ON delegation_log(user_id, created_at DESC);
+        """)
 
     # ════════════════════════════════════════════════════════════
     # USERS
@@ -517,42 +543,6 @@ class MemoryStore:
         return [r["note"] for r in rows]
 
     # ════════════════════════════════════════════════════════════
-    # ACTIVITY LOGS (ascibot meal_logs → genel)
-    # ════════════════════════════════════════════════════════════
-
-    def log_activity(
-        self,
-        user_id: str,
-        item_title: str,
-        activity_type: str = "used",
-        item_id: str | None = None,
-    ) -> int:
-        self.get_or_create_user(user_id)
-        with self._get_conn() as conn:
-            cursor = conn.execute(
-                """INSERT INTO activity_logs
-                   (user_id, item_id, item_title, activity_type)
-                   VALUES (?, ?, ?, ?)""",
-                (user_id, item_id, item_title, activity_type),
-            )
-            conn.commit()
-            return cursor.lastrowid or 0
-
-    def get_recent_activities(
-        self, user_id: str, days: int = 7
-    ) -> list[dict[str, Any]]:
-        cutoff = date.today() - timedelta(days=days)
-        with self._get_conn() as conn:
-            rows = conn.execute(
-                """SELECT item_id, item_title, activity_type, activity_date
-                   FROM activity_logs
-                   WHERE user_id = ? AND activity_date >= ?
-                   ORDER BY activity_date DESC""",
-                (user_id, cutoff),
-            ).fetchall()
-        return [dict(r) for r in rows]
-
-    # ════════════════════════════════════════════════════════════
     # FAVORITES
     # ════════════════════════════════════════════════════════════
 
@@ -654,16 +644,20 @@ class MemoryStore:
         agent_tools: str | None = None,
         agent_model: str | None = None,
         notify_condition: str = "always",
+        processor: str = "agent",
+        plan_json: str | None = None,
     ) -> None:
         with self._get_conn() as conn:
             conn.execute(
                 """INSERT INTO cron_jobs
                    (job_id, user_id, cron_expr, message, channel, enabled,
-                    agent_prompt, agent_tools, agent_model, notify_condition)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    agent_prompt, agent_tools, agent_model, notify_condition,
+                    processor, plan_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     job_id, user_id, cron_expr, message, channel, int(enabled),
                     agent_prompt, agent_tools, agent_model, notify_condition,
+                    processor, plan_json,
                 ),
             )
             conn.commit()
@@ -695,6 +689,8 @@ class MemoryStore:
         cron_expr: str | None = None,
         agent_prompt: str | None = None,
         agent_tools: str | None = None,
+        processor: str = "static",
+        plan_json: str | None = None,
     ) -> None:
         """Add a reminder to the reminders table.
 
@@ -705,16 +701,20 @@ class MemoryStore:
         agent_prompt : str, optional
             If set, LightAgent runs with this prompt instead of sending static text.
         agent_tools : str, optional
-            JSON list of tool names for the LightAgent (e.g. '["send_message_to_user"]').
+            JSON list of tool names for the LightAgent.
+        processor : str
+            Processor type: "static", "function", or "agent".
+        plan_json : str, optional
+            JSON with processor-specific config (tool_name/tool_args or prompt/tools).
         """
         with self._get_conn() as conn:
             conn.execute(
                 """INSERT INTO reminders
                    (reminder_id, user_id, run_at, message, channel, cron_expr,
-                    agent_prompt, agent_tools)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    agent_prompt, agent_tools, processor, plan_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (reminder_id, user_id, run_at, message, channel, cron_expr,
-                 agent_prompt, agent_tools),
+                 agent_prompt, agent_tools, processor, plan_json),
             )
             conn.commit()
 
@@ -930,6 +930,50 @@ class MemoryStore:
         return dict(row) if row else None
 
     # ════════════════════════════════════════════════════════════
+    # DELEGATION LOG (planner decision audit trail)
+    # ════════════════════════════════════════════════════════════
+
+    def log_delegation(
+        self,
+        user_id: str,
+        task_description: str,
+        execution_type: str,
+        processor_type: str,
+        reference_id: str | None = None,
+        plan_json: str | None = None,
+    ) -> int:
+        """Record a delegation planner decision."""
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO delegation_log
+                   (user_id, task_description, execution_type, processor_type,
+                    reference_id, plan_json)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (user_id, task_description, execution_type, processor_type,
+                 reference_id, plan_json),
+            )
+            conn.commit()
+            return cur.lastrowid or 0
+
+    def get_delegation_log(
+        self, user_id: str | None = None, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        """Get delegation log entries."""
+        with self._get_conn() as conn:
+            if user_id:
+                rows = conn.execute(
+                    """SELECT * FROM delegation_log
+                       WHERE user_id = ? ORDER BY created_at DESC LIMIT ?""",
+                    (user_id, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM delegation_log ORDER BY created_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ════════════════════════════════════════════════════════════
     # COMBINED USER CONTEXT (for ContextBuilder)
     # ════════════════════════════════════════════════════════════
 
@@ -942,15 +986,6 @@ class MemoryStore:
         if notes:
             lines = "\n".join(f"- {n}" for n in notes)
             parts.append(f"USER NOTES:\n{lines}")
-
-        # Recent activities
-        activities = self.get_recent_activities(user_id, days=7)
-        if activities:
-            lines = "\n".join(
-                f"- {a['activity_date']}: {a['item_title']} ({a['activity_type']})"
-                for a in activities
-            )
-            parts.append(f"RECENT ACTIVITIES:\n{lines}")
 
         # Favorites
         favs = self.get_favorites(user_id)
@@ -1039,20 +1074,7 @@ CREATE TABLE IF NOT EXISTS user_notes (
 );
 CREATE INDEX IF NOT EXISTS idx_notes_user ON user_notes(user_id);
 
--- 7. Activity logs (ascibot meal_logs → general)
-CREATE TABLE IF NOT EXISTS activity_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT NOT NULL,
-    item_id TEXT,
-    item_title TEXT NOT NULL,
-    activity_type TEXT DEFAULT 'used',
-    activity_date DATE DEFAULT CURRENT_DATE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(user_id)
-);
-CREATE INDEX IF NOT EXISTS idx_activity_user ON activity_logs(user_id, activity_date DESC);
-
--- 8. Favorites
+-- 7. Favorites
 CREATE TABLE IF NOT EXISTS favorites (
     user_id TEXT NOT NULL,
     item_id TEXT NOT NULL,
@@ -1154,4 +1176,18 @@ CREATE TABLE IF NOT EXISTS api_keys (
     is_active BOOLEAN DEFAULT TRUE,
     FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
+
+-- 16. Delegation log (planner decision audit trail)
+CREATE TABLE IF NOT EXISTS delegation_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    task_description TEXT NOT NULL,
+    execution_type TEXT NOT NULL,
+    processor_type TEXT NOT NULL,
+    reference_id TEXT,
+    plan_json TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_delegation_user ON delegation_log(user_id, created_at DESC);
 """

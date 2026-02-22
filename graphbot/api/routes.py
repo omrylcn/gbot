@@ -180,12 +180,10 @@ async def user_context(
     ctx_text = db.get_user_context(user_id)
     prefs = db.get_preferences(user_id)
     favs = db.get_favorites(user_id)
-    activities = db.get_recent_activities(user_id)
     return UserContextResponse(
         context_text=ctx_text,
         preferences=prefs,
         favorites=[ItemCard(id=f.get("item_id", ""), title=f.get("item_title", "")) for f in favs],
-        recent_activities=activities,
     )
 
 

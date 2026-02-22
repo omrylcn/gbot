@@ -108,17 +108,21 @@ async def lifespan(app: FastAPI):
     worker = SubagentWorker(config, db=db)
 
     # Build registry without delegation (planner doesn't exist yet)
-    registry = make_tools(config, db, scheduler=cron_scheduler, worker=None)
+    registry = make_tools(config, db)
 
     # Delegation planner uses background-safe subset of registry
     bg_registry = build_background_registry(registry)
     tool_catalog = get_tool_catalog(bg_registry)
     planner = DelegationPlanner(config, tool_catalog)
 
-    # Now add delegation tools (worker + planner ready)
-    delegate_tools = make_delegate_tools(worker, planner)
+    # Now add delegation tools (worker + scheduler + planner ready)
+    delegate_tools = make_delegate_tools(
+        worker, cron_scheduler, planner, db=db,
+    )
     if delegate_tools:
-        registry.register_group("delegation", delegate_tools, requires=["worker"])
+        registry.register_group(
+            "delegation", delegate_tools, requires=["worker", "scheduler"],
+        )
 
     # Rebuild runner with full registry
     from graphbot.agent.graph import create_graph
