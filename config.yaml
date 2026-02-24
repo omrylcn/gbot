@@ -6,7 +6,7 @@ assistant:
     username: "owner"
     name: "Owner"
   workspace: ./workspace
-  model: "openrouter/minimax/minimax-m2.5"
+  model: "openrouter/moonshotai/kimi-k2.5"
   temperature: 0.7
   thinking: true
   session_token_limit: 30000

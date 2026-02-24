@@ -52,11 +52,15 @@ async def achat(
     if response_format:
         kwargs["response_format"] = response_format
 
-    _is_moonshot = "moonshot/" in model and "k2" in model
+    _is_moonshot = "moonshot" in model and "kimi" in model
 
-    # Thinking mode: force temperature=1 (required by reasoning models).
-    # Non-thinking mode: disable thinking for Moonshot, use config temperature.
-    if thinking:
+    # Thinking mode for Moonshot Kimi: use extra_body with thinking enabled.
+    # Other models: use reasoning_effort parameter.
+    # Non-thinking mode: disable thinking for Moonshot.
+    if thinking and _is_moonshot:
+        kwargs["temperature"] = 1.0
+        kwargs["extra_body"] = {"thinking": {"type": "enabled", "budget_tokens": 4096}}
+    elif thinking:
         kwargs["temperature"] = 1.0
         kwargs["reasoning_effort"] = "medium"
     elif _is_moonshot:

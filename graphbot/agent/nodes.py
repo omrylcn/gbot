@@ -106,26 +106,45 @@ def make_nodes(config: Config, db: MemoryStore, tools: list | None = None):
             else:
                 try:
                     args = call["args"].copy()
+                    # Clean up malformed LLM args (e.g. {"raw": "..."})
+                    args.pop("raw", None)
                     # Inject state context into tools that accept these params
                     tool_fields = set(tool.args_schema.model_fields) if tool.args_schema else set()
                     if "channel" in tool_fields:
                         original = args.get("channel")
                         if original:
-                            # LLM explicitly set channel → keep it
                             logger.debug(
                                 f"Channel keep: tool={call['name']}, "
                                 f"LLM set {original!r}"
                             )
                         else:
-                            # No channel provided → inject from session
                             args["channel"] = state["channel"]
                             logger.debug(
                                 f"Channel inject: tool={call['name']}, "
                                 f"None → {state['channel']!r}"
                             )
-                    logger.debug(f"Executing tool: {call['name']}({args})")
-                    result = await tool.ainvoke(args)
-                    logger.debug(f"Tool result: {call['name']} → {str(result)[:100]}")
+                    # Pre-validate: detect empty args for tools with required params
+                    auto_keys = {"channel"}
+                    user_args = {k: v for k, v in args.items() if k not in auto_keys}
+                    required = set()
+                    if tool.args_schema:
+                        for k, f in tool.args_schema.model_fields.items():
+                            if k not in auto_keys and f.is_required():
+                                required.add(k)
+                    if required and not user_args:
+                        param_hints = ", ".join(sorted(required))
+                        example_args = ", ".join(
+                            f'{k}="..."' for k in sorted(required)
+                        )
+                        result = (
+                            f"Error: {call['name']} requires: {param_hints}. "
+                            f"Example: {call['name']}({example_args})"
+                        )
+                        logger.warning(f"Empty args: {call['name']} needs {required}")
+                    else:
+                        logger.debug(f"Executing tool: {call['name']}({args})")
+                        result = await tool.ainvoke(args)
+                        logger.debug(f"Tool result: {call['name']} → {str(result)[:100]}")
                 except Exception as e:
                     result = f"Tool error: {e}"
                     logger.error(f"Tool error: {call['name']} → {e}")

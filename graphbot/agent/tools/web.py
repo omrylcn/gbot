@@ -25,7 +25,16 @@ def make_web_tools(config: Config) -> list:
 
     @tool
     async def web_search(query: str, count: int = 5) -> str:
-        """Search the web for information. Returns relevant results."""
+        """Search the web for real-time information like news, scores, prices.
+
+        Parameters
+        ----------
+        query : str
+            Search query string, e.g. 'Istanbul weather today', 'Bitcoin price',
+            'Fenerbahce match result'.
+        count : int
+            Max number of results to return (default 5).
+        """
         # Strategy 1: DuckDuckGo (free, no API key)
         ddg_result = await _ddg_search(query, count)
         if ddg_result:
@@ -56,10 +65,15 @@ def make_web_tools(config: Config) -> list:
 
     shortcuts = config.tools.web.fetch_shortcuts
     shortcut_names = ", ".join(sorted(shortcuts.keys())) if shortcuts else "none configured"
+    shortcut_examples = " | ".join(
+        f'url="{k}"' for k in list(shortcuts.keys())[:3]
+    ) if shortcuts else ""
     docstring = (
         "Fetch a web page or shortcut tag and return content as text.\n\n"
-        f"Available shortcuts: {shortcut_names}. "
-        "Use shortcut name instead of URL for quick data access."
+        f"Available shortcuts: {shortcut_names}.\n"
+        f"Usage: pass the shortcut name as the url parameter, e.g. {shortcut_examples}.\n"
+        "For weather, use web_fetch(url='weather:istanbul'). "
+        "For any URL, pass the full URL as url parameter."
     )
 
     @tool
