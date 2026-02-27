@@ -279,10 +279,9 @@ class CronScheduler:
                 from graphbot.core.channels.whatsapp import send_whatsapp_message
 
                 chat_id = WAHAClient.phone_to_chat_id(link["channel_user_id"])
-                from graphbot.agent.tools.messaging import BOT_PREFIX
 
                 await send_whatsapp_message(
-                    self.config.channels.whatsapp, chat_id, f"{BOT_PREFIX}{text}"
+                    self.config.channels.whatsapp, chat_id, text
                 )
                 return True
             logger.warning(f"No whatsapp link for user {user_id}")
@@ -325,6 +324,7 @@ class CronScheduler:
         Processor types:
         - static: plain text delivery, no LLM
         - function: direct tool call, no LLM, no delivery
+        - runner: full GraphRunner with complete context + all tools (self-reminder)
         - agent: LightAgent with LLM + tools, delivers result
 
         Falls back to legacy agent_prompt/agent_tools if plan is empty.
@@ -349,6 +349,14 @@ class CronScheduler:
             else:
                 logger.warning(f"Function processor: tool '{tool_name}' not found")
             return None, False  # action itself is the goal, no delivery
+
+        if processor == "runner":
+            # Self-reminder: full GraphRunner with complete context + all tools.
+            # Runs as if the owner typed the message — same session, same channel.
+            response, _ = await self.runner.process(
+                user_id=user_id, channel=channel, message=message,
+            )
+            return response, True
 
         # processor == "agent" (default)
         from graphbot.agent.light import LightAgent

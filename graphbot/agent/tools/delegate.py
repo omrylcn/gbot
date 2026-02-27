@@ -78,6 +78,15 @@ def make_delegate_tools(
 
             execution = plan["execution"]
             processor = plan["processor"]
+
+            # Guard: runner processor only allowed with delayed/recurring
+            if processor == "runner" and execution == "immediate":
+                processor = "agent"
+                plan["processor"] = "agent"
+                logger.warning(
+                    "runner processor downgraded to agent for immediate execution"
+                )
+
             plan_json_str = json.dumps(plan)
 
             # Route based on execution type

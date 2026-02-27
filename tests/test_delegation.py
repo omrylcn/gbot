@@ -663,3 +663,79 @@ def test_delegation_log_crud(store):
     assert logs[0]["task_description"] == "Research BTC"
     assert logs[0]["execution_type"] == "immediate"
     assert logs[0]["processor_type"] == "agent"
+
+
+# ── Runner processor (self-reminder) ─────────────────────
+
+
+def test_planner_parse_runner(cfg):
+    """Runner processor parses correctly."""
+    planner = DelegationPlanner(cfg, "")
+    result = planner._parse(json.dumps({
+        "execution": "recurring",
+        "processor": "runner",
+        "delay_seconds": None,
+        "cron_expr": "0 10 * * *",
+        "message": None,
+        "tool_name": None,
+        "tool_args": None,
+        "tools": [],
+        "prompt": None,
+        "model": None,
+    }))
+    assert result["execution"] == "recurring"
+    assert result["processor"] == "runner"
+    assert result["cron_expr"] == "0 10 * * *"
+    assert result["tools"] == []
+    assert result["prompt"] is None
+
+
+@pytest.mark.asyncio
+async def test_run_by_processor_runner(cfg, store):
+    """Runner processor calls runner.process with full context."""
+    runner = AsyncMock()
+    runner.process = AsyncMock(
+        return_value=("İftar 17:47, Zeynep'e gönderdim.", "sess-1")
+    )
+    sched = CronScheduler(store, runner, config=cfg)
+
+    text, deliver = await sched._run_by_processor(
+        "runner", {}, "iftar saatini bul, Zeynep'e gönder", "owner", "whatsapp",
+    )
+
+    runner.process.assert_called_once_with(
+        user_id="owner",
+        channel="whatsapp",
+        message="iftar saatini bul, Zeynep'e gönder",
+    )
+    assert "İftar" in text
+    assert deliver is True
+
+
+@pytest.mark.asyncio
+async def test_delegate_runner_immediate_downgrade(cfg, store):
+    """immediate+runner downgrades to immediate+agent (loop prevention)."""
+    from graphbot.core.background.worker import SubagentWorker
+
+    worker = SubagentWorker(cfg)
+    planner = AsyncMock()
+    planner.plan = AsyncMock(return_value={
+        "execution": "immediate",
+        "processor": "runner",
+        "delay_seconds": None,
+        "cron_expr": None,
+        "message": None,
+        "tool_name": None,
+        "tool_args": None,
+        "tools": [],
+        "prompt": None,
+        "model": None,
+    })
+
+    tools = make_delegate_tools(worker, planner=planner, db=store)
+    delegate_tool = next(t for t in tools if t.name == "delegate")
+
+    with patch.object(worker, "spawn", return_value="abc") as mock_spawn:
+        result = await delegate_tool.ainvoke({"user_id": "u1", "task": "test"})
+        # Should have been downgraded — worker.spawn called (not runner.process)
+        mock_spawn.assert_called_once()
