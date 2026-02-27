@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import httpx
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -37,11 +39,10 @@ async def whatsapp_webhook(
 
     body = await request.json()
 
-    # Only process "message" events (skip "message.any" to avoid duplicates)
+    # "message" = incoming only; "message.any" = all (incoming + outgoing).
+    # Skip "message.any" for incoming (fromMe=False) to avoid duplicate processing.
     event_type = body.get("event", "")
     if event_type == "message.any":
-        # message.any includes fromMe — only use it for fromMe messages
-        # (regular incoming messages already arrive via "message" event)
         if not body.get("payload", {}).get("fromMe", False):
             return JSONResponse({"ok": True})
     elif event_type != "message":
@@ -59,9 +60,10 @@ async def whatsapp_webhook(
     if not text:
         return JSONResponse({"ok": True})
 
-    chat_id = message.get("from", "")  # "905551234567@c.us" or "XXX@g.us"
+    chat_id = message.get("from", "")  # "905551234567@c.us", "XXX@g.us", or "YYY@lid"
     # Ignore non-chat sources (newsletters, broadcasts, etc.)
-    if not chat_id.endswith("@c.us") and not chat_id.endswith("@g.us"):
+    valid_suffixes = ("@c.us", "@g.us", "@lid")
+    if not any(chat_id.endswith(s) for s in valid_suffixes):
         return JSONResponse({"ok": True})
     is_group = chat_id.endswith("@g.us")
     config = request.app.state.config
@@ -73,17 +75,17 @@ async def whatsapp_webhook(
             # DM processing completely disabled
             return JSONResponse({"ok": True})
 
-        # Check allowed_dms whitelist — only process DMs from listed numbers
-        sender_phone = WAHAClient.chat_id_to_phone(chat_id)
-        if wa_config.allowed_dms and sender_phone not in wa_config.allowed_dms:
+        # Check allowed_dms whitelist — keys are phone numbers or LIDs
+        sender_id = WAHAClient.chat_id_to_phone(chat_id)
+        if wa_config.allowed_dms and sender_id not in wa_config.allowed_dms:
             return JSONResponse({"ok": True})
 
         if is_from_me:
             return JSONResponse({"ok": True})
 
-        # Resolve sender name
-        sender_name = sender_phone
-        sender_user_id = db.resolve_user("whatsapp", sender_phone)
+        # Resolve sender name: config dict value > DB user > raw ID
+        sender_name = wa_config.allowed_dms.get(sender_id, sender_id)
+        sender_user_id = db.resolve_user("whatsapp", sender_id)
         if sender_user_id:
             sender_obj = db.get_user(sender_user_id)
             if sender_obj and sender_obj.get("name"):
@@ -97,11 +99,16 @@ async def whatsapp_webhook(
             sid = active["session_id"]
 
         if wa_config.respond_to_dm:
-            # Bot phone mode — respond to DMs with [gbot] prefix
+            # Process DM through runner — LLM decides whether to reply.
+            # Response stays in owner's session; LLM uses send_message_to_user
+            # tool if it wants to message the DM sender directly.
             logger.debug(f"WhatsApp DM (respond): {sender_name} → {user_id}: {text[:50]}")
-            dm_message = f"[WhatsApp DM from {sender_name}]: {text}"
+            dm_message = (
+                f"[WhatsApp DM from {sender_name}]: {text}\n"
+                f"[If you want to reply to {sender_name}, use send_message_to_user tool.]"
+            )
             try:
-                response, _session_id = await runner.process(
+                await runner.process(
                     user_id=user_id,
                     channel="whatsapp",
                     message=dm_message,
@@ -109,10 +116,6 @@ async def whatsapp_webhook(
                 )
             except Exception as e:
                 logger.error(f"WhatsApp DM processing error: {e}")
-                response = "An error occurred while processing your message."
-            await send_whatsapp_message(
-                wa_config, chat_id, f"{BOT_PREFIX}{response}"
-            )
         else:
             # monitor_dm=true → store DM in session but do NOT respond.
             db.add_message(sid, "user", f"[WhatsApp DM] {sender_name}: {text}")
@@ -148,9 +151,7 @@ async def whatsapp_webhook(
         logger.error(f"WhatsApp: processing error: {e}")
         response = "An error occurred while processing your message."
 
-    await send_whatsapp_message(
-        config.channels.whatsapp, chat_id, f"{BOT_PREFIX}{response}"
-    )
+    await send_whatsapp_message(config.channels.whatsapp, chat_id, response)
 
     return JSONResponse({"ok": True})
 
@@ -207,9 +208,20 @@ async def whatsapp_webhook_global(
 async def send_whatsapp_message(
     wa_config: WhatsAppChannelConfig, chat_id: str, text: str
 ) -> None:
-    """Send a message via WAHA API, splitting long messages if necessary."""
+    """Send a message via WAHA API, splitting long messages if necessary.
+
+    Auto-prefixes ``[gbot]`` if not already present — on WhatsApp, every
+    outgoing message comes from the bot's phone number, so the recipient
+    must always be able to distinguish bot messages from owner messages.
+    """
     if not text:
         return
+
+    # Strip ALL [gbot] variants from anywhere in text (plain, bold, repeated).
+    # LLM sometimes adds **[gbot]** or [gbot] in its response — remove them all,
+    # then prepend exactly one clean prefix.
+    text = re.sub(r'\*{0,2}\[gbot\]\*{0,2}\s*', '', text, flags=re.IGNORECASE).strip()
+    text = f"{BOT_PREFIX}{text}"
 
     client = WAHAClient(wa_config.waha_url, wa_config.session, wa_config.api_key)
     chunks = split_message(text)

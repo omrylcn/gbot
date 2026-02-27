@@ -169,7 +169,7 @@ class SubagentWorker:
             if link and wa_config.enabled:
                 chat_id = link["metadata"].get("chat_id")
                 if chat_id:
-                    await send_whatsapp_message(wa_config, chat_id, f"[gbot] {text}")
+                    await send_whatsapp_message(wa_config, chat_id, text)
                     self.db.mark_events_delivered([event_id])
                     logger.info(f"Task result delivered via WhatsApp to {chat_id}")
                     return True

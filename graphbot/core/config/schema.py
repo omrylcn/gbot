@@ -117,7 +117,7 @@ class WhatsAppChannelConfig(BaseModel):
     api_key: str = ""
     allow_from: list[str] = Field(default_factory=list)
     allowed_groups: list[str] = Field(default_factory=list)
-    allowed_dms: list[str] = Field(default_factory=list)
+    allowed_dms: dict[str, str] = Field(default_factory=dict)
     respond_to_dm: bool = False
     monitor_dm: bool = False
 

@@ -71,6 +71,35 @@ def test_split_empty_message():
     assert split_message("") == [""]
 
 
+# ── send_whatsapp_message prefix ─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_send_whatsapp_message_auto_prefix():
+    """send_whatsapp_message auto-prefixes [gbot] if missing."""
+    from graphbot.core.channels.whatsapp import send_whatsapp_message
+
+    wa_config = type("C", (), {"waha_url": "http://x", "session": "s", "api_key": "k"})()
+    with patch("graphbot.core.channels.whatsapp.WAHAClient") as MockClient:
+        mock_instance = AsyncMock()
+        MockClient.return_value = mock_instance
+        await send_whatsapp_message(wa_config, "123@c.us", "hello")
+        mock_instance.send_text.assert_called_once_with("123@c.us", "[gbot] hello")
+
+
+@pytest.mark.asyncio
+async def test_send_whatsapp_message_no_double_prefix():
+    """send_whatsapp_message does not double-prefix [gbot]."""
+    from graphbot.core.channels.whatsapp import send_whatsapp_message
+
+    wa_config = type("C", (), {"waha_url": "http://x", "session": "s", "api_key": "k"})()
+    with patch("graphbot.core.channels.whatsapp.WAHAClient") as MockClient:
+        mock_instance = AsyncMock()
+        MockClient.return_value = mock_instance
+        await send_whatsapp_message(wa_config, "123@c.us", "[gbot] already prefixed")
+        mock_instance.send_text.assert_called_once_with("123@c.us", "[gbot] already prefixed")
+
+
 # ── Webhook fixtures ──────────────────────────────────────
 
 
@@ -201,10 +230,10 @@ async def test_group_message_no_prefix_also_processed(tmp_path):
     assert resp.status_code == 200
     mock_runner.process.assert_called_once()
     assert mock_runner.process.call_args.kwargs["message"] == "selam herkese"
-    # Response should have [gbot] prefix
+    # Response sent (prefix added inside send_whatsapp_message, not by caller)
     mock_send.assert_called_once()
     sent_text = mock_send.call_args.args[2]
-    assert sent_text.startswith("[gbot]")
+    assert sent_text  # non-empty response
 
 
 @pytest.mark.asyncio
@@ -236,7 +265,8 @@ async def test_group_response_has_gbot_prefix(tmp_path):
 
     assert resp.status_code == 200
     sent_text = mock_send.call_args.args[2]
-    assert sent_text == "[gbot] Hava güzel!"
+    # Prefix added inside send_whatsapp_message (mocked here), caller sends raw
+    assert sent_text == "Hava güzel!"
 
 
 @pytest.mark.asyncio
@@ -378,7 +408,10 @@ async def test_dm_isolated_from_telegram_session(waha_dm_event, tmp_path):
 
 @pytest.mark.asyncio
 async def test_dm_respond_when_enabled(waha_dm_event, tmp_path):
-    """DM responded to with [gbot] prefix when respond_to_dm=true."""
+    """respond_to_dm=true processes DM through runner but does NOT auto-send.
+
+    LLM decides whether to reply via send_message_to_user tool.
+    """
     app, db, mock_runner = _make_app(
         tmp_path,
         config_overrides={"respond_to_dm": True},
@@ -398,9 +431,8 @@ async def test_dm_respond_when_enabled(waha_dm_event, tmp_path):
 
     assert resp.status_code == 200
     mock_runner.process.assert_called_once()
-    mock_send.assert_called_once()
-    sent_text = mock_send.call_args.args[2]
-    assert sent_text.startswith("[gbot]")
+    # Response NOT auto-sent to DM sender — LLM uses tools if needed
+    mock_send.assert_not_called()
 
 
 @pytest.mark.asyncio

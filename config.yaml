@@ -43,7 +43,9 @@ channels:
     monitor_dm: true     # true: allowed_dms listesindeki DM'leri kaydet (cevap vermeden)
     allowed_groups:
       - "120363407143421687@g.us"  # gbot grubu
-    allowed_dms: ["905438003241"]       # DM whitelist — sadece bu numaralardan gelen DM'ler işlenir
+    allowed_dms:
+      "905438003241": "Ömer"
+      "108053106016451": "Zeynep"
   # discord:
   #   enabled: false
 

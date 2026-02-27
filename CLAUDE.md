@@ -76,6 +76,7 @@ Entry point: `gbot` (alias: `graphbot`).
 | `gbot_cli/slash_commands.py` | SlashCommandRouter — /help, /status, /session, ... |
 | `roles.yaml` | RBAC role definitions (role → groups, no tool names — resolved from ToolRegistry) |
 | `mimari_kararlar.md` | 13 architectural decisions (detailed reasoning) |
+| `notes.md` | Kullanıcı şifreleri, WAHA kurulum adımları, WhatsApp credentials, memory tasarım notları |
 | `todo.md` | Phase progress tracking |
 
 ## Progress
