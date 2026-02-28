@@ -24,6 +24,7 @@ dependencies = [
 
     # LLM Providers
     "litellm>=1.0.0",
+    "openrouter>=0.7.0",
 
     # API
     "fastapi>=0.109.0",

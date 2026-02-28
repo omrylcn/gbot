@@ -171,14 +171,14 @@ _RESPONSE_SCHEMA = {
                     "type": "string",
                     "enum": ["static", "function", "agent", "runner"],
                 },
-                "delay_seconds": {"type": ["integer", "null"]},
-                "cron_expr": {"type": ["string", "null"]},
-                "message": {"type": ["string", "null"]},
-                "tool_name": {"type": ["string", "null"]},
-                "tool_args": {},
+                "delay_seconds": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+                "cron_expr": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                "message": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                "tool_name": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                "tool_args": {"anyOf": [{"type": "object"}, {"type": "null"}]},
                 "tools": {"type": "array", "items": {"type": "string"}},
-                "prompt": {"type": ["string", "null"]},
-                "model": {"type": ["string", "null"]},
+                "prompt": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                "model": {"anyOf": [{"type": "string"}, {"type": "null"}]},
             },
             "required": [
                 "execution", "processor", "delay_seconds", "cron_expr",
@@ -237,7 +237,6 @@ class DelegationPlanner:
             messages=messages,
             model=self.model,
             temperature=self.temperature,
-            max_tokens=512,
             api_base=self.config.get_api_base(self.model),
             response_format=_RESPONSE_SCHEMA,
         )
@@ -297,8 +296,9 @@ class DelegationPlanner:
                 "prompt": data.get("prompt"),
                 "model": model,
             }
-        except (json.JSONDecodeError, IndexError):
+        except (json.JSONDecodeError, IndexError, KeyError, TypeError) as e:
             logger.warning(
-                "DelegationPlanner: failed to parse LLM response, using defaults"
+                f"DelegationPlanner: parse failed: {e!r}, "
+                f"raw={text[:300]!r}"
             )
             return dict(_FALLBACK_PLAN)

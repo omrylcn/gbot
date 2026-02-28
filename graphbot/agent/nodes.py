@@ -111,18 +111,11 @@ def make_nodes(config: Config, db: MemoryStore, tools: list | None = None):
                     # Inject state context into tools that accept these params
                     tool_fields = set(tool.args_schema.model_fields) if tool.args_schema else set()
                     if "channel" in tool_fields:
-                        original = args.get("channel")
-                        if original:
-                            logger.debug(
-                                f"Channel keep: tool={call['name']}, "
-                                f"LLM set {original!r}"
-                            )
-                        else:
-                            args["channel"] = state["channel"]
-                            logger.debug(
-                                f"Channel inject: tool={call['name']}, "
-                                f"None → {state['channel']!r}"
-                            )
+                        args["channel"] = state["channel"]
+                        logger.debug(
+                            f"Channel inject: tool={call['name']}, "
+                            f"→ {state['channel']!r}"
+                        )
                     # Pre-validate: detect empty args for tools with required params
                     auto_keys = {"channel"}
                     user_args = {k: v for k, v in args.items() if k not in auto_keys}

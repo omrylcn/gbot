@@ -6,6 +6,32 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.12.0] - 2026-02-28
+
+### Added (LLM Provider Refactor — Strategy Pattern)
+
+- **`BaseLLMProvider` ABC:** Abstract base class for LLM providers — `achat()` interface
+- **`OpenRouterLLM` provider:** Direct OpenRouter SDK integration — bypasses LiteLLM adapter, `response_format` passes through without stripping
+- **`LiteLLMLLM` provider:** Extracted existing LiteLLM logic into standalone class (Moonshot thinking, summarize, extract_facts)
+- **`openrouter` SDK dependency:** `openrouter>=0.7.0` in pyproject.toml
+- **13 provider tests:** Factory routing, AIMessage conversion, reasoning normalization, tool call parsing, facade delegation
+
+### Changed
+
+- **`litellm.py` → facade module:** Global provider instances (`_main_provider`, `_fallback_provider`), routes `openrouter/*` models to OpenRouterLLM, others to LiteLLMLLM — zero caller changes
+- **`setup_provider()` routing:** Init-time provider selection based on model prefix, `os.environ` fallback for OpenRouter API key
+- **`_RESPONSE_SCHEMA` nullable fields:** `type: ["string", "null"]` → `anyOf` syntax for OpenRouter JSON schema compatibility
+- **Channel injection:** Always overrides with `state["channel"]` — LLM can no longer set wrong channel (was causing reminders to go to `api` instead of `telegram`)
+- **`delegate` tool return message:** Includes execution details (cron expr, delay, one-shot) so LLM reports accurately instead of inventing details
+
+### Fixed
+
+- **`response_format` stripping:** LiteLLM adapter was silently dropping `response_format` for OpenRouter models → DelegationPlanner ~40% empty JSON. Direct SDK fixes this.
+- **`max_tokens=512` truncation:** Planner JSON responses were being cut off, causing parse failures and silent fallback to `immediate/agent`. Removed hard limit.
+- **Channel delivery bug:** LLM was setting `channel: 'api'` for Telegram/WhatsApp requests — reminders delivered to wrong channel. Now always injected from state.
+- **Planner error logging:** Added exception details and raw text (first 300 chars) to parse failure warnings
+- **Misleading delegation confirmation:** When planner fell back to defaults, LLM still told user "setup complete" with fabricated details. Delegate tool now returns actual plan details.
+
 ## [1.11.0] - 2026-02-23
 
 ### Added (Delegation Refactor & WhatsApp DM)

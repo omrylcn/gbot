@@ -136,11 +136,21 @@ def make_delegate_tools(
             logger.info(
                 f"Delegated: {ref_id} (exec={execution}, proc={processor})"
             )
-            return (
-                f"OK — task delegated ({ref_id}, {execution}/{processor}). "
-                f"The result will be delivered to the user's channel automatically. "
-                f"STOP — do NOT call delegate again. Just confirm to the user."
+            # Build confirmation with actual plan details so LLM reports accurately
+            detail_parts = [f"OK — task delegated ({ref_id}, {execution}/{processor})."]
+            if execution == "delayed":
+                delay = plan.get("delay_seconds") or 60
+                detail_parts.append(f"Will run after {delay} seconds.")
+            elif execution in ("recurring", "monitor"):
+                detail_parts.append(f"Cron: {plan.get('cron_expr', '?')}.")
+            elif execution == "immediate":
+                detail_parts.append("Running now in background (one-shot).")
+            detail_parts.append(
+                "The result will be delivered to the user's channel automatically. "
+                "STOP — do NOT call delegate again. "
+                "Tell the user EXACTLY what was set up — do NOT exaggerate or invent details."
             )
+            return " ".join(detail_parts)
         except Exception as e:
             logger.error(f"Delegation failed: {e}")
             return f"Failed to delegate task: {e}"
