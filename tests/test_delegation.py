@@ -585,14 +585,14 @@ async def test_run_by_processor_agent(cfg, store):
     }
     with patch("graphbot.agent.light.LightAgent") as MockAgent:
         mock_instance = AsyncMock()
-        mock_instance.run = AsyncMock(return_value=("Sunny, 22°C", 150))
+        mock_instance.run_with_meta = AsyncMock(return_value=("Sunny, 22°C", 150, {"send_message_to_user"}))
         MockAgent.return_value = mock_instance
 
         text, deliver = await sched._run_by_processor(
             "agent", plan, "check weather", "u1", "telegram",
         )
         assert text == "Sunny, 22°C"
-        assert deliver is False  # Agent handles its own delivery
+        assert deliver is False  # Agent called send_message_to_user
         MockAgent.assert_called_once()
 
 

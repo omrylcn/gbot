@@ -73,7 +73,7 @@ def test_favorites_crud(store):
 
 def test_search_mock():
     tools = make_search_tools()
-    assert len(tools) == 2
+    assert len(tools) == 3
     search = next(t for t in tools if t.name == "search_items")
     result = search.invoke({"query": "test"})
     assert "mock" in result.lower()
