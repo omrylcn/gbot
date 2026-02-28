@@ -38,14 +38,16 @@ channels:
     enabled: false
     waha_url: "http://waha:3000"
     session: "default"
-    api_key: "2275f9a154174f18a912644829b8dad4"  # WAHA API key
-    respond_to_dm: true  # true: allowed_dms listesindeki numaralara cevap ver
-    monitor_dm: true     # true: allowed_dms listesindeki DM'leri kaydet (cevap vermeden)
-    allowed_groups:
-      - "120363407143421687@g.us"  # gbot grubu
-    allowed_dms:
-      "905438003241": "Ömer"
-      "108053106016451": "Zeynep"
+    api_key: ""                    # WAHA API key
+    respond_to_dm: false
+    monitor_dm: false
+    allowed_groups: []
+    allowed_dms: {}
+    # Example:
+    # allowed_groups:
+    #   - "120363XXXXXXXXX@g.us"
+    # allowed_dms:
+    #   "905551234567": "User Name"
   # discord:
   #   enabled: false
 
@@ -71,7 +73,7 @@ tools:
       news: "https://news.google.com/rss?hl=tr&gl=TR&ceid=TR:tr"
 
 auth:
-  jwt_secret_key: "graphbot-secure-jwt-secret-key-2026-production-vps"  # 32+ chars
+  jwt_secret_key: "change-me-to-a-secure-random-string-32chars"  # 32+ chars
   access_token_expire_minutes: 1440  # 24 hours
   rate_limit:
     enabled: true
