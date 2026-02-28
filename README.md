@@ -413,22 +413,32 @@ metadata:
 
 ### Background Services
 
-GraphBot can do things even when nobody is chatting. These services run in the background alongside the API server:
+GraphBot can do things even when nobody is chatting. Five services run alongside the API server, each with a different responsibility:
 
-| Service | Description |
+| Service | What it does |
 |---------|-------------|
-| CronScheduler | APScheduler with cron expressions |
-| LightAgent | Lightweight isolated agent for cron alerts (NOTIFY/SKIP) |
-| Reminder | One-shot delayed messages (no LLM, direct delivery) |
-| Heartbeat | Periodic wake-up, reads HEARTBEAT.md |
-| SubagentWorker | Async background task spawn with DB persistence |
+| **CronScheduler** | Loads jobs and reminders from SQLite into APScheduler. Manages both recurring cron jobs (CronTrigger) and one-shot reminders (DateTrigger). Handles execution, delivery, SKIP/NOTIFY logic, and auto-pauses jobs after 3 consecutive failures. |
+| **LightAgent** | Stripped-down LangGraph agent for background tasks — no session, no context loading, just a prompt + restricted tool set. Can override the model (e.g. cheaper model for monitoring). Used by both CronScheduler and SubagentWorker. |
+| **SubagentWorker** | Spawns async background tasks via `asyncio.create_task`. Persists status to `background_tasks` table, injects results into the user's active session, and creates `system_event` entries so the main agent sees the outcome. |
+| **HeartbeatService** | Periodic wake-up loop. Reads `HEARTBEAT.md` from workspace — if it has actionable content, triggers the full GraphRunner. Otherwise stays silent. |
+| **Reminder** | Not a separate service — reminders are stored in their own SQLite table and loaded into CronScheduler at startup. One-shot reminders auto-delete after firing; recurring ones keep running. |
 
-When you delegate a task, here's what actually happens under the hood:
+The scheduler has 4 processor types that determine *how* a job executes:
+
+| Processor | Execution | LLM needed? |
+|-----------|-----------|-------------|
+| `static` | Delivers a plain text message directly | No |
+| `function` | Calls a specific tool with known arguments | No |
+| `agent` | Runs LightAgent with selected tools | Yes (can use cheaper model) |
+| `runner` | Invokes full GraphRunner with all context, memory, and tools | Yes (main model) |
+
+**Delivery chain:** When a job fires, the scheduler tries to deliver the result directly to the user's channel (Telegram, WhatsApp, WebSocket). If no active connection exists, it falls back to saving a `system_event` in the database — the ContextBuilder picks it up on the user's next message.
+
 ```
-User: "Do this in the background: ..."
-  → delegate tool → SubagentWorker → background_tasks table
-  → On completion: system_event created
-  → Next user message: ContextBuilder injects result into prompt
+User: "Do this in the background: research topic X"
+  → delegate tool → DelegationPlanner (LLM) → plan: {execution: immediate, processor: agent}
+  → SubagentWorker.spawn() → LightAgent runs with web tools
+  → Result → background_tasks table + system_event + channel delivery
 ```
 
 ### RAG (Optional)
@@ -612,7 +622,6 @@ Everything lives in a single SQLite file. No Postgres, no Redis, no external dep
 | `messages` | Chat messages |
 | `agent_memory` | Key-value long-term memory |
 | `user_notes` | Learned information about users |
-| `activity_logs` | Activity records |
 | `favorites` | User favorites |
 | `preferences` | User preferences (JSON) |
 | `cron_jobs` | Scheduled tasks |
@@ -621,6 +630,7 @@ Everything lives in a single SQLite file. No Postgres, no Redis, no external dep
 | `system_events` | Background notification queue |
 | `background_tasks` | Subagent task records |
 | `api_keys` | API key management |
+| `delegation_log` | Delegation planner decision history |
 
 ## Workspace
 
@@ -647,7 +657,6 @@ uv run ruff format graphbot/ gbot_cli/ # format
 gbot run --reload                      # dev server with auto-reload
 ```
 
-The test suite covers 350 tests across 26 files — unit tests for individual components and integration tests for end-to-end flows.
 
 ## Technologies
 
