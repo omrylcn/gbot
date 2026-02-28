@@ -66,7 +66,7 @@ That's it. The REPL connects to the API server automatically.
 
 ![architecture](images/architecture.png)
 
-**Core design decisions:**
+GraphBot deliberately separates the "thinking" from the "remembering." LangGraph handles the agent loop as a pure execution engine — no checkpoints, no internal state. All durable state lives in SQLite: sessions, memory, users, scheduled tasks, events. This means you can restart the server, swap models, or scale horizontally without losing anything.
 
 | Principle | Description |
 |-----------|-------------|
@@ -80,6 +80,8 @@ The agent graph has 4 nodes: `load_context` → `reason` ⇄ `execute_tools` →
 ---
 
 ## Features
+
+GraphBot isn't just a chatbot wrapper — it's a full operational platform. Here's what's built in and working:
 
 | Feature | Description |
 |---------|-------------|
@@ -98,9 +100,13 @@ The agent graph has 4 nodes: `load_context` → `reason` ⇄ `execute_tools` →
 | WebSocket | Real-time chat + event delivery |
 | Docker | Single-command deployment with docker-compose |
 
+Most of these work together. For example, a user on Telegram can say "remind me every morning at 9 to check gold prices" — the delegation planner creates a recurring cron job, the LightAgent runs it with web tools, and the result gets delivered back through Telegram. No manual wiring needed.
+
 ---
 
 ## Usage
+
+GraphBot gives you three ways to interact: a CLI for quick operations, a REPL for interactive sessions, and a REST API for integration. They all talk to the same backend — pick whichever fits your workflow.
 
 ### CLI Commands
 
@@ -193,7 +199,7 @@ Type `/` inside the REPL for autocomplete:
 
 ### Tool Usage (via Chat)
 
-Tools are invoked with natural language — the LLM picks the right one:
+You don't call tools by name — just describe what you want. The LLM figures out which tool to use:
 
 ```
 "Save this note: meeting tomorrow"                   → save_user_note
@@ -206,6 +212,8 @@ Tools are invoked with natural language — the LLM picks the right one:
 ---
 
 ## Configuration
+
+GraphBot uses a layered config system — you can set things in multiple places, and the most specific one wins:
 
 Priority order: `.env` > environment variables > `config.yaml` > defaults
 
@@ -220,7 +228,7 @@ Full config reference: [`config.example.yaml`](./config.example.yaml)
 
 ### Authentication
 
-GraphBot runs in two modes:
+Authentication is optional — you can run GraphBot wide open for local development, or lock it down with JWT + API keys for production. A single config value controls the switch:
 
 #### Auth Disabled (default)
 
@@ -369,7 +377,7 @@ auth:
 
 ### Tool System
 
-7 tool groups, enabled via `tools: ["*"]` in config. Managed by `ToolRegistry` with automatic group resolution from `roles.yaml`:
+Tools are organized into 7 groups. By default all groups are enabled (`tools: ["*"]`), but RBAC can restrict which groups each role can access. The `ToolRegistry` resolves group names to actual tool functions automatically via `roles.yaml`:
 
 | Group | Tools | Description |
 |-------|-------|-------------|
@@ -385,7 +393,7 @@ Cron jobs, reminders, and alerts are managed through the delegation system — t
 
 ### Skill System
 
-Markdown-based skills in `workspace/skills/` (override built-in ones):
+Skills are like plugins written in plain Markdown — they get injected into the system prompt to give the agent specialized knowledge or behavior. Drop a `.md` file into `workspace/skills/` and it overrides built-in skills of the same name:
 
 ```markdown
 ---
@@ -405,6 +413,8 @@ metadata:
 
 ### Background Services
 
+GraphBot can do things even when nobody is chatting. These services run in the background alongside the API server:
+
 | Service | Description |
 |---------|-------------|
 | CronScheduler | APScheduler with cron expressions |
@@ -413,7 +423,7 @@ metadata:
 | Heartbeat | Periodic wake-up, reads HEARTBEAT.md |
 | SubagentWorker | Async background task spawn with DB persistence |
 
-**Delegate flow:**
+When you delegate a task, here's what actually happens under the hood:
 ```
 User: "Do this in the background: ..."
   → delegate tool → SubagentWorker → background_tasks table
@@ -422,6 +432,8 @@ User: "Do this in the background: ..."
 ```
 
 ### RAG (Optional)
+
+If you have structured data (products, documents, articles) that you want the agent to search through, enable the RAG module. It builds a local FAISS index and adds semantic search tools automatically:
 
 ```bash
 uv sync --extra rag   # FAISS + sentence-transformers
@@ -438,7 +450,7 @@ When enabled, `search_items` and `get_item_detail` tools are automatically added
 
 ### Telegram Bot
 
-Each user creates their own Telegram bot; the token is stored in the `user_channels` table.
+Telegram integration follows a "one bot per user" model — each user creates their own bot via @BotFather and links the token. This keeps things simple and avoids multi-tenant bot routing:
 
 ```bash
 # 1. Create a bot via @BotFather and get the token
@@ -454,7 +466,7 @@ gbot run
 
 ### WhatsApp (WAHA)
 
-WhatsApp integration uses [WAHA](https://waha.devlike.pro/) (WhatsApp HTTP API) running as a Docker sidecar.
+WhatsApp integration uses [WAHA](https://waha.devlike.pro/) (WhatsApp HTTP API) as a Docker sidecar. Unlike Telegram, this connects your actual WhatsApp account — the bot reads and responds through your phone number:
 
 ```yaml
 # config.yaml
@@ -488,7 +500,7 @@ Features:
 
 ### RBAC (Role-Based Access Control)
 
-3 roles defined in `roles.yaml`, enforced by a 2-layer guard (reason filter + execute guard):
+Not every user should have access to everything. RBAC lets you define who can use which tools and see which context. There are 3 built-in roles, enforced at two points: once when the LLM is deciding which tools to consider (reason filter), and again before any tool actually executes (execute guard):
 
 | Role | Tool Groups | Context Layers | Sessions |
 |------|-------------|---------------|----------|
@@ -502,7 +514,7 @@ Default role: `guest`. Set user role via `PUT /admin/users/{user_id}/role`.
 
 ### Delegation System
 
-The delegation system uses an LLM-based planner (`DelegationPlanner`) to decide how to execute background tasks:
+This is where GraphBot gets interesting. Instead of hardcoding "reminder = delayed message" and "cron = scheduled job," there's an LLM-based planner (`DelegationPlanner`) that figures out the best execution strategy for any background request. You just describe what you want, and it picks the right combination:
 
 | Execution | Description |
 |-----------|-------------|
@@ -532,17 +544,21 @@ User: "Check gold price every morning at 9, alert if above $2000"
 
 ## Docker
 
+The easiest way to deploy GraphBot in production. Everything — API server, WAHA (WhatsApp), volumes — is defined in a single compose file:
+
 ```bash
 docker compose up -d         # start
 docker compose logs -f       # follow logs
 docker compose down          # stop
 ```
 
-Uses named volumes (`graphbot_data`, `graphbot_workspace`) and `config.yaml` as read-only bind mount.
+Data is persisted in named volumes (`graphbot_data`, `graphbot_workspace`), so you can tear down and rebuild containers without losing anything. `config.yaml` is mounted read-only.
 
 ---
 
 ## Project Structure
+
+The codebase is split into two packages: `graphbot` (the core framework) and `gbot_cli` (the CLI client). They're independent — the CLI talks to the framework over HTTP, so you could swap it for your own client.
 
 ```
 graphbot/                          # Core framework
@@ -586,6 +602,8 @@ gbot_cli/                          # CLI package (separate module)
 
 ## SQLite Tables (15)
 
+Everything lives in a single SQLite file. No Postgres, no Redis, no external dependencies. WAL mode is enabled for concurrent reads:
+
 | Table | Purpose |
 |-------|---------|
 | `users` | User records |
@@ -606,6 +624,8 @@ gbot_cli/                          # CLI package (separate module)
 
 ## Workspace
 
+The `workspace/` directory is where you customize the bot's personality and capabilities without touching code:
+
 ```
 workspace/
 ├── AGENT.md              # Bot identity (system prompt)
@@ -613,7 +633,7 @@ workspace/
 └── skills/               # User skills (optional)
 ```
 
-`AGENT.md` defines the bot's personality and behavior. `system_prompt` in config takes higher priority.
+`AGENT.md` is the most important file here — it defines who the bot is, how it talks, and what it knows. Think of it as the bot's personality config. If you also set `system_prompt` in `config.yaml`, that takes priority.
 
 ---
 
@@ -627,7 +647,7 @@ uv run ruff format graphbot/ gbot_cli/ # format
 gbot run --reload                      # dev server with auto-reload
 ```
 
-350 tests, 26 test files.
+The test suite covers 350 tests across 26 files — unit tests for individual components and integration tests for end-to-end flows.
 
 ## Technologies
 
