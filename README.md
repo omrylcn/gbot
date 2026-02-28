@@ -17,33 +17,38 @@ In short: this project aims to be a practical assistant platform you can run, ex
 
 ## Quick Start
 
+**Prerequisites:** Python 3.11+, [uv](https://docs.astral.sh/uv/)
+
 ### 1. Install
 
 ```bash
+git clone https://github.com/omrylcn/gbot.git
+cd gbot
 uv sync --extra dev
 ```
 
 ### 2. Configure
 
-Copy and edit the config file:
+```bash
+cp config.example.yaml config.yaml   # your local config (gitignored)
+cp .env.example .env                 # your API keys (gitignored)
+```
 
+Edit `.env` — you need at least one LLM provider:
+```bash
+OPENROUTER_API_KEY=sk-or-...    # recommended (access to many models)
+# or: OPENAI_API_KEY=sk-...
+# or: ANTHROPIC_API_KEY=sk-...
+```
+
+Edit `config.yaml` — set your owner info and preferred model:
 ```yaml
-# config.yaml
 assistant:
   name: "GraphBot"
   owner:
-    username: "ali"
-    name: "Ali"
-  model: "openai/gpt-4o-mini"
-
-providers:
-  openai:
-    api_key: "sk-..."     # or set via .env
-```
-
-Or use environment variables (`.env`):
-```
-GRAPHBOT_PROVIDERS__OPENAI__API_KEY=sk-...
+    username: "yourname"
+    name: "Your Name"
+  model: "openrouter/google/gemini-2.5-flash"   # or openai/gpt-4o-mini, etc.
 ```
 
 ### 3. Run
@@ -78,17 +83,19 @@ The agent graph has 4 nodes: `load_context` → `reason` ⇄ `execute_tools` →
 
 | Feature | Description |
 |---------|-------------|
-| Multi-provider LLM | 6+ providers via LiteLLM |
-| Multi-channel | Telegram (active), Discord/WhatsApp/Feishu (stub) |
+| Multi-provider LLM | 6+ providers via LiteLLM + direct OpenRouter SDK |
+| Multi-channel | Telegram (active), WhatsApp via WAHA (active), Discord/Feishu (stub) |
 | Long-term memory | Notes, preferences, favorites, activity logs in SQLite |
 | Session management | Token-limit based with automatic LLM summary on transition |
-| 9 tool groups | Memory, filesystem, shell, web search, RAG, cron, reminder, delegate |
+| RBAC | 3 roles (owner/member/guest), roles.yaml, 2-layer guard |
+| 7 tool groups | Memory, search, filesystem, shell, web, messaging, delegation |
 | Skill system | Markdown-based, workspace override, always-on support |
 | Background tasks | Cron scheduler, one-shot reminders, heartbeat, async subagents |
+| Delegation | LLM-based planner — immediate, delayed, recurring, monitor |
 | Interactive CLI | `gbot` — Rich REPL with slash commands and autocomplete |
-| Admin API | Server status, config, skills, users, cron management |
+| Admin API | Server status, config, skills, tools, users, stats, cron, logs |
 | RAG | Optional FAISS + sentence-transformers semantic search |
-| WebSocket | Real-time chat support |
+| WebSocket | Real-time chat + event delivery |
 | Docker | Single-command deployment with docker-compose |
 
 ---
@@ -155,12 +162,19 @@ Type `/` inside the REPL for autocomplete:
 | GET | `/health` | Health check |
 | GET | `/sessions/{user_id}` | User's sessions |
 | GET | `/session/{sid}/history` | Session message history |
+| GET | `/session/{sid}/stats` | Session stats (messages, tokens, context) |
 | POST | `/session/{sid}/end` | End session |
 | GET | `/user/{user_id}/context` | User context |
 | POST | `/auth/register` | Register (owner-only) |
 | POST | `/auth/login` | Login |
-| WS | `/ws/chat` | WebSocket chat |
+| POST | `/auth/token` | OAuth2 token endpoint |
+| GET | `/auth/user/{user_id}` | User profile |
+| POST | `/auth/api-keys` | Create API key |
+| GET | `/auth/api-keys` | List API keys |
+| DELETE | `/auth/api-keys/{key_id}` | Deactivate API key |
+| WS | `/ws/chat` | WebSocket chat + event delivery |
 | POST | `/webhooks/telegram/{user_id}` | Telegram webhook |
+| POST | `/webhooks/whatsapp/{user_id}` | WhatsApp webhook (WAHA) |
 
 ### Admin Endpoints (owner-only)
 
@@ -169,10 +183,13 @@ Type `/` inside the REPL for autocomplete:
 | GET | `/admin/status` | Server status |
 | GET | `/admin/config` | Sanitized configuration |
 | GET | `/admin/skills` | Skill list |
+| GET | `/admin/tools` | Registered tools (ToolRegistry introspection) |
 | GET | `/admin/users` | User list |
+| PUT | `/admin/users/{user_id}/role` | Set user role |
 | GET | `/admin/crons` | Cron job list |
 | DELETE | `/admin/crons/{job_id}` | Delete cron job |
-| GET | `/admin/logs` | Activity logs |
+| GET | `/admin/stats` | System stats (context, tools, sessions, data) |
+| GET | `/admin/logs` | Delegation logs |
 
 ### Tool Usage (via Chat)
 
@@ -199,7 +216,7 @@ GRAPHBOT_PROVIDERS__OPENAI__API_KEY=sk-...
 GRAPHBOT_BACKGROUND__CRON__ENABLED=true
 ```
 
-Full config reference: [`config.yaml`](./config.yaml)
+Full config reference: [`config.example.yaml`](./config.example.yaml)
 
 ### Authentication
 
@@ -352,18 +369,19 @@ auth:
 
 ### Tool System
 
-9 tool groups, enabled via `tools: ["*"]` in config:
+7 tool groups, enabled via `tools: ["*"]` in config. Managed by `ToolRegistry` with automatic group resolution from `roles.yaml`:
 
 | Group | Tools | Description |
 |-------|-------|-------------|
-| Memory | save_user_note, get_user_context, log_activity, favorites | User memory |
-| Filesystem | read_file, write_file, edit_file, list_dir | Workspace files |
-| Shell | exec_command | Safe shell (destructive commands blocked) |
-| Web | web_search, web_fetch | Brave Search + page fetch |
-| RAG | search_items, get_item_detail | Semantic search (FAISS) |
-| Cron | add/list/remove_cron_job, create_alert | Recurring tasks + NOTIFY/SKIP |
-| Reminder | create/list/cancel_reminder | One-shot delayed messages |
-| Delegate | delegate | Background subagent spawn |
+| Memory | save_user_note, get_user_context, add_favorite, get_favorites, remove_favorite, set_user_preference, get_user_preferences, remove_user_preference | User memory (8 tools) |
+| Search | search_items, get_item_detail, get_current_time | RAG semantic search + time (3 tools) |
+| Filesystem | read_file, write_file, edit_file, list_dir | Workspace files (4 tools) |
+| Shell | exec_command | Safe shell — destructive commands blocked (1 tool) |
+| Web | web_search, web_fetch | Brave Search + page fetch (2 tools) |
+| Messaging | send_message_to_user | Cross-channel message delivery (1 tool) |
+| Delegation | delegate, list_scheduled_tasks, cancel_scheduled_task | Background subagent spawn + task management (3 tools) |
+
+Cron jobs, reminders, and alerts are managed through the delegation system — the LLM-based planner decides the execution strategy (immediate, delayed, recurring, or monitor).
 
 ### Skill System
 
@@ -434,6 +452,82 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://xxxx.ngrok-free
 gbot run
 ```
 
+### WhatsApp (WAHA)
+
+WhatsApp integration uses [WAHA](https://waha.devlike.pro/) (WhatsApp HTTP API) running as a Docker sidecar.
+
+```yaml
+# config.yaml
+channels:
+  whatsapp:
+    enabled: true
+    waha_url: "http://waha:3000"
+    session: "default"
+    api_key: "your-waha-api-key"
+    respond_to_dm: true
+    monitor_dm: false
+    allowed_groups:
+      - "120363xxx@g.us"
+    allowed_dms:
+      "905551234567": "Ali"
+```
+
+```bash
+# 1. WAHA runs as a Docker service (see docker-compose.yml)
+# 2. Configure whatsapp section in config.yaml
+# 3. Pair your phone via WAHA dashboard (http://localhost:3000)
+# 4. Start the server — webhook is auto-registered
+gbot run
+```
+
+Features:
+- Supports both phone numbers (`@c.us`) and Linked IDs (`@lid`)
+- Group and DM whitelist filtering
+- `respond_to_dm` — reply to direct messages
+- `monitor_dm` — log but don't reply
+
+### RBAC (Role-Based Access Control)
+
+3 roles defined in `roles.yaml`, enforced by a 2-layer guard (reason filter + execute guard):
+
+| Role | Tool Groups | Context Layers | Sessions |
+|------|-------------|---------------|----------|
+| **owner** | all 7 groups | all 8 layers | unlimited |
+| **member** | memory, search, web, messaging, delegation | all 8 layers | unlimited |
+| **guest** | web only | identity, runtime, role | max 1 |
+
+Default role: `guest`. Set user role via `PUT /admin/users/{user_id}/role`.
+
+`roles.yaml` defines role → group mapping; tool names are resolved automatically from `ToolRegistry`.
+
+### Delegation System
+
+The delegation system uses an LLM-based planner (`DelegationPlanner`) to decide how to execute background tasks:
+
+| Execution | Description |
+|-----------|-------------|
+| `immediate` | Run now in the background |
+| `delayed` | Run after N seconds (one-shot reminder) |
+| `recurring` | Run on a cron schedule |
+| `monitor` | Periodic check with NOTIFY/SKIP logic |
+
+| Processor | Description |
+|-----------|-------------|
+| `static` | Direct text message (no LLM) |
+| `function` | Single tool call |
+| `agent` | LightAgent with selected tools |
+| `runner` | Full GraphRunner with all context |
+
+```
+User: "Remind me in 5 minutes: take medicine"
+  → DelegationPlanner → {execution: "delayed", processor: "static", delay: 300}
+  → CronScheduler creates one-shot job → delivers message after 5 min
+
+User: "Check gold price every morning at 9, alert if above $2000"
+  → DelegationPlanner → {execution: "recurring", processor: "agent", cron: "0 9 * * *"}
+  → CronScheduler creates recurring job → LightAgent evaluates → NOTIFY or SKIP
+```
+
 ---
 
 ## Docker
@@ -453,14 +547,16 @@ Uses named volumes (`graphbot_data`, `graphbot_workspace`) and `config.yaml` as 
 ```
 graphbot/                          # Core framework
 ├── agent/
-│   ├── context.py                 # ContextBuilder (6-layer system prompt)
+│   ├── context.py                 # ContextBuilder (8-layer system prompt)
 │   ├── graph.py                   # StateGraph compile
 │   ├── nodes.py                   # 4 nodes: load_context, reason, execute_tools, respond
 │   ├── runner.py                  # GraphRunner orchestrator
 │   ├── light.py                   # LightAgent (background tasks)
 │   ├── state.py                   # AgentState(MessagesState)
 │   ├── skills/                    # Skill loader + built-ins
-│   └── tools/                     # 9 tool groups
+│   ├── delegation.py              # DelegationPlanner (LLM-based task routing)
+│   ├── permissions.py             # RBAC — roles.yaml loader, tool/context filtering
+│   └── tools/                     # 7 tool groups (ToolRegistry)
 ├── api/
 │   ├── app.py                     # FastAPI app + lifespan
 │   ├── routes.py                  # Chat, health, sessions, user endpoints
@@ -471,7 +567,7 @@ graphbot/                          # Core framework
 ├── core/
 │   ├── config/                    # YAML + BaseSettings + .env
 │   ├── providers/                 # LiteLLM wrapper
-│   ├── channels/                  # Telegram, base channel
+│   ├── channels/                  # Telegram, WhatsApp (WAHA), base channel
 │   ├── cron/                      # APScheduler + types
 │   └── background/                # Heartbeat + subagent worker
 ├── memory/
@@ -531,7 +627,7 @@ uv run ruff format graphbot/ gbot_cli/ # format
 gbot run --reload                      # dev server with auto-reload
 ```
 
-226 tests (206 unit + 20 integration), 15 test files.
+350 tests, 26 test files.
 
 ## Technologies
 
