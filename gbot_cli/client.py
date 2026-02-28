@@ -130,9 +130,17 @@ class GraphBotClient:
         """DELETE /admin/crons/{job_id}."""
         return self._request("DELETE", f"/admin/crons/{job_id}")
 
+    def admin_stats(self) -> dict:
+        """GET /admin/stats."""
+        return self._request("GET", "/admin/stats")
+
     def admin_logs(self, limit: int = 50) -> list:
         """GET /admin/logs."""
         return self._request("GET", "/admin/logs", params={"limit": limit})
+
+    def session_stats(self, session_id: str) -> dict:
+        """GET /session/{session_id}/stats."""
+        return self._request("GET", f"/session/{session_id}/stats")
 
     # ── Cleanup ──────────────────────────────────────────────
 

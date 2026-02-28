@@ -87,10 +87,21 @@ async def send_message(token: str, chat_id: int, text: str) -> None:
         )
         # Fallback to plain text if HTML parsing fails
         if resp.status_code != 200:
-            await client.post(
+            logger.warning(
+                f"Telegram HTML send failed ({resp.status_code}): {resp.text[:200]}"
+            )
+            fallback_resp = await client.post(
                 url,
                 json={"chat_id": chat_id, "text": text},
             )
+            if fallback_resp.status_code != 200:
+                logger.error(
+                    f"Telegram send failed ({fallback_resp.status_code}): {fallback_resp.text[:200]}"
+                )
+            else:
+                logger.debug("Telegram fallback send succeeded")
+        else:
+            logger.debug(f"Telegram message sent successfully to chat_id={chat_id}")
 
 
 def md_to_html(text: str) -> str:

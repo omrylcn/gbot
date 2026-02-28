@@ -78,12 +78,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
 
 def _ensure_owner(config, db) -> None:
-    """Create owner user in DB at startup if configured."""
+    """Create owner user in DB at startup and ensure role='owner'."""
     if config.assistant.owner is None:
         return
     owner = config.assistant.owner
     db.get_or_create_user(owner.username, name=owner.name)
-    logger.info(f"Owner user ensured: {owner.username}")
+    db.set_user_role(owner.username, "owner")
+    logger.info(f"Owner user ensured: {owner.username} (role=owner)")
 
 
 @asynccontextmanager
@@ -91,10 +92,8 @@ async def lifespan(app: FastAPI):
     """Startup: init Config → MemoryStore → GraphRunner → Background Services. Shutdown: cleanup."""
     from graphbot.agent.delegation import DelegationPlanner
     from graphbot.agent.tools import make_tools
-    from graphbot.agent.tools.registry import (
-        build_background_tool_registry,
-        get_tool_catalog,
-    )
+    from graphbot.agent.tools.delegate import make_delegate_tools
+    from graphbot.agent.tools.registry import build_background_registry, get_tool_catalog
 
     config = load_config()
     db = MemoryStore(str(config.db_path))
@@ -108,17 +107,41 @@ async def lifespan(app: FastAPI):
     heartbeat = HeartbeatService(config, runner)
     worker = SubagentWorker(config, db=db)
 
-    # Delegation planner — plans subagent execution via LLM
-    bg_registry = build_background_tool_registry(config, db)
+    # Build registry without delegation (planner doesn't exist yet)
+    registry = make_tools(config, db)
+
+    # Delegation planner uses background-safe subset of registry
+    bg_registry = build_background_registry(registry)
     tool_catalog = get_tool_catalog(bg_registry)
     planner = DelegationPlanner(config, tool_catalog)
 
-    # Now build tools with scheduler+worker+planner, and rebuild graph
+    # Now add delegation tools (worker + scheduler + planner ready)
+    delegate_tools = make_delegate_tools(
+        worker, cron_scheduler, planner, db=db,
+    )
+    if delegate_tools:
+        registry.register_group(
+            "delegation", delegate_tools, requires=["worker", "scheduler"],
+        )
+
+    # Rebuild runner with full registry
     from graphbot.agent.graph import create_graph
 
-    tools = make_tools(config, db, scheduler=cron_scheduler, worker=worker, planner=planner)
-    runner.tools = tools
-    runner._graph = create_graph(config, db, tools)
+    runner.registry = registry
+    runner.tools = registry.get_all_tools()
+    runner._graph = create_graph(config, db, runner.tools)
+
+    # Startup validation: check roles.yaml groups against registry
+    from graphbot.agent.permissions import _load_roles_yaml
+
+    roles_data = _load_roles_yaml()
+    if roles_data:
+        for w in registry.validate_roles(roles_data):
+            logger.warning(f"RBAC config: {w}")
+    logger.info(
+        f"ToolRegistry: {len(registry)} tools in "
+        f"{len(registry.get_groups_summary())} groups"
+    )
 
     await cron_scheduler.start()
     heartbeat_task = asyncio.create_task(heartbeat.start())
@@ -158,12 +181,17 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Middleware
+    # Middleware - CORS restricted to known origins
+    allowed_origins = [
+        "https://gbot-assistant.cloud",
+        "https://www.gbot-assistant.cloud",
+        # Add your frontend domains here if needed
+    ]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=allowed_origins,
         allow_credentials=True,
-        allow_methods=["*"],
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
     app.add_middleware(RateLimitMiddleware)

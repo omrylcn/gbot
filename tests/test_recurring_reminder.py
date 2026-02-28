@@ -225,26 +225,29 @@ async def test_recurring_db_fallback(store, mock_runner):
     assert "Offline ping" in events[0]["payload"]
 
 
-# ── Tool: create_recurring_reminder ─────────────────────────
+# ── Tool: create_reminder (agent mode) ─────────────────────
 
 
-def test_recurring_reminder_tool(store, mock_runner):
+def test_create_reminder_agent_mode(store, mock_runner):
+    """create_reminder with agent_prompt creates an agent-mode reminder."""
     sched = CronScheduler(store, mock_runner)
     with patch.object(sched, "_scheduler"):
         tools = make_reminder_tools(sched)
-        create_rec = next(t for t in tools if t.name == "create_recurring_reminder")
-        result = create_rec.invoke({
+        create_rem = next(t for t in tools if t.name == "create_reminder")
+        result = create_rem.invoke({
             "user_id": "u1",
-            "cron_expr": "*/10 * * * *",
-            "message": "Drink water",
+            "delay_seconds": 300,
+            "message": "Send hello to Murat",
             "channel": "ws",
+            "agent_prompt": "Use send_message_to_user to deliver the message.",
+            "agent_tools": ["send_message_to_user"],
         })
-    assert "Recurring reminder set" in result
-    assert "*/10 * * * *" in result
+    assert "agent" in result
+    assert "id:" in result
 
     reminders = store.get_pending_reminders("u1")
     assert len(reminders) == 1
-    assert reminders[0]["cron_expr"] == "*/10 * * * *"
+    assert reminders[0]["agent_prompt"] is not None
 
 
 def test_list_reminders_shows_recurring(store, mock_runner):

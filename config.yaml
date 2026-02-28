@@ -6,8 +6,9 @@ assistant:
     username: "owner"
     name: "Owner"
   workspace: ./workspace
-  model: "openai/gpt-4o-mini"
+  model: "openrouter/google/gemini-3-flash-preview"
   temperature: 0.7
+  thinking: true
   session_token_limit: 30000
   max_iterations: 20
   tools: ["*"]
@@ -24,6 +25,8 @@ assistant:
 providers:
   anthropic:
     api_key: ""                      # Set via .env or here
+  openrouter:
+    api_key: ""                      # Set via OPENROUTER_API_KEY in .env
   # openai:
   #   api_key: ""
 
@@ -31,6 +34,18 @@ channels:
   telegram:
     enabled: true
     allow_from: []
+  whatsapp:
+    enabled: false
+    waha_url: "http://waha:3000"
+    session: "default"
+    api_key: "2275f9a154174f18a912644829b8dad4"  # WAHA API key
+    respond_to_dm: true  # true: allowed_dms listesindeki numaralara cevap ver
+    monitor_dm: true     # true: allowed_dms listesindeki DM'leri kaydet (cevap vermeden)
+    allowed_groups:
+      - "120363407143421687@g.us"  # gbot grubu
+    allowed_dms:
+      "905438003241": "Ömer"
+      "108053106016451": "Zeynep"
   # discord:
   #   enabled: false
 
@@ -44,16 +59,23 @@ channels:
 tools:
   shell:
       timeout: 60
-      restrict_to_workspace: false
-  # web:
-  #   search_api_key: ""
+      restrict_to_workspace: true  # Security: limit to workspace only
+  web:
+    fetch_shortcuts:
+      gold: "https://api.genelpara.com/json/?list=altin&sembol=GA,C,Q,Y"
+      currency: "https://api.genelpara.com/json/?list=doviz&sembol=USD,EUR,GBP"
+      "weather:istanbul": "https://api.open-meteo.com/v1/forecast?latitude=41.01&longitude=28.98&current=temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m&timezone=auto"
+      "weather:ankara": "https://api.open-meteo.com/v1/forecast?latitude=39.93&longitude=32.86&current=temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m&timezone=auto"
+      "weather:izmir": "https://api.open-meteo.com/v1/forecast?latitude=38.42&longitude=27.13&current=temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m&timezone=auto"
+      earthquake: "https://api.orhanaydogdu.com.tr/deprem/kandilli/live"
+      news: "https://news.google.com/rss?hl=tr&gl=TR&ceid=TR:tr"
 
 auth:
-  jwt_secret_key: ""                 # Empty = auth disabled; set 32+ char secret to enable
-  # access_token_expire_minutes: 1440  # 24 hours (default)
-  # rate_limit:
-  #   enabled: true
-  #   requests_per_minute: 60
+  jwt_secret_key: "graphbot-secure-jwt-secret-key-2026-production-vps"  # 32+ chars
+  access_token_expire_minutes: 1440  # 24 hours
+  rate_limit:
+    enabled: true
+    requests_per_minute: 60
 
 background:
   cron:
@@ -61,3 +83,41 @@ background:
   heartbeat:
     enabled: false
     interval_s: 1800
+  delegation:
+    model: "openrouter/google/gemini-3-flash-preview"
+  # delegation (examples):
+  #   examples:  # Custom examples appended to planner prompt (optional)
+  #     - >-
+  #       "2 saat sonra toplanti var diye hatırlat"
+  #       → execution: "delayed", processor: "static", delay_seconds: 7200,
+  #       message: "Hatırlatma: toplantı var!"
+  #     - >-
+  #       "5 dk sonra Murat'a naber yaz"
+  #       → execution: "delayed", processor: "function", delay_seconds: 300,
+  #       tool_name: "send_message_to_user",
+  #       tool_args: {"target_user": "Murat", "message": "naber"}
+  #     - >-
+  #       "2 dk sonra hava durumunu bildir"
+  #       → execution: "delayed", processor: "agent", delay_seconds: 120,
+  #       tools: ["web_search"],
+  #       prompt: "Check current weather for Istanbul and report a brief summary."
+  #     - >-
+  #       "altın 3000 geçince haber ver"
+  #       → execution: "monitor", processor: "agent", cron_expr: "*/30 * * * *",
+  #       tools: ["web_fetch"],
+  #       prompt: "Check gold price. If above 3000 TL report the current price. Otherwise [SKIP]."
+  #     - >-
+  #       "her 10 dk'da Zeynep'e selam yaz"
+  #       → execution: "recurring", processor: "function", cron_expr: "*/10 * * * *",
+  #       tool_name: "send_message_to_user",
+  #       tool_args: {"target_user": "Zeynep", "message": "selam"}
+  #     - >-
+  #       "şu konuyu araştır"
+  #       → execution: "immediate", processor: "agent",
+  #       tools: ["web_search", "web_fetch"],
+  #       prompt: "Research the given topic thoroughly and return a clear summary."
+  #     - >-
+  #       "her sabah 9'da hava durumunu bildir"
+  #       → execution: "recurring", processor: "agent", cron_expr: "0 9 * * *",
+  #       tools: ["web_search"],
+  #       prompt: "Check current weather and provide a brief summary."

@@ -62,7 +62,6 @@ class UserContextResponse(BaseModel):
     context_text: str
     preferences: dict[str, Any] = Field(default_factory=dict)
     favorites: list[ItemCard] = Field(default_factory=list)
-    recent_activities: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class HealthResponse(BaseModel):

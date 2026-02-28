@@ -11,10 +11,11 @@ LangGraph-based AI assistant framework. Combines nanobot (multi-channel agent) +
 - Use `Config(BaseSettings)` from pydantic-settings (env_prefix="GRAPHBOT_", .env support)
 - Use flat pytest functions (not class-based TestCase)
 - Keep things simple — "basit ama katmanli"
-- Read `mimari_kararlar.md` for detailed architectural reasoning (11 decisions)
+- Read `mimari_kararlar.md` for detailed architectural reasoning (12 decisions)
 - Read `howtowork-development-plan.md` for phases 0–10 implementation details
-- Read `development-plan2.md` for phases 11–23 detailed plan
-- Check `todo.md` for current progress
+- Read `development-plan2.md` for phases 17–28 detailed plan
+- Read `future_works.md` for strategic directions
+- Check `todo.md` for current progress and priority
 - Do finish phase, change version and update `changelog.md`
 
 **DON'T:**
@@ -26,7 +27,7 @@ LangGraph-based AI assistant framework. Combines nanobot (multi-channel agent) +
 - Use `src/graphbot/` layout — flat `graphbot/` + `gbot_cli/` at repo root
 - Over-engineer tests — minimum effort, cover CRUD
 
-## Architecture (11 rules)
+## Architecture (12 rules)
 
 1. LangGraph = stateless executor (no checkpoint for data)
 2. SQLite = source of truth (15 tables)
@@ -36,9 +37,10 @@ LangGraph-based AI assistant framework. Combines nanobot (multi-channel agent) +
 6. Tools = LangGraph native @tool / BaseTool
 7. Sessions = token-based (30k limit, LLM summary on transition)
 8. Graph = 4 nodes: load_context → reason ⇄ execute_tools → respond
-9. ContextBuilder = 6 layers (identity, agent_memory, user_ctx, prev_summary, skills, skills_index)
+9. ContextBuilder = 8 layers (identity, runtime, role, agent_memory, user_ctx, events, session_summary, skills)
 10. Copy & adapt from reference code, never import as dependency
 11. Write code docstrings as numpy style, but not too long. Always use English.
+12. RBAC = 3 roles (owner/member/guest), roles.yaml, 2-layer guard (reason filter + execute guard)
 
 ## Two Packages
 
@@ -61,16 +63,20 @@ Entry point: `gbot` (alias: `graphbot`).
 | `graphbot/agent/state.py` | AgentState(MessagesState) |
 | `graphbot/agent/nodes.py` | Graph node functions |
 | `graphbot/agent/graph.py` | StateGraph compile |
-| `graphbot/agent/context.py` | ContextBuilder (SQLite-based) |
+| `graphbot/agent/context.py` | ContextBuilder (8 layers, RBAC-aware) |
 | `graphbot/agent/runner.py` | GraphRunner orchestrator |
+| `graphbot/agent/permissions.py` | RBAC — roles.yaml loader, tool/context filtering |
 | `graphbot/agent/light.py` | LightAgent — isolated background agent |
+| `graphbot/agent/delegation.py` | DelegationPlanner — LLM-based subagent planning |
 | `graphbot/core/providers/litellm.py` | LiteLLM → AIMessage wrapper |
 | `graphbot/api/admin.py` | Admin API endpoints (owner-only) |
 | `gbot_cli/commands.py` | Typer CLI (gbot run, chat, login, status, user, cron) |
 | `gbot_cli/repl.py` | Interactive REPL — Rich banner, autocomplete, slash commands |
 | `gbot_cli/client.py` | GraphBotClient — sync httpx API wrapper |
 | `gbot_cli/slash_commands.py` | SlashCommandRouter — /help, /status, /session, ... |
-| `mimari_kararlar.md` | 11 architectural decisions (detailed reasoning) |
+| `roles.yaml` | RBAC role definitions (role → groups, no tool names — resolved from ToolRegistry) |
+| `mimari_kararlar.md` | 13 architectural decisions (detailed reasoning) |
+| `notes.md` | Kullanıcı şifreleri, WAHA kurulum adımları, WhatsApp credentials, memory tasarım notları |
 | `todo.md` | Phase progress tracking |
 
 ## Progress
@@ -78,9 +84,12 @@ Entry point: `gbot` (alias: `graphbot`).
 - [x] Faz 0–10: Core framework (106 tests)
 - [x] Faz 11: Auth & API Security (134 tests)
 - [x] Faz 12: Agent Prompting & Context (143 tests)
-- [x] Faz 13–13.6: LightAgent, Background, WS Events, Delegation (203 tests)
+- [x] Faz 13–13.6: LightAgent, Background, WS Events, Delegation (230 tests)
 - [x] Faz 15: Docker & Deploy
-- [x] Faz 16: CLI Enhancement — `gbot` entry point, `gbot_cli/` package, Rich REPL, slash commands, admin API (226 tests)
+- [x] Faz 16: CLI Enhancement — Rich REPL, slash commands, admin API (253 tests)
+- [x] Faz 16.5: RBAC — 3 roles, roles.yaml, 2-layer guard (264 tests)
+- [x] Faz 17: Session Summarization — hybrid LLM summary, fact extraction, preference tools (281 tests)
+- [x] Faz 18: Tool Registry — ToolRegistry class, auto group mapping, roles.yaml simplified, /admin/tools (283 tests)
 
 ## SQLite Tables (15)
 users, user_channels, sessions, messages, agent_memory, user_notes, activity_logs, favorites, preferences, cron_jobs, cron_execution_log, reminders, system_events, background_tasks, api_keys

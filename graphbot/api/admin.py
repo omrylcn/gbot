@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
 
 from graphbot import __version__
 from graphbot.api.deps import get_config, get_current_user, get_db
 from graphbot.core.config.schema import Config
 from graphbot.memory.store import MemoryStore
+
+_VALID_ROLES = {"owner", "member", "guest"}
+
+
+class RoleUpdate(BaseModel):
+    """Request body for role update."""
+
+    role: str
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -95,6 +104,27 @@ async def admin_users(
     return [dict(u) for u in users]
 
 
+@router.put("/users/{user_id}/role")
+async def set_user_role(
+    user_id: str,
+    body: RoleUpdate,
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    db: MemoryStore = Depends(get_db),
+):
+    """Set user role (owner only)."""
+    _require_owner(current_user, config)
+    if body.role not in _VALID_ROLES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid role '{body.role}'. Must be one of: {_VALID_ROLES}",
+        )
+    if not db.user_exists(user_id):
+        raise HTTPException(status_code=404, detail=f"User '{user_id}' not found")
+    db.set_user_role(user_id, body.role)
+    return {"user_id": user_id, "role": body.role}
+
+
 @router.get("/crons")
 async def admin_crons(
     current_user: str = Depends(get_current_user),
@@ -120,6 +150,102 @@ async def admin_remove_cron(
     return {"status": "removed", "job_id": job_id}
 
 
+@router.get("/tools")
+async def admin_tools(
+    request: Request,
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+):
+    """List all registered tools with metadata, groups, and availability."""
+    _require_owner(current_user, config)
+    registry = request.app.state.runner.registry
+    return {
+        "tools": registry.get_catalog(),
+        "groups": registry.get_groups_summary(),
+        "total": len(registry),
+        "available": len(registry.get_all_tools()),
+    }
+
+
+@router.get("/stats")
+async def admin_stats(
+    request: Request,
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    db: MemoryStore = Depends(get_db),
+):
+    """Comprehensive system stats: context, tools, sessions, tokens."""
+    _require_owner(current_user, config)
+
+    from graphbot.agent.context import ContextBuilder
+
+    # Context stats for owner
+    ctx = ContextBuilder(config, db)
+    context_stats = ctx.get_context_stats(config.owner_user_id)
+
+    # Tool stats
+    registry = request.app.state.runner.registry
+    tool_groups = registry.get_groups_summary()
+    tool_total = len(registry)
+    tool_available = len(registry.get_all_tools())
+
+    # Session & token stats
+    with db._get_conn() as conn:
+        user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        active_sessions = conn.execute(
+            "SELECT COUNT(*) FROM sessions WHERE ended_at IS NULL"
+        ).fetchone()[0]
+        total_sessions = conn.execute(
+            "SELECT COUNT(*) FROM sessions"
+        ).fetchone()[0]
+        total_tokens = conn.execute(
+            "SELECT COALESCE(SUM(token_count), 0) FROM sessions"
+        ).fetchone()[0]
+        total_messages = conn.execute(
+            "SELECT COUNT(*) FROM messages"
+        ).fetchone()[0]
+        cron_count = conn.execute(
+            "SELECT COUNT(*) FROM cron_jobs WHERE enabled = 1"
+        ).fetchone()[0]
+        reminder_count = conn.execute(
+            "SELECT COUNT(*) FROM reminders WHERE status = 'pending'"
+        ).fetchone()[0]
+        note_count = conn.execute(
+            "SELECT COUNT(*) FROM user_notes"
+        ).fetchone()[0]
+        memory_count = conn.execute(
+            "SELECT COUNT(*) FROM agent_memory"
+        ).fetchone()[0]
+
+    return {
+        "system": {
+            "version": __version__,
+            "model": config.assistant.model,
+            "session_token_limit": config.assistant.session_token_limit,
+            "thinking": config.assistant.thinking,
+        },
+        "context": context_stats,
+        "tools": {
+            "total": tool_total,
+            "available": tool_available,
+            "groups": tool_groups,
+        },
+        "sessions": {
+            "active": active_sessions,
+            "total": total_sessions,
+            "total_tokens": total_tokens,
+        },
+        "data": {
+            "users": user_count,
+            "messages": total_messages,
+            "notes": note_count,
+            "memories": memory_count,
+            "cron_jobs": cron_count,
+            "reminders": reminder_count,
+        },
+    }
+
+
 @router.get("/logs")
 async def admin_logs(
     limit: int = Query(default=50, ge=1, le=500),
@@ -127,12 +253,12 @@ async def admin_logs(
     config: Config = Depends(get_config),
     db: MemoryStore = Depends(get_db),
 ):
-    """Recent activity logs."""
+    """Recent delegation logs."""
     _require_owner(current_user, config)
 
     with db._get_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM activity_logs ORDER BY created_at DESC LIMIT ?",
+            "SELECT * FROM delegation_log ORDER BY created_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
     return [dict(r) for r in rows]

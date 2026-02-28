@@ -6,6 +6,161 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.12.0] - 2026-02-28
+
+### Added (LLM Provider Refactor — Strategy Pattern)
+
+- **`BaseLLMProvider` ABC:** Abstract base class for LLM providers — `achat()` interface
+- **`OpenRouterLLM` provider:** Direct OpenRouter SDK integration — bypasses LiteLLM adapter, `response_format` passes through without stripping
+- **`LiteLLMLLM` provider:** Extracted existing LiteLLM logic into standalone class (Moonshot thinking, summarize, extract_facts)
+- **`openrouter` SDK dependency:** `openrouter>=0.7.0` in pyproject.toml
+- **13 provider tests:** Factory routing, AIMessage conversion, reasoning normalization, tool call parsing, facade delegation
+
+### Changed
+
+- **`litellm.py` → facade module:** Global provider instances (`_main_provider`, `_fallback_provider`), routes `openrouter/*` models to OpenRouterLLM, others to LiteLLMLLM — zero caller changes
+- **`setup_provider()` routing:** Init-time provider selection based on model prefix, `os.environ` fallback for OpenRouter API key
+- **`_RESPONSE_SCHEMA` nullable fields:** `type: ["string", "null"]` → `anyOf` syntax for OpenRouter JSON schema compatibility
+- **Channel injection:** Always overrides with `state["channel"]` — LLM can no longer set wrong channel (was causing reminders to go to `api` instead of `telegram`)
+- **`delegate` tool return message:** Includes execution details (cron expr, delay, one-shot) so LLM reports accurately instead of inventing details
+
+### Fixed
+
+- **`response_format` stripping:** LiteLLM adapter was silently dropping `response_format` for OpenRouter models → DelegationPlanner ~40% empty JSON. Direct SDK fixes this.
+- **`max_tokens=512` truncation:** Planner JSON responses were being cut off, causing parse failures and silent fallback to `immediate/agent`. Removed hard limit.
+- **Channel delivery bug:** LLM was setting `channel: 'api'` for Telegram/WhatsApp requests — reminders delivered to wrong channel. Now always injected from state.
+- **Planner error logging:** Added exception details and raw text (first 300 chars) to parse failure warnings
+- **Misleading delegation confirmation:** When planner fell back to defaults, LLM still told user "setup complete" with fabricated details. Delegate tool now returns actual plan details.
+
+## [1.11.0] - 2026-02-23
+
+### Added (Delegation Refactor & WhatsApp DM)
+
+- **Unified `delegate` tool:** Single tool replaces old delegate/reminder/cron split — routes to worker (immediate), scheduler (delayed/recurring/monitor)
+- **3 processor types:** `static` (plain text), `function` (direct tool call, no LLM), `agent` (LightAgent with tools)
+- **json_schema structured output:** `response_format` forces valid JSON from planner LLM — eliminates parse failures
+- **`list_scheduled_tasks` tool:** Lists active cron jobs and pending reminders
+- **`cancel_scheduled_task` tool:** Cancel by `cron:<id>` or `reminder:<id>` prefix
+- **`LightAgent.run_with_meta()`:** Returns `(response, tokens, called_tools)` for observability
+- **`delegation_log` table:** Records every planner decision (execution, processor, reference_id)
+- **WhatsApp DM respond:** `respond_to_dm=true` + `allowed_dms` whitelist — bot responds to DMs from listed numbers
+- **DM sender context:** `[WhatsApp DM from {sender_name}]` prefix so LLM knows who it's chatting with
+- **Tool catalog full description:** `get_tool_catalog()` now includes full description (up to 300 chars) with shortcuts visible to planner
+- **Test scenarios doc:** `senaryolar.md` — 10 delegation test scenarios with architecture overview
+- **36 delegation tests:** Planner parse, delegate routing, processor execution, list/cancel tools, delegation log
+
+### Changed
+
+- **Planner prompt examples:** Weather scenarios use `web_fetch` with shortcuts instead of `web_search`
+- **Agent processor channel injection:** Scheduler appends `IMPORTANT: set channel='{channel}'` to prompt for non-telegram channels
+- **Function processor channel injection:** Scheduler injects `channel` into `tool_args` when missing
+- **Agent delivery model:** Agent processor returns `(text, False)` — agent delivers via `send_message_to_user`, scheduler does NOT double-send
+- **`_parse_tools()` no filter:** All tools including `send_message_to_user` pass through to LightAgent
+- **`send_message_to_user` channel fallback:** Tries specified channel → whatsapp → telegram
+- **Background task channel:** `SubagentWorker` passes `fallback_channel` to `create_background_task`
+- **`CronJob` model:** Added `processor` and `plan_json` fields
+- **`roles.yaml`:** Added `delegation` group for delegate/list/cancel tools
+
+### Fixed
+
+- **WhatsApp channel routing:** LightAgent now uses correct channel (was defaulting to telegram)
+- **Double message bug:** Each processor type has exactly one delivery path — no duplicates
+- **Tool catalog truncation:** Planner couldn't see `web_fetch` shortcuts (was showing only first line of description)
+
+## [1.10.0] - 2026-02-21
+
+### Added (WhatsApp Channel — WAHA Integration)
+
+- **WAHA REST API client:** `WAHAClient` async client — `send_text()`, `get_session_status()`, phone↔chat_id conversion helpers
+- **WhatsApp webhook handler:** `POST /webhooks/whatsapp/{user_id}` — full message processing pipeline (like Telegram)
+- **Global webhook:** `POST /webhooks/whatsapp` — auto-routes by sender phone via `user_channels` table, only processes allowed groups
+- **Allowed groups:** `allowed_groups` config list — bot only sees and responds to messages in specified groups
+- **`[gbot]` response prefix:** All bot responses prefixed with `[gbot]` to distinguish from real messages
+- **Loop prevention:** Bot's own `[gbot]` messages (fromMe) are skipped to prevent infinite loops
+- **DM config flags:** `respond_to_dm` and `monitor_dm` — configurable DM behavior (both default `false`)
+- **Duplicate event filtering:** `message.any` only used for `fromMe` messages, `message` for regular incoming (prevents double processing)
+- **Non-chat filtering:** Newsletter (`@newsletter`), broadcast (`@broadcast`) messages ignored — only `@c.us` and `@g.us` accepted
+- **Message splitting:** `split_message()` splits long responses at paragraph boundaries (WhatsApp 4096 char limit)
+- **Scheduler integration:** `_send_to_channel()` supports WhatsApp — proactive messaging via WAHA for cron/reminders
+- **WhatsApp send tool:** `send_whatsapp_message` in messaging tools — send messages to saved WhatsApp contacts
+- **WAHA Docker service:** `docker-compose.yml` includes WAHA container with health check
+- **35 tests:** WAHAClient helpers, message splitting, webhook handler (group/DM/filtering/session), global webhook routing
+
+### Changed
+
+- **`WhatsAppChannelConfig`:** Replaced Baileys fields (`bridge_url`) with WAHA fields (`waha_url`, `session`, `api_key`, `allowed_groups`, `respond_to_dm`, `monitor_dm`)
+- **Session isolation:** WhatsApp messages stored in WhatsApp-specific sessions, never leak to Telegram/API sessions
+
+## [1.9.0] - 2026-02-21
+
+### Added (Web Tools & Multi-Provider)
+
+- **Web search 4-provider fallback:** DuckDuckGo (free) → Tavily (free 1000/mo) → Moonshot $web_search → Brave Search API
+- **DuckDuckGo search:** Primary free search provider, no API key needed, `asyncio.to_thread()` wrapper
+- **Tavily search:** AI-optimized search as second fallback, free tier 1000 requests/month
+- **Moonshot $web_search:** Kimi built-in web search as third fallback ($0.005/call)
+- **`web_fetch` shortcut system:** Tag-based data access — `web_fetch("gold")` resolves to API URL from config
+- **`fetch_shortcuts` in config.yaml:** Configurable shortcut → URL mapping, no hardcoded URLs in code
+- **7 default shortcuts:** gold, currency, weather:istanbul, weather:ankara, weather:izmir, earthquake, news
+- **`WebToolConfig.fetch_shortcuts`:** New config field (`dict[str, str]`) for deployment-specific shortcuts
+- **Tool call debug logging:** `reason` node logs tool call names, `execute_tools` logs execution and results
+- **`reasoning_content` preservation:** Thinking model output saved in `AIMessage.additional_kwargs`, restored in conversation history for tool call round-trips
+
+### Changed
+
+- **Model switched to MiniMax M2.5:** `openrouter/minimax/minimax-m2.5` — output 3x cheaper than Kimi K2.5 ($1.10 vs $3.00 per 1M tokens)
+- **OpenRouter provider activated:** `OPENROUTER_API_KEY` in `.env`, provider config in `config.yaml`
+- **`reasoning_effort` parameter:** Added to `litellm.achat()` for thinking models via OpenRouter
+- **`web_fetch` docstring dynamic:** Tool description auto-generated from config shortcuts at startup
+- **`.env` key renamed:** `OPEN_ROUTER_KEY` → `OPENROUTER_API_KEY` (LiteLLM convention)
+
+### Removed
+
+- **$web_search injection from litellm.py:** Moonshot-specific code moved to `_moonshot_search()` in web.py
+- **`crypto` and `bist` shortcuts:** Removed (user preference + broken API)
+
+## [1.8.0] - 2026-02-19
+
+### Added (Tool Registry & Management)
+
+- **ToolRegistry class:** Central tool registry — single source of truth for tool metadata, groups, and availability
+- **ToolInfo dataclass:** Per-tool metadata (group, requires, available) for introspection
+- **`register_group()`:** Factory functions register tools under named groups automatically
+- **`register_unavailable()`:** Dynamic tools (scheduling, delegation) registered as known-but-unavailable when dependencies missing
+- **`validate_roles()`:** Startup validation — detects unknown groups in roles.yaml, logs warnings
+- **`GET /admin/tools`:** New admin endpoint for tool catalog introspection (names, groups, availability, dependencies)
+- **2 new tests:** `test_registry_validate_roles`, `test_registry_groups_summary`
+
+### Changed
+
+- **`make_tools()` returns `ToolRegistry`** instead of `list[BaseTool]` — all consumers updated
+- **`roles.yaml` simplified:** Tool names completely removed; only role → groups + context_layers + max_sessions remain. Tool-to-group mapping now comes from code (ToolRegistry)
+- **`permissions.py`:** `get_allowed_tools()` accepts optional `registry` parameter — resolves tool names from registry groups instead of YAML
+- **`GraphRunner`:** Uses ToolRegistry for RBAC resolution; accepts `list | ToolRegistry | None` for backward compatibility
+- **`app.py` lifespan:** Startup validates roles.yaml groups against registry, logs warnings for unknown groups
+- **`build_background_registry()`:** New function extracts background-safe subset from main ToolRegistry
+- **Test updates:** `test_make_tools_all` → `test_make_tools_returns_registry` (dynamic assertions, no hardcoded counts)
+
+### Improved
+
+- **Adding a new tool now requires 1 file change** (was 5): add function to factory, it's auto-registered in the correct group
+- **No more tool name sync between code and YAML** — ToolRegistry is the single source of truth
+
+## [1.7.0] - 2026-02-19
+
+### Added (Session Summarization & Fact Extraction)
+
+- **`asummarize()`:** Hybrid format session summary (narrative paragraph + structured bullets: TOPICS/DECISIONS/PENDING/USER_INFO)
+- **`aextract_facts()`:** Structured JSON extraction (preferences + notes) from conversation, saved to DB
+- **`_rotate_session()` rewrite:** LLM-based summary + fact extraction + robust fallback on errors
+- **3 preference tools:** `set_user_preference`, `get_user_preferences`, `remove_user_preference` in memory group
+- **`remove_preference()`:** New MemoryStore method for preference deletion
+- **Session summarization policy doc:** `docs/session_summarization.md`
+
+### Fixed
+
+- **Closed session reuse bug:** When a closed session_id is sent, a new session is created instead of reusing the dead one
+
 ## [1.6.0] - 2026-02-15
 
 ### Added (CLI Enhancement — API Client + Rich REPL)

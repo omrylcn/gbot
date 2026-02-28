@@ -15,7 +15,10 @@ from graphbot.memory.store import MemoryStore
 def app(tmp_path):
     """Create test app with tmp database and mocked LLM."""
     config = Config(
-        assistant={"system_prompt": "You are TestBot."},
+        assistant={
+            "system_prompt": "You are TestBot.",
+            "owner": {"username": "u1", "name": "Test Owner"},
+        },
         database={"path": str(tmp_path / "test.db")},
     )
     application = create_app()

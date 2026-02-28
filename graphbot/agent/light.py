@@ -51,7 +51,27 @@ class LightAgent:
         self._graph = self._compile()
 
     async def run(self, message: str) -> tuple[str, int]:
-        """Run a single task and return (response, token_count)."""
+        """Run a single task and return (response, token_count).
+
+        The response text is the final assistant message.
+        Use `run_with_meta` to also get tool call metadata.
+        """
+        response, tokens, _ = await self.run_with_meta(message)
+        return response, tokens
+
+    async def run_with_meta(self, message: str) -> tuple[str, int, set[str]]:
+        """Run a task and return (response, token_count, called_tools).
+
+        Parameters
+        ----------
+        message : str
+            The task description.
+
+        Returns
+        -------
+        tuple[str, int, set[str]]
+            (response_text, token_count, set_of_tool_names_called)
+        """
         state = await self._graph.ainvoke(
             {
                 "messages": [HumanMessage(content=message)],
@@ -61,12 +81,24 @@ class LightAgent:
                 "channel": "background",
                 "iteration": 0,
                 "token_count": 0,
-            }
+            },
+            config={"recursion_limit": 50},
         )
         response = self._extract(state)
         tokens = state.get("token_count", 0)
+        called = self._extract_called_tools(state)
         logger.debug(f"LightAgent done: {len(response)} chars, {tokens} tokens")
-        return response, tokens
+        return response, tokens, called
+
+    @staticmethod
+    def _extract_called_tools(state: dict) -> set[str]:
+        """Extract set of tool names called during execution."""
+        names: set[str] = set()
+        for msg in state.get("messages", []):
+            if isinstance(msg, AIMessage) and msg.tool_calls:
+                for tc in msg.tool_calls:
+                    names.add(tc["name"])
+        return names
 
     def _compile(self) -> StateGraph:
         """Build minimal graph: reason -> execute_tools -> respond."""
@@ -75,16 +107,27 @@ class LightAgent:
         model = self.model
         config = self.config
 
+        max_tool_iterations = 10
+
         async def reason(state: AgentState) -> dict[str, Any]:
             """Call LLM with system prompt + messages."""
             messages = [{"role": "system", "content": state["system_prompt"]}]
             for msg in state["messages"]:
                 messages.append(_langchain_to_dict(msg))
 
+            # Force final response when nearing iteration limit
+            use_tools = tool_defs
+            if state["iteration"] >= max_tool_iterations:
+                use_tools = None
+                messages.append({
+                    "role": "user",
+                    "content": "Summarize your findings now. Do not make any more tool calls.",
+                })
+
             ai_message = await llm_provider.achat(
                 messages=messages,
                 model=model,
-                tools=tool_defs,
+                tools=use_tools,
                 temperature=config.assistant.temperature,
                 api_base=config.get_api_base(),
             )

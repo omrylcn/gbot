@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from graphbot.agent.skills.loader import SkillLoader, SkillMeta
+from graphbot.agent.skills.loader import SkillLoader
 from graphbot.core.config import Config
 from graphbot.memory.store import MemoryStore
 

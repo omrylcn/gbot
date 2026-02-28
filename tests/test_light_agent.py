@@ -265,3 +265,31 @@ def test_create_alert_tool(store, mock_runner):
     assert len(jobs) == 1
     assert jobs[0]["notify_condition"] == "notify_skip"
     assert jobs[0]["agent_prompt"] is not None
+    # Default agent_tools should be set (web_search + web_fetch)
+    import json
+    agent_tools = json.loads(jobs[0]["agent_tools"])
+    assert "web_search" in agent_tools
+    assert "web_fetch" in agent_tools
+
+
+def test_create_alert_custom_tools(store, mock_runner):
+    """create_alert with explicit agent_tools stores them correctly."""
+    from graphbot.agent.tools.cron_tool import make_cron_tools
+
+    sched = CronScheduler(store, mock_runner)
+    with patch.object(sched, "_scheduler"):
+        tools = make_cron_tools(sched)
+        alert = next(t for t in tools if t.name == "create_alert")
+        result = alert.invoke({
+            "user_id": "u1",
+            "cron_expr": "*/30 * * * *",
+            "check_message": "Use web_fetch('gold') to check prices",
+            "agent_tools": ["web_fetch"],
+        })
+
+    assert "Alert created" in result
+    jobs = store.get_cron_jobs("u1")
+    assert len(jobs) == 1
+    import json
+    agent_tools = json.loads(jobs[0]["agent_tools"])
+    assert agent_tools == ["web_fetch"]

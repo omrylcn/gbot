@@ -24,6 +24,7 @@ dependencies = [
 
     # LLM Providers
     "litellm>=1.0.0",
+    "openrouter>=0.7.0",
 
     # API
     "fastapi>=0.109.0",
@@ -39,6 +40,9 @@ dependencies = [
     # Background
     "apscheduler>=3.10.0",
     "croniter>=1.3.0",
+
+    # Web search
+    "duckduckgo-search>=8.0.0",
 
     # Logging
     "loguru>=0.7.0",
@@ -94,6 +98,7 @@ target-version = "py311"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+addopts = "-m 'not integration'"
 markers = [
     "integration: Integration tests (require running server on localhost:8000)",
 ]

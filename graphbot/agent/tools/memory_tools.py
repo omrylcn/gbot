@@ -1,4 +1,4 @@
-"""Memory tools — user notes, context, activities, favorites."""
+"""Memory tools — user notes, context, activities, favorites, preferences."""
 
 from __future__ import annotations
 
@@ -23,23 +23,6 @@ def make_memory_tools(db: MemoryStore) -> list:
         return ctx if ctx else "No context found for this user."
 
     @tool
-    def log_activity(user_id: str, item_title: str, item_id: str = "") -> str:
-        """Log a user activity (e.g. used an item, completed a task)."""
-        db.log_activity(user_id, item_title, item_id=item_id or None)
-        return f"Activity logged: {item_title}"
-
-    @tool
-    def get_recent_activities(user_id: str, days: int = 7) -> str:
-        """Get user's recent activities from the last N days."""
-        rows = db.get_recent_activities(user_id, days=days)
-        if not rows:
-            return "No recent activities."
-        lines = []
-        for r in rows:
-            lines.append(f"- {r['item_title']} ({r['activity_date']})")
-        return "\n".join(lines)
-
-    @tool
     def add_favorite(user_id: str, item_id: str, item_title: str) -> str:
         """Add an item to user's favorites list."""
         if db.is_favorite(user_id, item_id):
@@ -62,12 +45,46 @@ def make_memory_tools(db: MemoryStore) -> list:
         db.remove_favorite(user_id, item_id)
         return "Removed from favorites."
 
+    @tool
+    def set_user_preference(user_id: str, key: str, value: str) -> str:
+        """Save a user preference (e.g. language, response_style, theme).
+
+        Parameters
+        ----------
+        user_id : str
+            Target user ID.
+        key : str
+            Preference key (e.g. 'language', 'tone', 'theme').
+        value : str
+            Preference value.
+        """
+        db.update_preferences(user_id, {key: value})
+        return f"Preference saved: {key} = {value}"
+
+    @tool
+    def get_user_preferences(user_id: str) -> str:
+        """Get all saved preferences for a user."""
+        prefs = db.get_preferences(user_id)
+        if not prefs:
+            return "No preferences saved yet."
+        lines = [f"- {k}: {v}" for k, v in prefs.items()]
+        return "User preferences:\n" + "\n".join(lines)
+
+    @tool
+    def remove_user_preference(user_id: str, key: str) -> str:
+        """Remove a specific user preference by key."""
+        removed = db.remove_preference(user_id, key)
+        if not removed:
+            return f"Preference '{key}' not found."
+        return f"Preference removed: {key}"
+
     return [
         save_user_note,
         get_user_context,
-        log_activity,
-        get_recent_activities,
         add_favorite,
         get_favorites,
         remove_favorite,
+        set_user_preference,
+        get_user_preferences,
+        remove_user_preference,
     ]

@@ -1,0 +1,54 @@
+# GraphBot — Role-Based Access Control
+#
+# Tool group -> tool name mapping comes from ToolRegistry (code).
+# This file only defines role -> groups + context layers + session limits.
+
+roles:
+  owner:
+    tool_groups:
+      - memory
+      - search
+      - web
+      - filesystem
+      - shell
+      - messaging
+      - delegation
+    context_layers:
+      - identity
+      - runtime
+      - role
+      - agent_memory
+      - user_context
+      - events
+      - session_summary
+      - skills
+    max_sessions: 0  # unlimited
+
+  member:
+    tool_groups:
+      - memory
+      - search
+      - web
+      - messaging
+      - delegation
+    context_layers:
+      - identity
+      - runtime
+      - role
+      - agent_memory
+      - user_context
+      - events
+      - session_summary
+      - skills
+    max_sessions: 0
+
+  guest:
+    tool_groups:
+      - web
+    context_layers:
+      - identity
+      - runtime
+      - role
+    max_sessions: 1
+
+default_role: guest

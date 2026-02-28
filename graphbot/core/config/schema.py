@@ -29,17 +29,7 @@ class ProvidersConfig(BaseModel):
     deepseek: ProviderConfig = Field(default_factory=ProviderConfig)
     groq: ProviderConfig = Field(default_factory=ProviderConfig)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
-
-
-class AgentConfig(BaseModel):
-    """Sub-agent definition (assistant.agents.*)."""
-
-    name: str = ""
-    description: str = ""
-    workspace: str = ""
-    model: str = ""
-    tools: list[str] = Field(default_factory=list)
-    mode: str = "sync"  # "sync" | "async"
+    moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
 
 
 class OwnerConfig(BaseModel):
@@ -83,11 +73,11 @@ class AssistantConfig(BaseModel):
     workspace: str = "./workspace"
     model: str = "anthropic/claude-sonnet-4-5-20250929"
     temperature: float = 0.7
+    thinking: bool = False
     session_token_limit: int = 30_000
     max_iterations: int = 20
     tools: list[str] = Field(default_factory=lambda: ["*"])
     system_prompt: str | None = None
-    agents: dict[str, AgentConfig] = Field(default_factory=dict)
     persona: PersonaConfig = Field(default_factory=PersonaConfig)
     roles: RolesConfig = Field(default_factory=RolesConfig)
     context_priorities: ContextPrioritiesConfig = Field(
@@ -110,8 +100,14 @@ class DiscordChannelConfig(BaseModel):
 
 class WhatsAppChannelConfig(BaseModel):
     enabled: bool = False
-    bridge_url: str = "ws://localhost:3001"
+    waha_url: str = "http://localhost:3000"
+    session: str = "default"
+    api_key: str = ""
     allow_from: list[str] = Field(default_factory=list)
+    allowed_groups: list[str] = Field(default_factory=list)
+    allowed_dms: dict[str, str] = Field(default_factory=dict)
+    respond_to_dm: bool = False
+    monitor_dm: bool = False
 
 
 class FeishuChannelConfig(BaseModel):
@@ -146,6 +142,7 @@ class ShellToolConfig(BaseModel):
 class WebToolConfig(BaseModel):
     search_api_key: str = ""
     max_results: int = 5
+    fetch_shortcuts: dict[str, str] = Field(default_factory=dict)
 
 
 class ToolsConfig(BaseModel):
@@ -168,6 +165,7 @@ class DelegationConfig(BaseModel):
 
     model: str = ""  # empty → falls back to assistant.model
     temperature: float = 0.3
+    examples: list[str] = Field(default_factory=list)
 
 
 class BackgroundConfig(BaseModel):

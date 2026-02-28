@@ -14,7 +14,10 @@ from graphbot.memory.store import MemoryStore
 @pytest.fixture
 def app(tmp_path):
     config = Config(
-        assistant={"system_prompt": "You are TestBot."},
+        assistant={
+            "system_prompt": "You are TestBot.",
+            "owner": {"username": "u1", "name": "Test Owner"},
+        },
         database={"path": str(tmp_path / "e2e.db")},
     )
     application = create_app()
@@ -31,6 +34,12 @@ def app(tmp_path):
         return_value=ai_msg,
     ):
         runner = GraphRunner(config, db)
+
+    # Pre-create owner user with correct role
+    db.get_or_create_user("u1", name="Test Owner")
+    with db._get_conn() as conn:
+        conn.execute("UPDATE users SET role = 'owner' WHERE user_id = 'u1'")
+        conn.commit()
 
     application.state.config = config
     application.state.db = db

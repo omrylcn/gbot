@@ -16,8 +16,9 @@ if TYPE_CHECKING:
 
 # Default system prompt for delegated tasks
 _DELEGATE_PROMPT = (
-    "You are a background task agent. Complete the given task thoroughly "
-    "and return a clear, concise result. Do not ask follow-up questions."
+    "You are a background task agent. Your goal is to research and return a clear result.\n"
+    "IMPORTANT: Use at most 3-4 tool calls, then summarize your findings. "
+    "Do NOT keep searching endlessly. After a few searches, write your final answer."
 )
 
 
@@ -62,7 +63,7 @@ class SubagentWorker:
         task_id = str(uuid.uuid4())[:8]
 
         if self.db:
-            self.db.create_background_task(task_id, user_id, task)
+            self.db.create_background_task(task_id, user_id, task, fallback_channel=channel)
 
         bg_task = asyncio.create_task(
             self._run(task_id, user_id, task, channel, tools, prompt, model)
@@ -104,29 +105,93 @@ class SubagentWorker:
 
             if self.db:
                 self.db.complete_background_task(task_id, result=response)
+
+                # Inject result into user's active session so main agent sees it
+                session = self.db.get_active_session(user_id, channel=channel)
+                if not session:
+                    session = self.db.get_active_session(user_id)
+                if session:
+                    self.db.add_message(
+                        session["session_id"],
+                        role="assistant",
+                        content=f"[Arka plan araştırma sonucu — task:{task_id}]\n\n{response}",
+                    )
+                    logger.info(f"Subagent {task_id} result added to session {session['session_id']}")
+
                 event_id = self.db.add_system_event(
                     user_id,
                     source=f"task:{task_id}",
                     event_type="task_completed",
-                    payload=response[:500],
+                    payload=response[:2000],
                 )
 
-                # Try WS push — mark delivered if successful
-                ws_manager = getattr(self, "ws_manager", None)
-                if ws_manager:
-                    sent = await ws_manager.send_event(user_id, {
-                        "type": "event",
-                        "event_type": "task_completed",
-                        "source": f"task:{task_id}",
-                        "payload": response[:500],
-                    })
-                    if sent:
-                        self.db.mark_events_delivered([event_id])
-                        logger.info(f"Task {task_id} result pushed via WS")
+                # Deliver result to user's channel
+                delivered = await self._deliver_result(
+                    user_id, channel, response[:2000], event_id
+                )
+                if delivered:
+                    logger.info(f"Task {task_id} result delivered via {channel}")
         except Exception as e:
             logger.error(f"Subagent {task_id} failed: {e}")
             if self.db:
                 self.db.fail_background_task(task_id, error=str(e))
+
+    async def _deliver_result(
+        self, user_id: str, channel: str, text: str, event_id: int
+    ) -> bool:
+        """Deliver task result to user's channel. Returns True if delivered."""
+        # Telegram: send directly
+        if channel == "telegram":
+            link = self.db.get_channel_link(user_id, "telegram")
+            if link:
+                chat_id = link["metadata"].get("chat_id")
+                if chat_id:
+                    from graphbot.core.channels.telegram import send_message
+
+                    logger.debug(
+                        f"Sending task result to Telegram: chat_id={chat_id}, "
+                        f"token={link['channel_user_id'][:10]}..."
+                    )
+                    await send_message(link["channel_user_id"], int(chat_id), text)
+                    self.db.mark_events_delivered([event_id])
+                    return True
+                logger.warning(f"No chat_id for user {user_id}")
+            else:
+                logger.warning(f"No telegram link for user {user_id}")
+            return False
+
+        # WhatsApp: send directly
+        if channel == "whatsapp":
+            from graphbot.core.channels.whatsapp import send_whatsapp_message
+
+            wa_config = self.config.channels.whatsapp
+            link = self.db.get_channel_link(user_id, "whatsapp")
+            if link and wa_config.enabled:
+                chat_id = link["metadata"].get("chat_id")
+                if chat_id:
+                    await send_whatsapp_message(wa_config, chat_id, text)
+                    self.db.mark_events_delivered([event_id])
+                    logger.info(f"Task result delivered via WhatsApp to {chat_id}")
+                    return True
+            return False
+
+        # API/WS channel: try WebSocket push
+        ws_manager = getattr(self, "ws_manager", None)
+        if ws_manager:
+            sent = await ws_manager.send_event(user_id, {
+                "type": "event",
+                "event_type": "task_completed",
+                "source": "task:result",
+                "payload": text,
+            })
+            if sent:
+                self.db.mark_events_delivered([event_id])
+                logger.info(f"Task result pushed via WebSocket to {user_id}")
+                return True
+
+        # Fallback: event saved to DB for polling
+        logger.info(f"Task result saved to DB for {user_id} (no active delivery)")
+        return False
 
     def get_running_count(self) -> int:
         """Number of currently running tasks."""

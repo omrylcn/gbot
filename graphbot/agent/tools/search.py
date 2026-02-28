@@ -1,7 +1,8 @@
-"""Search tools — item search and detail (mock or real RAG)."""
+"""Search tools — item search, detail, and time utility."""
 
 from __future__ import annotations
 
+from datetime import datetime, timezone, timedelta
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.tools import tool
@@ -39,4 +40,35 @@ def make_search_tools(retriever: SemanticRetriever | None = None) -> list:
         lines = [f"{k}: {v}" for k, v in item.items()]
         return "\n".join(lines)
 
-    return [search_items, get_item_detail]
+    @tool
+    def get_current_time(timezone_name: str = "Europe/Istanbul") -> str:
+        """Get the current date and time. Returns ISO format with day of week.
+
+        Use this tool whenever you need to know the current time, date,
+        or day of week. Default timezone is Europe/Istanbul (UTC+3).
+        """
+        tz_offsets = {
+            "Europe/Istanbul": timedelta(hours=3),
+            "UTC": timedelta(hours=0),
+            "Europe/London": timedelta(hours=0),
+            "Europe/Berlin": timedelta(hours=1),
+            "US/Eastern": timedelta(hours=-5),
+            "US/Pacific": timedelta(hours=-8),
+        }
+        offset = tz_offsets.get(timezone_name, timedelta(hours=3))
+        tz = timezone(offset)
+        now = datetime.now(tz)
+        days_tr = {
+            "Monday": "Pazartesi", "Tuesday": "Salı",
+            "Wednesday": "Çarşamba", "Thursday": "Perşembe",
+            "Friday": "Cuma", "Saturday": "Cumartesi",
+            "Sunday": "Pazar",
+        }
+        day_en = now.strftime("%A")
+        day_tr = days_tr.get(day_en, day_en)
+        return (
+            f"{now.strftime('%Y-%m-%d %H:%M:%S')} ({day_tr}), "
+            f"timezone: {timezone_name}"
+        )
+
+    return [search_items, get_item_detail, get_current_time]

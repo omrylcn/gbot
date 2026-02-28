@@ -273,13 +273,15 @@ def test_cron_tool_add_job(store, mock_runner):
 
 
 def test_delegate_tools_none():
-    """No worker → empty list."""
-    assert make_delegate_tools(None) == []
+    """No worker and no scheduler → empty list."""
+    assert make_delegate_tools(None, None) == []
 
 
-def test_delegate_tools_created(cfg):
-    """With worker → 1 tool."""
+def test_delegate_tools_created(cfg, store, mock_runner):
+    """With worker + scheduler → 3 tools."""
     worker = SubagentWorker(cfg)
-    tools = make_delegate_tools(worker)
-    assert len(tools) == 1
-    assert tools[0].name == "delegate"
+    sched = CronScheduler(store, mock_runner, config=cfg)
+    tools = make_delegate_tools(worker, sched)
+    assert len(tools) == 3
+    names = {t.name for t in tools}
+    assert names == {"delegate", "list_scheduled_tasks", "cancel_scheduled_task"}
