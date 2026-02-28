@@ -32,17 +32,6 @@ class ProvidersConfig(BaseModel):
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
 
 
-class AgentConfig(BaseModel):
-    """Sub-agent definition (assistant.agents.*)."""
-
-    name: str = ""
-    description: str = ""
-    workspace: str = ""
-    model: str = ""
-    tools: list[str] = Field(default_factory=list)
-    mode: str = "sync"  # "sync" | "async"
-
-
 class OwnerConfig(BaseModel):
     """Owner (default user) configuration."""
 
@@ -89,7 +78,6 @@ class AssistantConfig(BaseModel):
     max_iterations: int = 20
     tools: list[str] = Field(default_factory=lambda: ["*"])
     system_prompt: str | None = None
-    agents: dict[str, AgentConfig] = Field(default_factory=dict)
     persona: PersonaConfig = Field(default_factory=PersonaConfig)
     roles: RolesConfig = Field(default_factory=RolesConfig)
     context_priorities: ContextPrioritiesConfig = Field(

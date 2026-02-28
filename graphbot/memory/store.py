@@ -509,14 +509,6 @@ class MemoryStore:
             ).fetchone()
         return row["content"] if row else None
 
-    def get_all_memory(self, user_id: str | None = None) -> list[dict[str, Any]]:
-        with self._get_conn() as conn:
-            rows = conn.execute(
-                "SELECT key, content, updated_at FROM agent_memory WHERE user_id = ?",
-                (user_id or "",),
-            ).fetchall()
-        return [dict(r) for r in rows]
-
     # ════════════════════════════════════════════════════════════
     # USER NOTES (learned facts)
     # ════════════════════════════════════════════════════════════

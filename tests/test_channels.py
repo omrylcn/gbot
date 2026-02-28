@@ -9,9 +9,7 @@ from httpx import ASGITransport, AsyncClient
 
 from graphbot.core.channels.base import (
     check_allowlist,
-    is_owner_mode,
     resolve_or_create_user,
-    resolve_user_strict,
 )
 from graphbot.core.channels.telegram import md_to_html
 from graphbot.core.config import Config
@@ -49,33 +47,6 @@ def test_resolve_or_create_user_existing(store):
 
     user_id = resolve_or_create_user(store, "telegram", "99999")
     assert user_id == "my_user"
-
-
-# ── Owner Mode & Strict Resolve ───────────────────────────
-
-
-def test_is_owner_mode_true():
-    """Config with owner → owner mode active."""
-    cfg = Config(assistant={"owner": {"username": "ali", "name": "Ali"}})
-    assert is_owner_mode(cfg) is True
-
-
-def test_is_owner_mode_false():
-    """Config without owner → owner mode inactive."""
-    cfg = Config()
-    assert is_owner_mode(cfg) is False
-
-
-def test_resolve_strict_found(store):
-    """Linked user → returns user_id."""
-    store.get_or_create_user("ali")
-    store.link_channel("ali", "telegram", "555")
-    assert resolve_user_strict(store, "telegram", "555") == "ali"
-
-
-def test_resolve_strict_not_found(store):
-    """Unknown channel user → None (no auto-create)."""
-    assert resolve_user_strict(store, "telegram", "unknown") is None
 
 
 # ── Allowlist ──────────────────────────────────────────────
@@ -174,7 +145,7 @@ async def test_telegram_webhook(telegram_update, tmp_path):
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        with patch("graphbot.core.channels.telegram.send_message", new_callable=AsyncMock) as mock_send:
+        with patch("graphbot.core.channels.telegram.send_message", new_callable=AsyncMock):
             resp = await client.post("/webhooks/telegram/testuser", json=telegram_update)
 
     assert resp.status_code == 200

@@ -98,6 +98,7 @@ target-version = "py311"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+addopts = "-m 'not integration'"
 markers = [
     "integration: Integration tests (require running server on localhost:8000)",
 ]

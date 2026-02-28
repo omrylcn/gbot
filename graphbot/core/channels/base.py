@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from graphbot.core.config.schema import ChannelsConfig, Config
+from graphbot.core.config.schema import ChannelsConfig
 from graphbot.memory.store import MemoryStore
 
 
@@ -42,17 +42,3 @@ def check_allowlist(
     return sender_id in allow_from
 
 
-def resolve_user_strict(
-    db: MemoryStore, channel: str, channel_user_id: str
-) -> str | None:
-    """Resolve channel identity to user_id. Returns None if not found.
-
-    Unlike resolve_or_create_user, this does NOT auto-create users.
-    Used when owner is configured (DB-based access control).
-    """
-    return db.resolve_user(channel, channel_user_id)
-
-
-def is_owner_mode(config: Config) -> bool:
-    """Check if owner-based access control is active."""
-    return config.assistant.owner is not None

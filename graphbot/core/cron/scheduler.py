@@ -382,9 +382,12 @@ class CronScheduler:
                 tools=tools,
                 model=resolved_model,
             )
-            text, _ = await agent.run(message)
-            # Agent handles its own delivery via send_message_to_user
-            return text, False
+            text, _, called = await agent.run_with_meta(message)
+            # If agent called send_message_to_user, it handled delivery itself
+            if "send_message_to_user" in called:
+                return text, False
+            # Otherwise, scheduler delivers the response as fallback
+            return text, True
 
         # Legacy fallback: no prompt → full runner
         response, _ = await self.runner.process(

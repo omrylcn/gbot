@@ -736,6 +736,6 @@ async def test_delegate_runner_immediate_downgrade(cfg, store):
     delegate_tool = next(t for t in tools if t.name == "delegate")
 
     with patch.object(worker, "spawn", return_value="abc") as mock_spawn:
-        result = await delegate_tool.ainvoke({"user_id": "u1", "task": "test"})
+        await delegate_tool.ainvoke({"user_id": "u1", "task": "test"})
         # Should have been downgraded — worker.spawn called (not runner.process)
         mock_spawn.assert_called_once()

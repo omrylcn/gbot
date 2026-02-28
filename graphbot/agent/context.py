@@ -298,8 +298,8 @@ class ContextBuilder:
             index = self.skills.build_index() or ""
             _add("skills", active + index, priorities.skills)
 
-        total_chars = sum(l["chars"] for l in layers)
-        total_tokens = sum(l["tokens"] for l in layers)
+        total_chars = sum(layer["chars"] for layer in layers)
+        total_tokens = sum(layer["tokens"] for layer in layers)
 
         return {
             "layers": layers,

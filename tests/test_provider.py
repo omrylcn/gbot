@@ -64,11 +64,12 @@ def test_setup_provider_non_openrouter(cfg):
     assert isinstance(facade._fallback_provider, LiteLLMLLM)
 
 
-def test_setup_provider_no_api_key(cfg):
+def test_setup_provider_no_api_key(cfg, monkeypatch):
     """Missing OpenRouter API key falls back to LiteLLM."""
     from graphbot.core.providers import litellm as facade
 
     cfg.providers.openrouter.api_key = ""
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     facade.setup_provider(cfg)
     assert isinstance(facade._main_provider, LiteLLMLLM)
 

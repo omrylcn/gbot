@@ -6,7 +6,7 @@ assistant:
     username: "owner"
     name: "Owner"
   workspace: ./workspace
-  model: "openrouter/moonshotai/kimi-k2.5"
+  model: "openrouter/google/gemini-3-flash-preview"
   temperature: 0.7
   thinking: true
   session_token_limit: 30000
@@ -83,7 +83,9 @@ background:
   heartbeat:
     enabled: false
     interval_s: 1800
-  # delegation:
+  delegation:
+    model: "openrouter/google/gemini-3-flash-preview"
+  # delegation (examples):
   #   examples:  # Custom examples appended to planner prompt (optional)
   #     - >-
   #       "2 saat sonra toplanti var diye hatırlat"

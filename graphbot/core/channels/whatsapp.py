@@ -196,6 +196,7 @@ async def whatsapp_webhook_global(
         return JSONResponse({"ok": True})
 
     # Resolve phone → user_id via user_channels table
+    # Try both phone and LID since participant may use either format
     user_id = db.resolve_user("whatsapp", sender_phone)
     if not user_id:
         logger.warning(f"Unknown WhatsApp sender: {sender_phone}")

@@ -47,14 +47,6 @@ class WAHAClient:
             resp.raise_for_status()
             return resp.json()
 
-    async def get_session_status(self) -> dict:
-        """Get WAHA session status."""
-        url = f"{self.base_url}/api/sessions/{self.session}"
-        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0), headers=self._headers()) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            return resp.json()
-
     def _headers(self) -> dict[str, str]:
         """Build request headers with optional API key."""
         headers: dict[str, str] = {}

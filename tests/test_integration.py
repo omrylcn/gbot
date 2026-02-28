@@ -23,14 +23,32 @@ BASE_URL = "http://localhost:8000"
 
 @pytest.fixture(scope="module")
 def test_user():
-    """Register a test user once per module (sync, via httpx)."""
+    """Register a test user once per module (sync, via httpx).
+
+    Requires running server with owner user configured.
+    Owner logs in first to register the test user.
+    """
     uid = f"inttest_{uuid4().hex[:6]}"
     pwd = "test1234"
     with httpx.Client(base_url=BASE_URL, timeout=30.0) as client:
+        # Login as owner to get auth token for registration
+        owner_resp = client.post(
+            "/auth/login",
+            json={"user_id": "owner", "password": "owner123rtı"},
+        )
+        owner_token = owner_resp.json().get("token")
+        if not owner_token:
+            pytest.skip("Owner login failed — server auth may be misconfigured")
+
+        # Register test user (requires owner auth)
+        client.headers["Authorization"] = f"Bearer {owner_token}"
         client.post(
             "/auth/register",
             json={"user_id": uid, "name": "Integration Test", "password": pwd},
         )
+        client.headers.pop("Authorization", None)
+
+        # Login as test user
         resp = client.post(
             "/auth/login",
             json={"user_id": uid, "password": pwd},

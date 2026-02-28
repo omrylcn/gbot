@@ -9,7 +9,6 @@ from graphbot.agent.context import ContextBuilder
 from graphbot.agent.graph import create_graph
 from graphbot.agent.nodes import should_continue
 from graphbot.agent.runner import GraphRunner
-from graphbot.agent.state import AgentState
 from graphbot.core.config import Config
 from graphbot.memory.store import MemoryStore
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from langchain_core.tools import BaseTool
 from loguru import logger
@@ -16,9 +16,6 @@ from graphbot.agent.tools.shell import make_shell_tools
 from graphbot.agent.tools.web import make_web_tools
 from graphbot.core.config.schema import Config
 from graphbot.memory.store import MemoryStore
-
-if TYPE_CHECKING:
-    pass
 
 
 @dataclass
@@ -80,10 +77,6 @@ class ToolRegistry:
     def get_all_tools(self) -> list:
         """Return all available tool objects."""
         return [info.tool for info in self._tools.values() if info.available]
-
-    def get_group_tool_names(self, group: str) -> list[str]:
-        """Return tool names in a group (including unavailable)."""
-        return list(self._groups.get(group, []))
 
     def get_tools_for_groups(self, groups: list[str]) -> set[str]:
         """Resolve groups to a flat set of available tool names."""
