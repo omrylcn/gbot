@@ -98,6 +98,7 @@ Entry point: `gbot` (alias: `graphbot`).
 - [x] Faz 17: Session Summarization — hybrid LLM summary, fact extraction, preference tools (281 tests)
 - [x] Faz 18: Tool Registry — ToolRegistry class, auto group mapping, roles.yaml simplified, /admin/tools (283 tests)
 - [x] Faz 19: AGENT.md & Skills — config/ dir, agents.yaml profiles, prompt extraction, load_skill tool, progressive disclosure (334 tests)
+- [x] Faz 20: Context Service — context/ package, build_layers(), ContextService facade, 8 admin API endpoints, runtime overrides (348 tests)
 
 ## SQLite Tables (15)
 users, user_channels, sessions, messages, agent_memory, user_notes, activity_logs, favorites, preferences, cron_jobs, cron_execution_log, reminders, system_events, background_tasks, api_keys

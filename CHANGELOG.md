@@ -6,6 +6,32 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.14.0] - 2026-03-14
+
+### Added (Faz 20: Context Service & Admin API)
+
+- **`graphbot/agent/context/` package:** Restructured from single file to package — `models.py`, `builder.py`, `service.py` with backward-compatible `__init__.py` re-exports
+- **`LayerResult` Pydantic model:** Per-layer inspection with name, content, chars, tokens, budget, truncated, enabled fields
+- **`ContextOverride` Pydantic model:** Runtime layer override definition (content + enabled)
+- **`ContextBuilder.build_layers()`:** Returns `dict[str, LayerResult]` — layer-by-layer breakdown with content. `mark_delivered` parameter controls event side-effects
+- **`ContextService`:** Unified facade for context inspection across all 3 agent types (main, planner, light) with runtime override support
+- **8 new admin API endpoints:**
+  - `GET /admin/context/{profile}/layers` — layer-by-layer content + stats
+  - `GET /admin/context/{profile}/preview` — full rendered context string
+  - `PUT /admin/context/{profile}/layers/{layer}` — runtime layer override
+  - `DELETE /admin/context/{profile}/layers/{layer}` — clear layer override
+  - `GET /admin/context/overrides` — list all active overrides
+  - `DELETE /admin/context/overrides` — clear all overrides
+  - `GET /admin/profiles` — list agent profiles
+  - `GET /admin/profiles/{name}` — profile detail + AGENT.md content
+- **14 context service tests:** build_layers, side-effects, overrides, service methods
+
+### Changed
+
+- **`ContextBuilder.build()`:** Now delegates to `build_layers()` — same signature, same output
+- **`ContextBuilder.get_context_stats()`:** Delegates to `build_layers()`, removes ~70 lines of duplicate logic
+- **Skills index split:** `skills` and `skills_index` now separate LayerResult entries for finer inspection
+
 ## [1.13.0] - 2026-03-14
 
 ### Added (Faz 19: AGENT.md & Skills Gözden Geçirme)

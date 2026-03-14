@@ -131,6 +131,11 @@ async def lifespan(app: FastAPI):
     runner.tools = registry.get_all_tools()
     runner._graph = create_graph(config, db, runner.tools)
 
+    # Context service for inspection and management
+    from graphbot.agent.context import ContextService
+
+    context_service = ContextService(config, db)
+
     # Startup validation: check roles.yaml groups against registry
     from graphbot.agent.permissions import _load_roles_yaml
 
@@ -160,6 +165,7 @@ async def lifespan(app: FastAPI):
     app.state.heartbeat = heartbeat
     app.state.worker = worker
     app.state.ws_manager = ws_manager
+    app.state.context_service = context_service
 
     logger.info(f"GraphBot API started — model: {config.assistant.model}")
     yield

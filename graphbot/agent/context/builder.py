@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+from graphbot.agent.context.models import LayerResult
 from graphbot.agent.profiles import get_agent_md, get_agent_skills
 from graphbot.agent.skills.loader import SkillLoader
 from graphbot.core.config.schema import Config
@@ -12,8 +13,7 @@ from graphbot.memory.store import MemoryStore
 
 
 class ContextBuilder:
-    """
-    Builds layered system prompt with configurable persona, roles, and token budgets.
+    """Builds layered system prompt with configurable persona, roles, and token budgets.
 
     Layers:
       1. Identity (prompt_template > system_prompt > AGENT.md > persona config)
@@ -21,9 +21,9 @@ class ContextBuilder:
       3. Current role (if configured)
       4. Agent memory (agent_memory table)
       5. User context (notes, activities, favorites, preferences)
-      6. Previous session summary
-      7. Active skills (always-on, full content)
-      8. Skills index (all skills, name + description)
+      6. Undelivered events (background notifications)
+      7. Previous session summary
+      8. Skills (always-on + index)
     """
 
     def __init__(self, config: Config, db: MemoryStore, profile: str = "main"):
@@ -32,8 +32,133 @@ class ContextBuilder:
         self.profile = profile
         self.skills = SkillLoader(
             workspace=config.workspace_path,
-            builtin_dir=Path(__file__).parent / "skills" / "builtin",
+            builtin_dir=Path(__file__).parent.parent / "skills" / "builtin",
         )
+
+    def build_layers(
+        self,
+        user_id: str,
+        role: str | None = None,
+        context_layers: set[str] | None = None,
+        mark_delivered: bool = False,
+    ) -> dict[str, LayerResult]:
+        """Build each context layer individually.
+
+        Parameters
+        ----------
+        user_id : str
+            Target user ID.
+        role : str, optional
+            Override role name.
+        context_layers : set[str], optional
+            Allowed layers from RBAC. None = all.
+        mark_delivered : bool
+            If True, mark events as delivered (side-effect).
+            Use False for preview/inspection.
+
+        Returns
+        -------
+        dict[str, LayerResult]
+            Ordered dict of layer_name -> LayerResult.
+        """
+        priorities = self.config.assistant.context_priorities
+        layers: dict[str, LayerResult] = {}
+
+        def _allowed(layer: str) -> bool:
+            return context_layers is None or layer in context_layers
+
+        def _add(name: str, content: str, budget: int = 0) -> None:
+            truncated_content = self._truncate(content, budget) if budget else content
+            was_truncated = len(truncated_content) < len(content)
+            layers[name] = LayerResult(
+                name=name,
+                content=truncated_content,
+                chars=len(truncated_content),
+                tokens=len(truncated_content) // 4,
+                budget=budget,
+                truncated=was_truncated,
+                enabled=True,
+            )
+
+        # 1. Identity
+        if _allowed("identity"):
+            identity = self._get_identity()
+            if identity:
+                _add("identity", identity, priorities.identity)
+
+        # 2. Runtime info
+        if _allowed("runtime"):
+            now = datetime.now().strftime("%Y-%m-%d %H:%M")
+            user = self.db.get_user(user_id)
+            user_name = user["name"] if user and user.get("name") else user_id
+            _add("runtime", (
+                f"# Runtime\n\n"
+                f"- Current user_id: {user_id}\n"
+                f"- Current user_name: {user_name}\n"
+                f"- Current time: {now}\n"
+                f"- Use this user_id when calling tools that require it."
+            ))
+
+        # 3. Current role
+        if _allowed("role"):
+            role_text = self._get_role(role)
+            if role_text:
+                _add("role", f"# Current Role\n\n{role_text}")
+
+        # 4. Agent memory
+        if _allowed("agent_memory"):
+            memory = self.db.read_memory("long_term")
+            if memory:
+                _add("agent_memory", f"# Agent Memory\n\n{memory}", priorities.agent_memory)
+
+        # 5. User context
+        if _allowed("user_context"):
+            user_ctx = self.db.get_user_context(user_id)
+            if user_ctx:
+                _add("user_context", f"# User Context\n\n{user_ctx}", priorities.user_context)
+
+        # 6. Undelivered events
+        if _allowed("events"):
+            events = self.db.get_undelivered_events(user_id, limit=5)
+            if events:
+                lines = [f"- [{e['source']}] {e['payload']}" for e in events]
+                _add("events", "# Background Notifications\n\n" + "\n".join(lines))
+                if mark_delivered:
+                    self.db.mark_events_delivered([e["id"] for e in events])
+
+        # 7. Previous session summary
+        if _allowed("session_summary"):
+            summary = self.db.get_last_session_summary(user_id)
+            if summary:
+                _add(
+                    "session_summary",
+                    f"# Previous Conversation\n\n{summary}",
+                    priorities.session_summary,
+                )
+
+        # 8. Skills
+        if _allowed("skills"):
+            profile_skills = get_agent_skills(self.profile)
+            if profile_skills != []:
+                always_on = self.skills.get_always_on()
+                if profile_skills != ["*"] and profile_skills:
+                    allowed_names = set(profile_skills)
+                    always_on = [s for s in always_on if s.name in allowed_names]
+                if always_on:
+                    skill_texts = [self.skills.load_content(s.name) for s in always_on]
+                    active = "\n\n---\n\n".join(t for t in skill_texts if t)
+                    if active:
+                        _add("skills", f"# Active Skills\n\n{active}", priorities.skills)
+
+                index = self.skills.build_index()
+                if index:
+                    _add("skills_index", (
+                        "# Available Skills\n\n"
+                        "Use load_skill(skill_name) to load detailed instructions when needed.\n\n"
+                        + index
+                    ))
+
+        return layers
 
     def build(
         self,
@@ -41,7 +166,7 @@ class ContextBuilder:
         role: str | None = None,
         context_layers: set[str] | None = None,
     ) -> str:
-        """Build full system prompt for a user.
+        """Build full system prompt for a user (backward compatible).
 
         Parameters
         ----------
@@ -52,108 +177,36 @@ class ContextBuilder:
         context_layers : set[str], optional
             Allowed context layers from RBAC. None = all layers.
         """
-        parts: list[str] = []
-        priorities = self.config.assistant.context_priorities
-
-        def _allowed(layer: str) -> bool:
-            return context_layers is None or layer in context_layers
-
-        # 1. Identity (always included)
-        if _allowed("identity"):
-            identity = self._get_identity()
-            if identity:
-                parts.append(self._truncate(identity, priorities.identity))
-
-        # 2. Runtime info (user_id, datetime)
-        if _allowed("runtime"):
-            now = datetime.now().strftime("%Y-%m-%d %H:%M")
-            user = self.db.get_user(user_id)
-            user_name = user["name"] if user and user.get("name") else user_id
-            parts.append(
-                f"# Runtime\n\n"
-                f"- Current user_id: {user_id}\n"
-                f"- Current user_name: {user_name}\n"
-                f"- Current time: {now}\n"
-                f"- Use this user_id when calling tools that require it."
-            )
-
-        # 3. Current role
-        if _allowed("role"):
-            role_text = self._get_role(role)
-            if role_text:
-                parts.append(f"# Current Role\n\n{role_text}")
-
-        # 4. Agent memory
-        if _allowed("agent_memory"):
-            memory = self.db.read_memory("long_term")
-            if memory:
-                parts.append(
-                    self._truncate(f"# Agent Memory\n\n{memory}", priorities.agent_memory)
-                )
-
-        # 5. User context
-        if _allowed("user_context"):
-            user_ctx = self.db.get_user_context(user_id)
-            if user_ctx:
-                parts.append(
-                    self._truncate(
-                        f"# User Context\n\n{user_ctx}", priorities.user_context
-                    )
-                )
-
-        # 6. Undelivered system events (background notifications)
-        if _allowed("events"):
-            events = self.db.get_undelivered_events(user_id, limit=5)
-            if events:
-                lines = [
-                    f"- [{e['source']}] {e['payload']}" for e in events
-                ]
-                parts.append(
-                    "# Background Notifications\n\n" + "\n".join(lines)
-                )
-                self.db.mark_events_delivered([e["id"] for e in events])
-
-        # 7. Previous session summary
-        if _allowed("session_summary"):
-            summary = self.db.get_last_session_summary(user_id)
-            if summary:
-                parts.append(
-                    self._truncate(
-                        f"# Previous Conversation\n\n{summary}",
-                        priorities.session_summary,
-                    )
-                )
-
-        # 8. Active skills (always-on, full content)
-        if _allowed("skills"):
-            profile_skills = get_agent_skills(self.profile)
-            # Empty list = no skills for this profile
-            if profile_skills != []:
-                always_on = self.skills.get_always_on()
-                # Filter by profile if not wildcard
-                if profile_skills != ["*"] and profile_skills:
-                    allowed_names = set(profile_skills)
-                    always_on = [s for s in always_on if s.name in allowed_names]
-                if always_on:
-                    skill_texts = [self.skills.load_content(s.name) for s in always_on]
-                    active = "\n\n---\n\n".join(t for t in skill_texts if t)
-                    if active:
-                        parts.append(
-                            self._truncate(
-                                f"# Active Skills\n\n{active}", priorities.skills
-                            )
-                        )
-
-                # Skills index
-                index = self.skills.build_index()
-                if index:
-                    parts.append(
-                        "# Available Skills\n\n"
-                        "Use load_skill(skill_name) to load detailed instructions when needed.\n\n"
-                        + index
-                    )
-
+        layers = self.build_layers(user_id, role, context_layers, mark_delivered=True)
+        parts = [lr.content for lr in layers.values() if lr.content]
         return "\n\n---\n\n".join(parts)
+
+    def get_context_stats(
+        self,
+        user_id: str,
+        role: str | None = None,
+        context_layers: set[str] | None = None,
+    ) -> dict:
+        """Measure each context layer's size without building the full prompt.
+
+        Returns a dict with per-layer char/token counts and totals.
+        """
+        layers = self.build_layers(user_id, role, context_layers, mark_delivered=False)
+        layer_stats = [
+            {
+                "layer": lr.name,
+                "chars": lr.chars,
+                "tokens": lr.tokens,
+                "budget": lr.budget,
+                "truncated": lr.truncated,
+            }
+            for lr in layers.values()
+        ]
+        return {
+            "layers": layer_stats,
+            "total_chars": sum(d["chars"] for d in layer_stats),
+            "total_tokens": sum(d["tokens"] for d in layer_stats),
+        }
 
     # ── Identity resolution ───────────────────────────────────
 
@@ -222,7 +275,6 @@ class ContextBuilder:
         raw = template_path.read_text(encoding="utf-8").strip()
         if not raw:
             return None
-        # Render simple {variable} placeholders
         persona = self.config.assistant.persona
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
         variables = {
@@ -249,77 +301,6 @@ class ContextBuilder:
         if roles.default:
             return f"Role: {roles.default}"
         return None
-
-    def get_context_stats(
-        self,
-        user_id: str,
-        role: str | None = None,
-        context_layers: set[str] | None = None,
-    ) -> dict:
-        """Measure each context layer's size without building the full prompt.
-
-        Returns a dict with per-layer char/token counts and totals.
-        """
-        priorities = self.config.assistant.context_priorities
-        layers: list[dict] = []
-
-        def _allowed(layer: str) -> bool:
-            return context_layers is None or layer in context_layers
-
-        def _add(name: str, text: str, budget: int = 0) -> None:
-            chars = len(text)
-            tokens_approx = chars // 4
-            layers.append({
-                "layer": name,
-                "chars": chars,
-                "tokens": tokens_approx,
-                "budget": budget,
-                "truncated": chars > budget * 4 if budget else False,
-            })
-
-        if _allowed("identity"):
-            identity = self._get_identity()
-            _add("identity", identity or "", priorities.identity)
-
-        if _allowed("runtime"):
-            _add("runtime", "~runtime~", 0)  # small, constant
-
-        if _allowed("role"):
-            role_text = self._get_role(role) or ""
-            _add("role", role_text, 0)
-
-        if _allowed("agent_memory"):
-            memory = self.db.read_memory("long_term") or ""
-            _add("agent_memory", memory, priorities.agent_memory)
-
-        if _allowed("user_context"):
-            user_ctx = self.db.get_user_context(user_id) or ""
-            _add("user_context", user_ctx, priorities.user_context)
-
-        if _allowed("events"):
-            events = self.db.get_undelivered_events(user_id, limit=5)
-            text = "\n".join(e.get("payload", "") for e in events) if events else ""
-            _add("events", text, 0)
-
-        if _allowed("session_summary"):
-            summary = self.db.get_last_session_summary(user_id) or ""
-            _add("session_summary", summary, priorities.session_summary)
-
-        if _allowed("skills"):
-            always_on = self.skills.get_always_on()
-            skill_texts = [self.skills.load_content(s.name) for s in always_on]
-            active = "\n".join(t for t in skill_texts if t)
-            index = self.skills.build_index() or ""
-            _add("skills", active + index, priorities.skills)
-
-        total_chars = sum(layer["chars"] for layer in layers)
-        total_tokens = sum(layer["tokens"] for layer in layers)
-
-        return {
-            "layers": layers,
-            "total_chars": total_chars,
-            "total_tokens": total_tokens,
-        }
 
     # ── Helpers ───────────────────────────────────────────────
 
