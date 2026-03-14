@@ -17,8 +17,10 @@ LangGraph-based AI assistant framework. Combines nanobot (multi-channel agent) +
 - Read `future_works.md` for strategic directions
 - Check `todo.md` for current progress and priority
 - Do finish phase, change version and update `changelog.md`
+- When `config/config.yaml` structure changes, sync `config/config.example.yaml` — replace secrets with `${ENV_VAR}` placeholders, keep comments
 
 **DON'T:**
+- Commit `config/config.yaml` — it contains secrets; only `config.example.yaml` goes to repo
 - Touch `reference files/` — read-only reference code (ascibot + nanobot)
 - Use LangGraph checkpoint for persistence — SQLite is source of truth
 - Use MessageBus — FastAPI handlers call GraphRunner directly
@@ -33,7 +35,7 @@ LangGraph-based AI assistant framework. Combines nanobot (multi-channel agent) +
 2. SQLite = source of truth (15 tables)
 3. GraphRunner = orchestrator (SQLite ↔ LangGraph bridge, request-scoped)
 4. FastAPI = main service (lifespan hosts background services)
-5. Config = YAML + BaseSettings + .env
+5. Config = YAML (config/) + BaseSettings + .env; secrets in .env, structure in config.example.yaml
 6. Tools = LangGraph native @tool / BaseTool
 7. Sessions = token-based (30k limit, LLM summary on transition)
 8. Graph = 4 nodes: load_context → reason ⇄ execute_tools → respond
@@ -78,7 +80,8 @@ Entry point: `gbot` (alias: `graphbot`).
 | `graphbot/agent/tools/skill_tools.py` | load_skill tool — progressive disclosure |
 | `config/agents.yaml` | Agent profiles (which AGENT.md, skills per agent type) |
 | `config/roles.yaml` | RBAC role definitions (role → groups, no tool names — resolved from ToolRegistry) |
-| `config/config.yaml` | Main configuration (assistant, database, API, background, etc.) |
+| `config/config.yaml` | Main configuration — gitignored, contains secrets |
+| `config/config.example.yaml` | Config template — committed, secrets as `${ENV_VAR}` placeholders |
 | `mimari_kararlar.md` | 13 architectural decisions (detailed reasoning) |
 | `notes.md` | Kullanıcı şifreleri, WAHA kurulum adımları, WhatsApp credentials, memory tasarım notları |
 | `todo.md` | Phase progress tracking |
