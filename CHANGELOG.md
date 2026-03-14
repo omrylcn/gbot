@@ -8,29 +8,50 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [1.14.0] - 2026-03-14
 
-### Added (Faz 20: Context Service & Admin API)
+### Added (Faz 20: Context Service, Admin Dashboard & API)
 
 - **`graphbot/agent/context/` package:** Restructured from single file to package — `models.py`, `builder.py`, `service.py` with backward-compatible `__init__.py` re-exports
-- **`LayerResult` Pydantic model:** Per-layer inspection with name, content, chars, tokens, budget, truncated, enabled fields
+- **`LayerResult` Pydantic model:** Per-layer inspection with name, description, source, content, chars, tokens, budget, truncated, enabled fields
 - **`ContextOverride` Pydantic model:** Runtime layer override definition (content + enabled)
-- **`ContextBuilder.build_layers()`:** Returns `dict[str, LayerResult]` — layer-by-layer breakdown with content. `mark_delivered` parameter controls event side-effects
-- **`ContextService`:** Unified facade for context inspection across all 3 agent types (main, planner, light) with runtime override support
+- **`ContextBuilder.build_layers()`:** Returns `dict[str, LayerResult]` — layer-by-layer breakdown with content. `mark_delivered` parameter controls event side-effects. `template_vars` parameter for planner identity injection
+- **`_LAYER_META` dict:** Description and source metadata for each layer — full traceability in dashboard
+- **Empty layer support:** Layers with no content (role, agent_memory, events) still included in `build_layers()` output for dashboard visibility
+- **`ContextService`:** Unified facade for context inspection across all 3 agent types (main, planner, light) with runtime override support. Accepts optional `registry` for tool definition token calculation
+- **`get_profile_context_layers()`:** Profile-aware layer filtering — reads `context_layers` from agents.yaml (`["*"]` = all, `[identity]` = minimal)
+- **Informational layers:** `message_history` (session messages) and `tool_definitions` (ToolRegistry OpenAI schemas) added to dashboard for complete LLM input visibility
+- **Planner/light context via layers:** `get_planner_context()` and `get_light_context()` return `dict[str, LayerResult]` for unified dashboard display
 - **8 new admin API endpoints:**
-  - `GET /admin/context/{profile}/layers` — layer-by-layer content + stats
+  - `GET /admin/context/{profile}/layers` — layer-by-layer content + stats (all 3 profiles)
   - `GET /admin/context/{profile}/preview` — full rendered context string
-  - `PUT /admin/context/{profile}/layers/{layer}` — runtime layer override
-  - `DELETE /admin/context/{profile}/layers/{layer}` — clear layer override
+  - `GET /admin/context/budget` — token budget breakdown
   - `GET /admin/context/overrides` — list all active overrides
-  - `DELETE /admin/context/overrides` — clear all overrides
-  - `GET /admin/profiles` — list agent profiles
-  - `GET /admin/profiles/{name}` — profile detail + AGENT.md content
-- **14 context service tests:** build_layers, side-effects, overrides, service methods
+  - `POST /admin/context/overrides` — set runtime layer overrides
+  - `DELETE /admin/context/overrides/{layer}` — clear layer override
+  - `GET /admin/context/profiles` — list agent profiles
+  - `GET /admin/context/profiles/{name}` — profile detail + AGENT.md content
+- **Admin Dashboard (React):** Separate web UI for monitoring and inspection
+  - React 19 + TanStack Query + Zustand + Tailwind CSS 4 + Lucide icons + Vite
+  - Pages: Dashboard, Context (layer inspector), Conversations (session browser + message history), Users, Tools, Crons, Settings
+  - Context page: per-profile layer view with description, source, content, token/char stats
+  - Conversations page: owner can view all users' sessions and message history
+  - Dark/light theme with system preference detection
+  - JWT auth integration (login page with GBot branding)
+  - Deployed as separate Docker container (nginx:alpine), proxies API via `/api/` rewrite
+- **`dashboard/` directory:** Complete React project — Dockerfile, nginx.conf, API client, stores, components
+- **GBot logo:** SVG logo (`gbot_logo.svg`) + PNG (`logo.png`) + favicon (`dashboard/public/favicon.png`)
+- **Owner session bypass:** Owner can view any user's sessions and message history (not just their own)
+- **`/admin/users` role field:** User list now includes RBAC role from database
+- **14 context service tests:** build_layers, side-effects, overrides, service methods, planner/light layer format
 
 ### Changed
 
 - **`ContextBuilder.build()`:** Now delegates to `build_layers()` — same signature, same output
 - **`ContextBuilder.get_context_stats()`:** Delegates to `build_layers()`, removes ~70 lines of duplicate logic
 - **Skills index split:** `skills` and `skills_index` now separate LayerResult entries for finer inspection
+- **`docker-compose.yml`:** Added dashboard service (gbot-dashboard, port 3001, depends on graphbot)
+- **`app.py`:** ContextService now receives `registry` parameter for tool token calculation
+- **`routes.py`:** Owner bypass — `current_user != config.owner_user_id` check for session/history access
+- **README.md:** Complete rewrite — GBot branding, logo, dashboard section, context service docs, agent profiles, updated project structure
 
 ## [1.13.0] - 2026-03-14
 
