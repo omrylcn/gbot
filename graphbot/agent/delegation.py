@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from graphbot.agent.profiles import get_agent_md
 from graphbot.core.providers import litellm as llm_provider
 
 if TYPE_CHECKING:
@@ -205,6 +206,8 @@ class DelegationPlanner:
         self.model = deleg.model or config.assistant.model
         self.temperature = deleg.temperature
         self._extra_examples = self._build_extra_examples(deleg.examples)
+        # Try to load prompt from profile AGENT.md, fallback to _PLANNER_PROMPT
+        self._prompt_template = get_agent_md("planner") or _PLANNER_PROMPT
 
     @staticmethod
     def _build_extra_examples(examples: list[str]) -> str:
@@ -224,7 +227,7 @@ class DelegationPlanner:
         dict
             Plan with execution type, processor type, and relevant config.
         """
-        system = _PLANNER_PROMPT.format(
+        system = self._prompt_template.format(
             tool_catalog=self.tool_catalog,
             extra_examples=self._extra_examples,
         )

@@ -13,6 +13,7 @@ from graphbot.agent.tools.memory_tools import make_memory_tools
 from graphbot.agent.tools.messaging import make_messaging_tools
 from graphbot.agent.tools.search import make_search_tools
 from graphbot.agent.tools.shell import make_shell_tools
+from graphbot.agent.tools.skill_tools import make_skill_tools
 from graphbot.agent.tools.web import make_web_tools
 from graphbot.core.config.schema import Config
 from graphbot.memory.store import MemoryStore
@@ -157,6 +158,7 @@ def make_tools(config: Config, db: MemoryStore) -> ToolRegistry:
     registry.register_group("shell", make_shell_tools(config))
     registry.register_group("web", make_web_tools(config))
     registry.register_group("messaging", make_messaging_tools(config, db))
+    registry.register_group("skills", make_skill_tools(config))
 
     # Delegation registered as unavailable until lifespan wires it up
     registry.register_unavailable(

@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #3b82f6;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #6b7280;
+  --color-accent: #8b5cf6;
+  --color-destructive: #ef4444;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-muted: #9ca3af;
+  --color-border: #e5e7eb;
+  --color-card: #ffffff;
+  --color-card-foreground: #111827;
+  --color-background: #f9fafb;
+  --color-foreground: #111827;
+  --color-sidebar: #ffffff;
+  --color-sidebar-foreground: #374151;
+  --color-sidebar-active: #eff6ff;
+}
+
+/* Dark mode overrides */
+.dark {
+  --color-border: #374151;
+  --color-card: #1f2937;
+  --color-card-foreground: #f9fafb;
+  --color-background: #111827;
+  --color-foreground: #f9fafb;
+  --color-sidebar: #1f2937;
+  --color-sidebar-foreground: #d1d5db;
+  --color-sidebar-active: #1e3a5f;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-muted); border-radius: 3px; }
+.dark ::-webkit-scrollbar-thumb { background: #4b5563; }
+
+/* Message bubble styles */
+.msg-user { background: #dbeafe; border-radius: 18px 18px 4px 18px; }
+.msg-assistant { background: #f3f4f6; border-radius: 18px 18px 18px 4px; }
+.msg-tool { background: #fef3c7; border-radius: 8px; border-left: 3px solid #f59e0b; }
+.dark .msg-user { background: #1e3a5f; }
+.dark .msg-assistant { background: #374151; }
+.dark .msg-tool { background: #422006; border-left-color: #d97706; }
+
+/* Code blocks inside messages */
+.msg-content pre {
+  background: #1e293b;
+  color: #e2e8f0;
+  padding: 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 13px;
+}
+.msg-content code:not(pre code) {
+  background: #e5e7eb;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.dark .msg-content code:not(pre code) { background: #4b5563; }

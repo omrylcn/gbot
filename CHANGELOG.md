@@ -6,6 +6,58 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.14.0] - 2026-03-14
+
+### Added (Faz 20: Context Service & Admin API)
+
+- **`graphbot/agent/context/` package:** Restructured from single file to package — `models.py`, `builder.py`, `service.py` with backward-compatible `__init__.py` re-exports
+- **`LayerResult` Pydantic model:** Per-layer inspection with name, content, chars, tokens, budget, truncated, enabled fields
+- **`ContextOverride` Pydantic model:** Runtime layer override definition (content + enabled)
+- **`ContextBuilder.build_layers()`:** Returns `dict[str, LayerResult]` — layer-by-layer breakdown with content. `mark_delivered` parameter controls event side-effects
+- **`ContextService`:** Unified facade for context inspection across all 3 agent types (main, planner, light) with runtime override support
+- **8 new admin API endpoints:**
+  - `GET /admin/context/{profile}/layers` — layer-by-layer content + stats
+  - `GET /admin/context/{profile}/preview` — full rendered context string
+  - `PUT /admin/context/{profile}/layers/{layer}` — runtime layer override
+  - `DELETE /admin/context/{profile}/layers/{layer}` — clear layer override
+  - `GET /admin/context/overrides` — list all active overrides
+  - `DELETE /admin/context/overrides` — clear all overrides
+  - `GET /admin/profiles` — list agent profiles
+  - `GET /admin/profiles/{name}` — profile detail + AGENT.md content
+- **14 context service tests:** build_layers, side-effects, overrides, service methods
+
+### Changed
+
+- **`ContextBuilder.build()`:** Now delegates to `build_layers()` — same signature, same output
+- **`ContextBuilder.get_context_stats()`:** Delegates to `build_layers()`, removes ~70 lines of duplicate logic
+- **Skills index split:** `skills` and `skills_index` now separate LayerResult entries for finer inspection
+
+## [1.13.0] - 2026-03-14
+
+### Added (Faz 19: AGENT.md & Skills Gözden Geçirme)
+
+- **`config/` directory:** All YAML configs consolidated — `config.yaml`, `roles.yaml`, `agents.yaml` in single directory with backward-compatible fallback to root
+- **`config/agents.yaml`:** Agent profile system — each agent type (main, planner, light) defines which AGENT.md and skills to use
+- **`graphbot/agent/profiles.py`:** AgentProfile loader with global cache, `get_agent_md()`, `get_agent_skills()`, `get_template_vars()` (same pattern as permissions.py)
+- **`workspace/agents/planner/AGENT.md`:** Planner prompt extracted from Python to Markdown — template vars `{tool_catalog}` and `{extra_examples}` preserved
+- **`workspace/agents/light/AGENT.md`:** Base context for LightAgent — identity, language rules, background task guidelines
+- **`graphbot/agent/skills/builtin/scheduling/SKILL.md`:** Scheduling decision tree extracted from main AGENT.md — available via progressive disclosure
+- **`load_skill` tool:** Progressive disclosure — agent loads full skill instructions on demand instead of always-in-context
+- **`skills` tool group:** Added to ToolRegistry and roles.yaml (owner + member)
+- **11 profile tests:** Loading, fallback, cache, AGENT.md resolution, skill filtering
+
+### Changed
+
+- **`ContextBuilder`:** Profile-aware — accepts `profile` parameter, identity resolves from profile AGENT.md, skills filtered by profile config
+- **`ContextBuilder._get_identity()`:** 5-level priority chain: prompt_template > system_prompt > profile AGENT.md > workspace/AGENT.md > persona config
+- **`DelegationPlanner`:** Loads prompt from profile AGENT.md, falls back to `_PLANNER_PROMPT` constant
+- **`LightAgent`:** Prepends base context from profile before task prompt
+- **`workspace/AGENT.md`:** Scheduling section replaced with `load_skill("scheduling")` reference (83 → 41 lines, ~50% smaller)
+- **Skills index instruction:** `read_file` → `load_skill(skill_name)` for skill loading
+- **`docker-compose.yml`:** Single `./config:/app/config:ro` volume mount replaces two separate mounts
+- **`load_config()`:** Resolution order now checks `config/config.yaml` before `config.yaml`
+- **`_load_roles_yaml()`:** Resolution order now checks `config/roles.yaml` before `roles.yaml`
+
 ## [1.12.0] - 2026-02-28
 
 ### Added (LLM Provider Refactor — Strategy Pattern)

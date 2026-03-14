@@ -64,8 +64,8 @@ async def list_sessions(
     config: Config = Depends(get_config),
 ):
     """List user's sessions."""
-    # Auth enabled → only own sessions
-    if config.auth_enabled and user_id != current_user:
+    # Auth enabled → only own sessions (owner can see all)
+    if config.auth_enabled and user_id != current_user and current_user != config.owner_user_id:
         raise HTTPException(status_code=403, detail="Access denied")
     rows = db.get_user_sessions(user_id, limit=limit)
     return [SessionInfo(**r) for r in rows]
@@ -82,7 +82,7 @@ async def session_history(
     session = db.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    if config.auth_enabled and session.get("user_id") != current_user:
+    if config.auth_enabled and session.get("user_id") != current_user and current_user != config.owner_user_id:
         raise HTTPException(status_code=403, detail="Access denied")
     messages = db.get_session_messages(session_id)
     return {"session_id": session_id, "messages": messages}

@@ -80,10 +80,13 @@ def test_status_output(tmp_path):
     fake_registry.get_all_tools.return_value = [MagicMock()]
     fake_registry.__len__ = MagicMock(return_value=1)
 
+    fake_stats = {"layers": [], "total_chars": 0, "total_tokens": 0}
+
     with (
         patch(_PATCH_CONFIG, return_value=fake_config),
         patch(_PATCH_STORE, return_value=fake_db),
         patch("graphbot.agent.tools.make_tools", return_value=fake_registry),
+        patch("graphbot.agent.context.ContextBuilder.get_context_stats", return_value=fake_stats),
     ):
         result = runner.invoke(app, ["status"])
 

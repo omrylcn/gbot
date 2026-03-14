@@ -1,0 +1,83 @@
+# GraphBot Configuration — Example Template
+#
+# Copy this file to config/config.yaml and fill in your secrets.
+# config.yaml is gitignored — never commit real credentials.
+#
+# Secret values can also be set via .env (GRAPHBOT_ prefix) or environment variables.
+# Priority: env vars > .env file > YAML > defaults
+
+assistant:
+  name: "GraphBot"
+  owner:
+    username: "owner"
+    name: "Owner"
+  workspace: ./workspace
+  model: "openrouter/google/gemini-3-flash-preview"
+  temperature: 0.7
+  thinking: true
+  session_token_limit: 30000
+  max_iterations: 20
+  tools: ["*"]
+  # system_prompt: "You are GraphBot — a helpful AI assistant."
+  # ^ If set, this overrides AGENT.md (higher priority)
+
+providers:
+  anthropic:
+    api_key: "${ANTHROPIC_API_KEY}"        # Set via .env
+  openrouter:
+    api_key: "${OPENROUTER_API_KEY}"       # Set via .env
+  # openai:
+  #   api_key: "${OPENAI_API_KEY}"
+
+channels:
+  telegram:
+    enabled: true
+    allow_from: []                         # Telegram user IDs (optional whitelist)
+  whatsapp:
+    enabled: false
+    waha_url: "http://waha:3000"
+    session: "default"
+    api_key: "${WAHA_API_KEY}"             # WAHA instance API key
+    respond_to_dm: true
+    monitor_dm: true
+    allowed_groups:
+      - "YOUR_GROUP_ID@g.us"
+    allowed_dms:
+      "PHONE_NUMBER": "Name"
+  # discord:
+  #   enabled: false
+
+# rag:
+#   embedding_model: "intfloat/multilingual-e5-small"
+#   data_source: ./data/items.json
+#   index_path: ./data/faiss_index
+#   text_template: "{title}. {description}. Category: {category}."
+#   id_field: "id"
+
+tools:
+  shell:
+    timeout: 60
+    restrict_to_workspace: true
+  web:
+    fetch_shortcuts:
+      gold: "https://api.genelpara.com/json/?list=altin&sembol=GA,C,Q,Y"
+      currency: "https://api.genelpara.com/json/?list=doviz&sembol=USD,EUR,GBP"
+      "weather:istanbul": "https://api.open-meteo.com/v1/forecast?latitude=41.01&longitude=28.98&current=temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m&timezone=auto"
+      earthquake: "https://api.orhanaydogdu.com.tr/deprem/kandilli/live"
+      news: "https://news.google.com/rss?hl=tr&gl=TR&ceid=TR:tr"
+
+auth:
+  jwt_secret_key: "${JWT_SECRET_KEY}"      # 32+ chars, set via .env
+  access_token_expire_minutes: 1440
+  rate_limit:
+    enabled: true
+    requests_per_minute: 60
+
+background:
+  cron:
+    enabled: true
+  heartbeat:
+    enabled: false
+    interval_s: 1800
+  delegation:
+    model: "openrouter/google/gemini-3-flash-preview"

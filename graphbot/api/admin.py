@@ -1,4 +1,4 @@
-"""Admin API endpoints — server status, config, users, crons, skills, logs."""
+"""Admin API endpoints — server status, config, users, crons, skills, logs, context."""
 
 from __future__ import annotations
 
@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from graphbot import __version__
-from graphbot.api.deps import get_config, get_current_user, get_db
+from graphbot.agent.context import ContextService
+from graphbot.api.deps import get_config, get_context_service, get_current_user, get_db
 from graphbot.core.config.schema import Config
 from graphbot.memory.store import MemoryStore
 
@@ -17,6 +18,13 @@ class RoleUpdate(BaseModel):
     """Request body for role update."""
 
     role: str
+
+
+class LayerOverrideRequest(BaseModel):
+    """Request body for layer override."""
+
+    content: str | None = None
+    enabled: bool = True
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -101,7 +109,14 @@ async def admin_users(
     """List all users."""
     _require_owner(current_user, config)
     users = db.list_users()
-    return [dict(u) for u in users]
+    result = []
+    for u in users:
+        d = dict(u)
+        if "role" not in d:
+            user_data = db.get_user(d["user_id"])
+            d["role"] = (user_data or {}).get("role", "guest")
+        result.append(d)
+    return result
 
 
 @router.put("/users/{user_id}/role")
@@ -262,3 +277,153 @@ async def admin_logs(
             (limit,),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ── Context Inspection ─────────────────────────────────
+
+
+@router.get("/context/{profile}/layers")
+async def admin_context_layers(
+    profile: str,
+    user_id: str = Query(default=None),
+    role: str = Query(default=None),
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    ctx_service: ContextService = Depends(get_context_service),
+):
+    """Layer-by-layer context breakdown for an agent profile."""
+    _require_owner(current_user, config)
+    uid = user_id or config.owner_user_id or "default"
+
+    if profile == "planner":
+        layers = ctx_service.get_planner_context(user_id=uid)
+    elif profile == "light":
+        layers = ctx_service.get_light_context(user_id=uid)
+    else:
+        layers = ctx_service.get_layers(uid, profile=profile, role=role)
+
+    return {
+        "profile": profile,
+        "user_id": uid,
+        "layers": [lr.model_dump() for lr in layers.values()],
+        "total_chars": sum(lr.chars for lr in layers.values()),
+        "total_tokens": sum(lr.tokens for lr in layers.values()),
+    }
+
+
+@router.get("/context/{profile}/preview")
+async def admin_context_preview(
+    profile: str,
+    user_id: str = Query(default=None),
+    role: str = Query(default=None),
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    ctx_service: ContextService = Depends(get_context_service),
+):
+    """Full rendered context string for an agent profile."""
+    _require_owner(current_user, config)
+    uid = user_id or config.owner_user_id or "default"
+
+    if profile == "planner":
+        layers = ctx_service.get_planner_context(user_id=uid)
+        parts = [lr.content for lr in layers.values() if lr.enabled and lr.content]
+        content = "\n\n---\n\n".join(parts)
+    elif profile == "light":
+        layers = ctx_service.get_light_context(user_id=uid)
+        parts = [lr.content for lr in layers.values() if lr.enabled and lr.content]
+        content = "\n\n---\n\n".join(parts)
+    else:
+        content = ctx_service.preview(uid, profile=profile, role=role)
+    return {
+        "profile": profile,
+        "user_id": uid,
+        "content": content,
+        "chars": len(content),
+        "tokens": len(content) // 4,
+    }
+
+
+@router.put("/context/{profile}/layers/{layer}")
+async def admin_override_layer(
+    profile: str,
+    layer: str,
+    body: LayerOverrideRequest,
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    ctx_service: ContextService = Depends(get_context_service),
+):
+    """Override a layer's content at runtime (not persisted)."""
+    _require_owner(current_user, config)
+    ctx_service.set_override(profile, layer, content=body.content, enabled=body.enabled)
+    return {"status": "ok", "profile": profile, "layer": layer, "override": body.model_dump()}
+
+
+@router.delete("/context/{profile}/layers/{layer}")
+async def admin_clear_layer_override(
+    profile: str,
+    layer: str,
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    ctx_service: ContextService = Depends(get_context_service),
+):
+    """Clear a runtime layer override."""
+    _require_owner(current_user, config)
+    ctx_service.clear_override(profile, layer)
+    return {"status": "cleared", "profile": profile, "layer": layer}
+
+
+@router.get("/context/overrides")
+async def admin_list_overrides(
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    ctx_service: ContextService = Depends(get_context_service),
+):
+    """List all active runtime overrides."""
+    _require_owner(current_user, config)
+    result = {}
+    for p in ("main", "planner", "light"):
+        overrides = ctx_service.get_overrides(p)
+        if overrides:
+            result[p] = {
+                name: ov.model_dump() for name, ov in overrides.items()
+            }
+    return result
+
+
+@router.delete("/context/overrides")
+async def admin_clear_all_overrides(
+    profile: str = Query(default=None),
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    ctx_service: ContextService = Depends(get_context_service),
+):
+    """Clear all runtime overrides (optionally filtered by profile)."""
+    _require_owner(current_user, config)
+    ctx_service.clear_all_overrides(profile)
+    return {"status": "cleared", "profile": profile or "all"}
+
+
+# ── Profile Endpoints ──────────────────────────────────
+
+
+@router.get("/profiles")
+async def admin_profiles(
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    ctx_service: ContextService = Depends(get_context_service),
+):
+    """List all agent profiles."""
+    _require_owner(current_user, config)
+    return ctx_service.list_profiles()
+
+
+@router.get("/profiles/{name}")
+async def admin_profile_detail(
+    name: str,
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    ctx_service: ContextService = Depends(get_context_service),
+):
+    """Profile detail with AGENT.md content."""
+    _require_owner(current_user, config)
+    return ctx_service.get_profile_detail(name)

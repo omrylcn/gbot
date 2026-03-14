@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import Depends, Header, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from graphbot.agent.context import ContextService
 from graphbot.agent.runner import GraphRunner
 from graphbot.core.config.schema import Config
 from graphbot.memory.store import MemoryStore
@@ -25,6 +26,11 @@ def get_db(request: Request) -> MemoryStore:
 def get_runner(request: Request) -> GraphRunner:
     """Get GraphRunner singleton from app state."""
     return request.app.state.runner
+
+
+def get_context_service(request: Request) -> ContextService:
+    """Get ContextService singleton from app state."""
+    return request.app.state.context_service
 
 
 async def get_current_user(
