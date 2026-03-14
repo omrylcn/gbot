@@ -74,7 +74,11 @@ Entry point: `gbot` (alias: `graphbot`).
 | `gbot_cli/repl.py` | Interactive REPL — Rich banner, autocomplete, slash commands |
 | `gbot_cli/client.py` | GraphBotClient — sync httpx API wrapper |
 | `gbot_cli/slash_commands.py` | SlashCommandRouter — /help, /status, /session, ... |
-| `roles.yaml` | RBAC role definitions (role → groups, no tool names — resolved from ToolRegistry) |
+| `graphbot/agent/profiles.py` | Agent profiles — agents.yaml loader, AGENT.md/skills per agent type |
+| `graphbot/agent/tools/skill_tools.py` | load_skill tool — progressive disclosure |
+| `config/agents.yaml` | Agent profiles (which AGENT.md, skills per agent type) |
+| `config/roles.yaml` | RBAC role definitions (role → groups, no tool names — resolved from ToolRegistry) |
+| `config/config.yaml` | Main configuration (assistant, database, API, background, etc.) |
 | `mimari_kararlar.md` | 13 architectural decisions (detailed reasoning) |
 | `notes.md` | Kullanıcı şifreleri, WAHA kurulum adımları, WhatsApp credentials, memory tasarım notları |
 | `todo.md` | Phase progress tracking |
@@ -90,6 +94,7 @@ Entry point: `gbot` (alias: `graphbot`).
 - [x] Faz 16.5: RBAC — 3 roles, roles.yaml, 2-layer guard (264 tests)
 - [x] Faz 17: Session Summarization — hybrid LLM summary, fact extraction, preference tools (281 tests)
 - [x] Faz 18: Tool Registry — ToolRegistry class, auto group mapping, roles.yaml simplified, /admin/tools (283 tests)
+- [x] Faz 19: AGENT.md & Skills — config/ dir, agents.yaml profiles, prompt extraction, load_skill tool, progressive disclosure (334 tests)
 
 ## SQLite Tables (15)
 users, user_channels, sessions, messages, agent_memory, user_notes, activity_logs, favorites, preferences, cron_jobs, cron_execution_log, reminders, system_events, background_tasks, api_keys

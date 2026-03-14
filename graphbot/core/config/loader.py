@@ -36,8 +36,11 @@ def _resolve_path(config_path: str | Path | None = None) -> Path | None:
     if env:
         return Path(env)
 
-    default = Path("config.yaml")
-    return default if default.exists() else None
+    # Try config/ directory first, then root fallback
+    for candidate in (Path("config/config.yaml"), Path("config.yaml")):
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def _load_yaml(path: Path | None) -> dict[str, Any]:

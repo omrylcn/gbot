@@ -9,6 +9,7 @@ from langgraph.graph import StateGraph, START, END
 from loguru import logger
 
 from graphbot.agent.nodes import should_continue, _langchain_to_dict, _build_tool_definitions
+from graphbot.agent.profiles import get_agent_md
 from graphbot.agent.state import AgentState
 from graphbot.core.config.schema import Config
 from graphbot.core.providers import litellm as llm_provider
@@ -44,7 +45,12 @@ class LightAgent:
         model: str | None = None,
     ):
         self.config = config
-        self.prompt = prompt
+        # Prepend base context from profile if available
+        base = get_agent_md("light")
+        if base:
+            self.prompt = f"{base}\n\n{prompt}"
+        else:
+            self.prompt = prompt
         self.tools = tools or []
         self.model = model or config.assistant.model
         setup_provider(config)

@@ -1,0 +1,20 @@
+# GraphBot — Agent Profiles
+#
+# Each profile defines which AGENT.md and skills an agent type uses.
+# agent_md paths are relative to the project root.
+
+agents:
+  main:
+    agent_md: workspace/AGENT.md
+    skills: ["*"]           # all discovered skills
+
+  planner:
+    agent_md: workspace/agents/planner/AGENT.md
+    skills: []
+    template_vars:
+      - tool_catalog
+      - extra_examples
+
+  light:
+    agent_md: workspace/agents/light/AGENT.md
+    skills: []

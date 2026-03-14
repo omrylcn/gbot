@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+from graphbot.agent.profiles import get_agent_md, get_agent_skills
 from graphbot.agent.skills.loader import SkillLoader
 from graphbot.core.config.schema import Config
 from graphbot.memory.store import MemoryStore
@@ -25,9 +26,10 @@ class ContextBuilder:
       8. Skills index (all skills, name + description)
     """
 
-    def __init__(self, config: Config, db: MemoryStore):
+    def __init__(self, config: Config, db: MemoryStore, profile: str = "main"):
         self.config = config
         self.db = db
+        self.profile = profile
         self.skills = SkillLoader(
             workspace=config.workspace_path,
             builtin_dir=Path(__file__).parent / "skills" / "builtin",
@@ -124,25 +126,32 @@ class ContextBuilder:
 
         # 8. Active skills (always-on, full content)
         if _allowed("skills"):
-            always_on = self.skills.get_always_on()
-            if always_on:
-                skill_texts = [self.skills.load_content(s.name) for s in always_on]
-                active = "\n\n---\n\n".join(t for t in skill_texts if t)
-                if active:
-                    parts.append(
-                        self._truncate(
-                            f"# Active Skills\n\n{active}", priorities.skills
+            profile_skills = get_agent_skills(self.profile)
+            # Empty list = no skills for this profile
+            if profile_skills != []:
+                always_on = self.skills.get_always_on()
+                # Filter by profile if not wildcard
+                if profile_skills != ["*"] and profile_skills:
+                    allowed_names = set(profile_skills)
+                    always_on = [s for s in always_on if s.name in allowed_names]
+                if always_on:
+                    skill_texts = [self.skills.load_content(s.name) for s in always_on]
+                    active = "\n\n---\n\n".join(t for t in skill_texts if t)
+                    if active:
+                        parts.append(
+                            self._truncate(
+                                f"# Active Skills\n\n{active}", priorities.skills
+                            )
                         )
-                    )
 
-            # Skills index
-            index = self.skills.build_index()
-            if index:
-                parts.append(
-                    "# Available Skills\n\n"
-                    "Use read_file to load a skill's full instructions when needed.\n\n"
-                    + index
-                )
+                # Skills index
+                index = self.skills.build_index()
+                if index:
+                    parts.append(
+                        "# Available Skills\n\n"
+                        "Use load_skill(skill_name) to load detailed instructions when needed.\n\n"
+                        + index
+                    )
 
         return "\n\n---\n\n".join(parts)
 
@@ -151,7 +160,7 @@ class ContextBuilder:
     def _get_identity(self) -> str:
         """Get identity prompt.
 
-        Priority: prompt_template file > system_prompt > AGENT.md > persona config.
+        Priority: prompt_template > system_prompt > profile AGENT.md > workspace/AGENT.md > persona config.
         """
         # Priority 0: custom prompt template file
         template = self._load_template()
@@ -162,14 +171,19 @@ class ContextBuilder:
         if self.config.assistant.system_prompt:
             return self._apply_persona_suffix(self.config.assistant.system_prompt)
 
-        # Priority 2: workspace/AGENT.md
+        # Priority 2: profile AGENT.md (from agents.yaml)
+        profile_md = get_agent_md(self.profile)
+        if profile_md and profile_md.strip():
+            return self._apply_persona_suffix(profile_md.strip())
+
+        # Priority 3: workspace/AGENT.md (direct fallback)
         agent_md = self.config.workspace_path / "AGENT.md"
         if agent_md.exists():
             content = agent_md.read_text(encoding="utf-8").strip()
             if content:
                 return self._apply_persona_suffix(content)
 
-        # Priority 3: build from persona config
+        # Priority 4: build from persona config
         return self._build_persona_prompt()
 
     def _build_persona_prompt(self) -> str:

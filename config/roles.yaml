@@ -13,6 +13,7 @@ roles:
       - shell
       - messaging
       - delegation
+      - skills
     context_layers:
       - identity
       - runtime
@@ -31,6 +32,7 @@ roles:
       - web
       - messaging
       - delegation
+      - skills
     context_layers:
       - identity
       - runtime

@@ -6,6 +6,32 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.13.0] - 2026-03-14
+
+### Added (Faz 19: AGENT.md & Skills Gözden Geçirme)
+
+- **`config/` directory:** All YAML configs consolidated — `config.yaml`, `roles.yaml`, `agents.yaml` in single directory with backward-compatible fallback to root
+- **`config/agents.yaml`:** Agent profile system — each agent type (main, planner, light) defines which AGENT.md and skills to use
+- **`graphbot/agent/profiles.py`:** AgentProfile loader with global cache, `get_agent_md()`, `get_agent_skills()`, `get_template_vars()` (same pattern as permissions.py)
+- **`workspace/agents/planner/AGENT.md`:** Planner prompt extracted from Python to Markdown — template vars `{tool_catalog}` and `{extra_examples}` preserved
+- **`workspace/agents/light/AGENT.md`:** Base context for LightAgent — identity, language rules, background task guidelines
+- **`graphbot/agent/skills/builtin/scheduling/SKILL.md`:** Scheduling decision tree extracted from main AGENT.md — available via progressive disclosure
+- **`load_skill` tool:** Progressive disclosure — agent loads full skill instructions on demand instead of always-in-context
+- **`skills` tool group:** Added to ToolRegistry and roles.yaml (owner + member)
+- **11 profile tests:** Loading, fallback, cache, AGENT.md resolution, skill filtering
+
+### Changed
+
+- **`ContextBuilder`:** Profile-aware — accepts `profile` parameter, identity resolves from profile AGENT.md, skills filtered by profile config
+- **`ContextBuilder._get_identity()`:** 5-level priority chain: prompt_template > system_prompt > profile AGENT.md > workspace/AGENT.md > persona config
+- **`DelegationPlanner`:** Loads prompt from profile AGENT.md, falls back to `_PLANNER_PROMPT` constant
+- **`LightAgent`:** Prepends base context from profile before task prompt
+- **`workspace/AGENT.md`:** Scheduling section replaced with `load_skill("scheduling")` reference (83 → 41 lines, ~50% smaller)
+- **Skills index instruction:** `read_file` → `load_skill(skill_name)` for skill loading
+- **`docker-compose.yml`:** Single `./config:/app/config:ro` volume mount replaces two separate mounts
+- **`load_config()`:** Resolution order now checks `config/config.yaml` before `config.yaml`
+- **`_load_roles_yaml()`:** Resolution order now checks `config/roles.yaml` before `roles.yaml`
+
 ## [1.12.0] - 2026-02-28
 
 ### Added (LLM Provider Refactor — Strategy Pattern)

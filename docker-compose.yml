@@ -11,8 +11,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./workspace:/app/workspace
-      - ./config.yaml:/app/config.yaml:ro
-      - ./roles.yaml:/app/roles.yaml:ro
+      - ./config:/app/config:ro
     restart: unless-stopped
 
   waha:

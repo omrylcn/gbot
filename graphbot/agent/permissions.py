@@ -21,7 +21,10 @@ def _load_roles_yaml(path: str | Path | None = None) -> dict[str, Any]:
         return _ROLES_DATA
 
     if path is None:
-        path = Path("roles.yaml")
+        # Try config/ directory first, then root fallback
+        path = Path("config/roles.yaml")
+        if not path.exists():
+            path = Path("roles.yaml")
     else:
         path = Path(path)
 
