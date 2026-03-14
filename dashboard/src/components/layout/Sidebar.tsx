@@ -1,7 +1,7 @@
 import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard, MessageSquare, Layers, Users,
-  Wrench, Clock, Settings, Bot,
+  Wrench, Clock, Settings,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/auth";
 import { cn } from "@/lib/utils";
@@ -41,12 +41,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         )}
       >
         {/* Logo */}
-        <div className="flex items-center gap-3 px-5 py-5 border-b border-border">
-          <Bot className="w-8 h-8 text-primary" />
-          <div>
-            <h1 className="text-lg font-bold text-foreground">GBot</h1>
-            <span className="text-xs text-muted">Admin Dashboard</span>
-          </div>
+        <div className="flex items-center justify-center px-5 py-3 border-b border-border">
+          <img src="/logo.svg" alt="GBot" className="w-48 h-auto" />
         </div>
 
         {/* Navigation */}
