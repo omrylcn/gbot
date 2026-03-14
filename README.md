@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="gbot_logo.svg" alt="GBot Logo" width="400">
+  <img src="images/gbot_logo.svg" alt="GBot Logo" width="400">
 </p>
 
 # GBot
