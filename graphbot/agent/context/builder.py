@@ -41,6 +41,7 @@ class ContextBuilder:
         role: str | None = None,
         context_layers: set[str] | None = None,
         mark_delivered: bool = False,
+        template_vars: dict[str, str] | None = None,
     ) -> dict[str, LayerResult]:
         """Build each context layer individually.
 
@@ -67,11 +68,27 @@ class ContextBuilder:
         def _allowed(layer: str) -> bool:
             return context_layers is None or layer in context_layers
 
+        # Layer metadata: description and source
+        _LAYER_META: dict[str, tuple[str, str]] = {
+            "identity": ("Bot identity, persona and rules", "workspace/AGENT.md or persona config"),
+            "runtime": ("Current user, datetime, model info", "Config + datetime.now()"),
+            "role": ("RBAC role description (guest only)", "config/roles.yaml"),
+            "agent_memory": ("Long-term facts the bot remembers", "agent_memory table (SQLite)"),
+            "user_context": ("Notes, preferences, favorites", "user_notes + preferences + favorites (SQLite)"),
+            "events": ("Undelivered background notifications", "system_events table (SQLite)"),
+            "session_summary": ("Previous session LLM summary", "sessions table (SQLite)"),
+            "skills": ("Always-on skill content", "SKILL.md files (workspace + builtin)"),
+            "skills_index": ("Available skills for load_skill()", "SKILL.md files (workspace + builtin)"),
+        }
+
         def _add(name: str, content: str, budget: int = 0) -> None:
             truncated_content = self._truncate(content, budget) if budget else content
             was_truncated = len(truncated_content) < len(content)
+            desc, src = _LAYER_META.get(name, ("", ""))
             layers[name] = LayerResult(
                 name=name,
+                description=desc,
+                source=src,
                 content=truncated_content,
                 chars=len(truncated_content),
                 tokens=len(truncated_content) // 4,
@@ -80,9 +97,22 @@ class ContextBuilder:
                 enabled=True,
             )
 
+        def _add_empty(name: str) -> None:
+            desc, src = _LAYER_META.get(name, ("", ""))
+            layers[name] = LayerResult(
+                name=name, description=desc, source=src,
+                content="", chars=0, tokens=0,
+                budget=0, truncated=False, enabled=True,
+            )
+
         # 1. Identity
         if _allowed("identity"):
             identity = self._get_identity()
+            if identity and template_vars:
+                try:
+                    identity = identity.format(**template_vars)
+                except (KeyError, ValueError):
+                    pass  # template vars not found, use as-is
             if identity:
                 _add("identity", identity, priorities.identity)
 
@@ -104,18 +134,24 @@ class ContextBuilder:
             role_text = self._get_role(role)
             if role_text:
                 _add("role", f"# Current Role\n\n{role_text}")
+            else:
+                _add_empty("role")
 
         # 4. Agent memory
         if _allowed("agent_memory"):
             memory = self.db.read_memory("long_term")
             if memory:
                 _add("agent_memory", f"# Agent Memory\n\n{memory}", priorities.agent_memory)
+            else:
+                _add_empty("agent_memory")
 
         # 5. User context
         if _allowed("user_context"):
             user_ctx = self.db.get_user_context(user_id)
             if user_ctx:
                 _add("user_context", f"# User Context\n\n{user_ctx}", priorities.user_context)
+            else:
+                _add_empty("user_context")
 
         # 6. Undelivered events
         if _allowed("events"):
@@ -125,6 +161,8 @@ class ContextBuilder:
                 _add("events", "# Background Notifications\n\n" + "\n".join(lines))
                 if mark_delivered:
                     self.db.mark_events_delivered([e["id"] for e in events])
+            else:
+                _add_empty("events")
 
         # 7. Previous session summary
         if _allowed("session_summary"):
@@ -135,6 +173,8 @@ class ContextBuilder:
                     f"# Previous Conversation\n\n{summary}",
                     priorities.session_summary,
                 )
+            else:
+                _add_empty("session_summary")
 
         # 8. Skills
         if _allowed("skills"):

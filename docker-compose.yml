@@ -14,6 +14,16 @@ services:
       - ./config:/app/config:ro
     restart: unless-stopped
 
+  dashboard:
+    build: ./dashboard
+    container_name: gbot-dashboard
+    ports:
+      - "127.0.0.1:3001:80"
+    depends_on:
+      graphbot:
+        condition: service_started
+    restart: unless-stopped
+
   waha:
     image: devlikeapro/waha
     container_name: waha

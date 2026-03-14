@@ -6,7 +6,13 @@ from typing import Any
 
 from graphbot.agent.context.builder import ContextBuilder
 from graphbot.agent.context.models import ContextOverride, LayerResult
-from graphbot.agent.profiles import get_agent_md, get_agent_skills, get_profile
+from graphbot.agent.profiles import (
+    get_agent_md,
+    get_agent_skills,
+    get_profile,
+    get_profile_context_layers,
+    get_template_vars,
+)
 from graphbot.core.config.schema import Config
 from graphbot.memory.store import MemoryStore
 
@@ -20,9 +26,10 @@ class ContextService:
     - Full context preview
     """
 
-    def __init__(self, config: Config, db: MemoryStore) -> None:
+    def __init__(self, config: Config, db: MemoryStore, registry: Any = None) -> None:
         self.config = config
         self.db = db
+        self._registry = registry
         self._builders: dict[str, ContextBuilder] = {}
         self._overrides: dict[str, dict[str, ContextOverride]] = {}
 
@@ -41,10 +48,63 @@ class ContextService:
         role: str | None = None,
         context_layers: set[str] | None = None,
     ) -> dict[str, LayerResult]:
-        """Get layer-by-layer breakdown for main agent context."""
+        """Get layer-by-layer breakdown for main agent context.
+
+        Includes informational layers for message history and tool definitions
+        to show the complete LLM input picture.
+        """
         builder = self._get_builder(profile)
         layers = builder.build_layers(user_id, role, context_layers, mark_delivered=False)
-        return self._apply_overrides(profile, layers)
+        layers = self._apply_overrides(profile, layers)
+
+        # Informational: message history stats
+        active = self.db.get_active_session(user_id)
+        if active:
+            msgs = self.db.get_session_messages(active["session_id"])
+            msg_count = len(msgs)
+            msg_text = "\n".join(f"[{m['role']}] {(m.get('content') or '')[:80]}" for m in msgs[-10:])
+            if msg_count > 10:
+                msg_text = f"... ({msg_count - 10} earlier messages)\n{msg_text}"
+            layers["message_history"] = LayerResult(
+                name="message_history",
+                description=f"Session message history ({msg_count} messages)",
+                source=f"messages table — session {active['session_id'][:8]}...",
+                content=msg_text,
+                chars=sum(len(m.get("content") or "") for m in msgs),
+                tokens=sum(len(m.get("content") or "") for m in msgs) // 4,
+                budget=0, truncated=False, enabled=True,
+            )
+        else:
+            layers["message_history"] = LayerResult(
+                name="message_history",
+                description="Session message history (no active session)",
+                source="messages table (SQLite)",
+                content="", chars=0, tokens=0,
+                budget=0, truncated=False, enabled=True,
+            )
+
+        # Informational: tool definitions
+        if self._registry:
+            import json
+            from langchain_core.utils.function_calling import convert_to_openai_function
+            tools = self._registry.get_all_tools()
+            tool_defs = [
+                {"type": "function", "function": convert_to_openai_function(t)}
+                for t in tools
+            ]
+            tool_json = json.dumps(tool_defs, ensure_ascii=False)
+            tool_names = [t.name for t in tools]
+            layers["tool_definitions"] = LayerResult(
+                name="tool_definitions",
+                description=f"OpenAI function schemas ({len(tools)} tools)",
+                source="ToolRegistry — sent as 'tools' parameter",
+                content=", ".join(tool_names),
+                chars=len(tool_json),
+                tokens=len(tool_json) // 4,
+                budget=0, truncated=False, enabled=True,
+            )
+
+        return layers
 
     def preview(
         self,
@@ -60,42 +120,54 @@ class ContextService:
 
     # ── Planner Context ────────────────────────────────────
 
-    def get_planner_context(self, tool_catalog: str = "") -> dict[str, Any]:
-        """Inspect DelegationPlanner's context."""
-        from graphbot.agent.delegation import _PLANNER_PROMPT
+    def get_planner_context(
+        self, user_id: str | None = None, tool_catalog: str = ""
+    ) -> dict[str, LayerResult]:
+        """Build planner context via layer system.
 
-        template = get_agent_md("planner") or _PLANNER_PROMPT
-        rendered = template.format(
-            tool_catalog=tool_catalog or "[no catalog provided]",
-            extra_examples="",
-        )
-        return {
-            "profile": "planner",
-            "template_source": "agents.yaml" if get_agent_md("planner") else "builtin",
-            "template_vars": ["tool_catalog", "extra_examples"],
-            "rendered_length": len(rendered),
-            "rendered_tokens": len(rendered) // 4,
-            "content": rendered,
-        }
+        Uses context_layers from agents.yaml (default: identity only).
+        Template vars (tool_catalog, extra_examples) are injected into identity.
+        """
+        uid = user_id or self.config.owner_user_id or "default"
+        profile_layers = get_profile_context_layers("planner")
+        tvars = {"tool_catalog": tool_catalog or "[no catalog provided]", "extra_examples": ""}
+        builder = self._get_builder("planner")
+        layers = builder.build_layers(uid, context_layers=profile_layers, template_vars=tvars)
+        return self._apply_overrides("planner", layers)
 
     # ── Light Agent Context ────────────────────────────────
 
-    def get_light_context(self, task_prompt: str = "") -> dict[str, Any]:
-        """Inspect LightAgent's context composition."""
+    def get_light_context(
+        self, user_id: str | None = None, task_prompt: str = ""
+    ) -> dict[str, LayerResult]:
+        """Inspect LightAgent's context composition.
+
+        LightAgent is a special-purpose agent with its own context model:
+        AGENT.md (base identity) + task_prompt (injected at runtime).
+        Not built via layer system — shown as layers for Dashboard consistency.
+        """
         base = get_agent_md("light") or ""
-        if base and task_prompt:
-            full = f"{base}\n\n{task_prompt}"
-        else:
-            full = base or task_prompt
-        return {
-            "profile": "light",
-            "base_md": base,
-            "base_length": len(base),
-            "task_prompt": task_prompt,
-            "full_length": len(full),
-            "full_tokens": len(full) // 4,
-            "content": full,
-        }
+        layers: dict[str, LayerResult] = {}
+        layers["identity"] = LayerResult(
+            name="identity",
+            description="Light agent base identity",
+            source="workspace/agents/light/AGENT.md",
+            content=base,
+            chars=len(base),
+            tokens=len(base) // 4,
+            budget=0, truncated=False, enabled=True,
+        )
+        if task_prompt:
+            layers["task_prompt"] = LayerResult(
+                name="task_prompt",
+                description="Background task instructions",
+                source="DelegationPlanner or cron job",
+                content=task_prompt,
+                chars=len(task_prompt),
+                tokens=len(task_prompt) // 4,
+                budget=0, truncated=False, enabled=True,
+            )
+        return layers
 
     # ── Profile Listing ────────────────────────────────────
 

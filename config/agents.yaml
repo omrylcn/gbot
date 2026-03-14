@@ -1,16 +1,23 @@
 # GraphBot — Agent Profiles
 #
-# Each profile defines which AGENT.md and skills an agent type uses.
-# agent_md paths are relative to the project root.
+# Each profile defines which AGENT.md, skills, and context layers
+# an agent type uses. agent_md paths are relative to the project root.
+#
+# context_layers: which layers to include in the system prompt.
+#   Omit or set to ["*"] for all layers (default for main).
+#   Empty list [] means identity only.
 
 agents:
   main:
     agent_md: workspace/AGENT.md
     skills: ["*"]           # all discovered skills
+    context_layers: ["*"]   # all layers
 
   planner:
     agent_md: workspace/agents/planner/AGENT.md
     skills: []
+    context_layers:         # minimal — only identity with template vars
+      - identity
     template_vars:
       - tool_catalog
       - extra_examples
@@ -18,3 +25,5 @@ agents:
   light:
     agent_md: workspace/agents/light/AGENT.md
     skills: []
+    # No context_layers — LightAgent has its own context model
+    # (AGENT.md base + task_prompt injected at runtime)

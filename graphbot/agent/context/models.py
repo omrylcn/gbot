@@ -9,6 +9,8 @@ class LayerResult(BaseModel):
     """Result of building a single context layer."""
 
     name: str
+    description: str = ""
+    source: str = ""
     content: str
     chars: int
     tokens: int

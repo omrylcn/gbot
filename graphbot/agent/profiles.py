@@ -106,3 +106,18 @@ def get_template_vars(name: str, path: str | Path | None = None) -> list[str]:
     """
     profile = get_profile(name, path)
     return profile.get("template_vars", [])
+
+
+def get_profile_context_layers(name: str, path: str | Path | None = None) -> set[str] | None:
+    """Get allowed context layers for a profile.
+
+    Returns
+    -------
+    set[str] or None
+        Layer names to include. None means all layers (["*"] or omitted).
+    """
+    profile = get_profile(name, path)
+    layers = profile.get("context_layers", ["*"])
+    if layers == ["*"] or not layers:
+        return None
+    return set(layers)

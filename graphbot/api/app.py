@@ -134,7 +134,7 @@ async def lifespan(app: FastAPI):
     # Context service for inspection and management
     from graphbot.agent.context import ContextService
 
-    context_service = ContextService(config, db)
+    context_service = ContextService(config, db, registry=registry)
 
     # Startup validation: check roles.yaml groups against registry
     from graphbot.agent.permissions import _load_roles_yaml
@@ -191,13 +191,15 @@ def create_app() -> FastAPI:
     allowed_origins = [
         "https://gbot-assistant.cloud",
         "https://www.gbot-assistant.cloud",
-        # Add your frontend domains here if needed
+        "http://localhost:3001",       # Dashboard dev/docker
+        "http://127.0.0.1:3001",      # Dashboard docker
+        "http://localhost:3000",       # Dashboard vite dev
     ]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
     app.add_middleware(RateLimitMiddleware)

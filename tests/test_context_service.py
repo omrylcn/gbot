@@ -137,24 +137,26 @@ def test_service_preview(tmp_path):
 
 
 def test_service_planner_context(tmp_path):
-    """get_planner_context returns template info."""
+    """get_planner_context returns layer dict with identity."""
     config = _make_config(tmp_path)
     db = _make_db(tmp_path)
     svc = ContextService(config, db)
-    ctx = svc.get_planner_context(tool_catalog="test tools")
-    assert ctx["profile"] == "planner"
-    assert "test tools" in ctx["content"]
-    assert ctx["rendered_length"] > 0
+    layers = svc.get_planner_context(tool_catalog="test tools")
+    assert isinstance(layers, dict)
+    assert "identity" in layers
+    assert layers["identity"].chars > 0
 
 
 def test_service_light_context(tmp_path):
-    """get_light_context returns base + task info."""
+    """get_light_context returns layers with task_prompt."""
     config = _make_config(tmp_path)
     db = _make_db(tmp_path)
     svc = ContextService(config, db)
-    ctx = svc.get_light_context(task_prompt="Do something")
-    assert ctx["profile"] == "light"
-    assert "Do something" in ctx["content"]
+    layers = svc.get_light_context(task_prompt="Do something")
+    assert isinstance(layers, dict)
+    assert "identity" in layers
+    assert "task_prompt" in layers
+    assert "Do something" in layers["task_prompt"].content
 
 
 def test_service_override_replaces_content(tmp_path):

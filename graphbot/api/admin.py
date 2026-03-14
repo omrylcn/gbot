@@ -109,7 +109,14 @@ async def admin_users(
     """List all users."""
     _require_owner(current_user, config)
     users = db.list_users()
-    return [dict(u) for u in users]
+    result = []
+    for u in users:
+        d = dict(u)
+        if "role" not in d:
+            user_data = db.get_user(d["user_id"])
+            d["role"] = (user_data or {}).get("role", "guest")
+        result.append(d)
+    return result
 
 
 @router.put("/users/{user_id}/role")
@@ -289,11 +296,12 @@ async def admin_context_layers(
     uid = user_id or config.owner_user_id or "default"
 
     if profile == "planner":
-        return ctx_service.get_planner_context()
-    if profile == "light":
-        return ctx_service.get_light_context()
+        layers = ctx_service.get_planner_context(user_id=uid)
+    elif profile == "light":
+        layers = ctx_service.get_light_context(user_id=uid)
+    else:
+        layers = ctx_service.get_layers(uid, profile=profile, role=role)
 
-    layers = ctx_service.get_layers(uid, profile=profile, role=role)
     return {
         "profile": profile,
         "user_id": uid,
@@ -317,13 +325,15 @@ async def admin_context_preview(
     uid = user_id or config.owner_user_id or "default"
 
     if profile == "planner":
-        data = ctx_service.get_planner_context()
-        return {"profile": "planner", "content": data["content"], "tokens": data["rendered_tokens"]}
-    if profile == "light":
-        data = ctx_service.get_light_context()
-        return {"profile": "light", "content": data["content"], "tokens": data["full_tokens"]}
-
-    content = ctx_service.preview(uid, profile=profile, role=role)
+        layers = ctx_service.get_planner_context(user_id=uid)
+        parts = [lr.content for lr in layers.values() if lr.enabled and lr.content]
+        content = "\n\n---\n\n".join(parts)
+    elif profile == "light":
+        layers = ctx_service.get_light_context(user_id=uid)
+        parts = [lr.content for lr in layers.values() if lr.enabled and lr.content]
+        content = "\n\n---\n\n".join(parts)
+    else:
+        content = ctx_service.preview(uid, profile=profile, role=role)
     return {
         "profile": profile,
         "user_id": uid,
