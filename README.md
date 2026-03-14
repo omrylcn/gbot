@@ -1,12 +1,16 @@
-# GraphBot
+<p align="center">
+  <img src="gbot_logo.svg" alt="GBot Logo" width="400">
+</p>
+
+# GBot
 
 Extensible AI assistant framework built on LangGraph.
 
-Multi-channel support, long-term memory, background tasks, tool system, and an interactive CLI — all backed by SQLite as the single source of truth.
+Multi-channel support, long-term memory, background tasks, tool system, admin dashboard, and an interactive CLI — all backed by SQLite as the single source of truth.
 
 ## What is this project for?
 
-GraphBot is designed to help you build a **production-ready personal/team assistant** that can move beyond plain chat:
+GBot is designed to help you build a **production-ready personal/team assistant** that can move beyond plain chat:
 
 - Persist conversation state and user memory in a simple local database (SQLite)
 - Run tool-augmented workflows (files, shell, web, reminders, cron jobs, delegation)
@@ -30,8 +34,8 @@ uv sync --extra dev
 ### 2. Configure
 
 ```bash
-cp config.example.yaml config.yaml   # your local config (gitignored)
-cp .env.example .env                 # your API keys (gitignored)
+cp config/config.example.yaml config/config.yaml   # your local config (gitignored)
+cp .env.example .env                               # your API keys (gitignored)
 ```
 
 Edit `.env` — you need at least one LLM provider:
@@ -41,14 +45,14 @@ OPENROUTER_API_KEY=sk-or-...    # recommended (access to many models)
 # or: ANTHROPIC_API_KEY=sk-...
 ```
 
-Edit `config.yaml` — set your owner info and preferred model:
+Edit `config/config.yaml` — set your owner info and preferred model:
 ```yaml
 assistant:
-  name: "GraphBot"
+  name: "GBot"
   owner:
     username: "yourname"
     name: "Your Name"
-  model: "openrouter/google/gemini-2.5-flash"   # or openai/gpt-4o-mini, etc.
+  model: "openrouter/google/gemini-3-flash-preview"   # or openai/gpt-4o-mini, etc.
 ```
 
 ### 3. Run
@@ -64,9 +68,7 @@ That's it. The REPL connects to the API server automatically.
 
 ## Architecture
 
-![architecture](images/architecture.png)
-
-GraphBot deliberately separates the "thinking" from the "remembering." LangGraph handles the agent loop as a pure execution engine — no checkpoints, no internal state. All durable state lives in SQLite: sessions, memory, users, scheduled tasks, events. This means you can restart the server, swap models, or scale horizontally without losing anything.
+GBot deliberately separates the "thinking" from the "remembering." LangGraph handles the agent loop as a pure execution engine — no checkpoints, no internal state. All durable state lives in SQLite: sessions, memory, users, scheduled tasks, events. This means you can restart the server, swap models, or scale horizontally without losing anything.
 
 | Principle | Description |
 |-----------|-------------|
@@ -81,7 +83,7 @@ The agent graph has 4 nodes: `load_context` → `reason` ⇄ `execute_tools` →
 
 ## Features
 
-GraphBot isn't just a chatbot wrapper — it's a full operational platform. Here's what's built in and working:
+GBot isn't just a chatbot wrapper — it's a full operational platform. Here's what's built in and working:
 
 | Feature | Description |
 |---------|-------------|
@@ -90,12 +92,15 @@ GraphBot isn't just a chatbot wrapper — it's a full operational platform. Here
 | Long-term memory | Notes, preferences, favorites, activity logs in SQLite |
 | Session management | Token-limit based with automatic LLM summary on transition |
 | RBAC | 3 roles (owner/member/guest), roles.yaml, 2-layer guard |
-| 7 tool groups | Memory, search, filesystem, shell, web, messaging, delegation |
-| Skill system | Markdown-based, workspace override, always-on support |
+| 8 tool groups (23 tools) | Memory, search, filesystem, shell, web, messaging, delegation, skills |
+| Skill system | Markdown-based, progressive disclosure via `load_skill` tool |
+| Agent profiles | `agents.yaml` — per-profile AGENT.md, skills, context layers |
+| Context service | 10-layer system prompt with description/source metadata |
 | Background tasks | Cron scheduler, one-shot reminders, heartbeat, async subagents |
 | Delegation | LLM-based planner — immediate, delayed, recurring, monitor |
 | Interactive CLI | `gbot` — Rich REPL with slash commands and autocomplete |
-| Admin API | Server status, config, skills, tools, users, stats, cron, logs |
+| Admin API | Server status, config, skills, tools, users, stats, cron, context, logs |
+| Admin Dashboard | React web UI — context inspector, conversations, users, tools, crons |
 | RAG | Optional FAISS + sentence-transformers semantic search |
 | WebSocket | Real-time chat + event delivery |
 | Docker | Single-command deployment with docker-compose |
@@ -106,7 +111,7 @@ Most of these work together. For example, a user on Telegram can say "remind me 
 
 ## Usage
 
-GraphBot gives you three ways to interact: a CLI for quick operations, a REPL for interactive sessions, and a REST API for integration. They all talk to the same backend — pick whichever fits your workflow.
+GBot gives you four ways to interact: a CLI for quick operations, a REPL for interactive sessions, a REST API for integration, and an admin dashboard for monitoring. They all talk to the same backend — pick whichever fits your workflow.
 
 ### CLI Commands
 
@@ -190,12 +195,20 @@ Type `/` inside the REPL for autocomplete:
 | GET | `/admin/config` | Sanitized configuration |
 | GET | `/admin/skills` | Skill list |
 | GET | `/admin/tools` | Registered tools (ToolRegistry introspection) |
-| GET | `/admin/users` | User list |
+| GET | `/admin/users` | User list with roles |
 | PUT | `/admin/users/{user_id}/role` | Set user role |
 | GET | `/admin/crons` | Cron job list |
 | DELETE | `/admin/crons/{job_id}` | Delete cron job |
 | GET | `/admin/stats` | System stats (context, tools, sessions, data) |
 | GET | `/admin/logs` | Delegation logs |
+| GET | `/admin/context/{profile}/layers` | Context layers for profile (main/planner/light) |
+| GET | `/admin/context/{profile}/preview` | Full context preview for profile |
+| GET | `/admin/context/budget` | Token budget breakdown |
+| GET | `/admin/context/overrides` | Runtime layer overrides |
+| POST | `/admin/context/overrides` | Set runtime layer overrides |
+| DELETE | `/admin/context/overrides/{layer}` | Delete layer override |
+| GET | `/admin/context/profiles` | Agent profile list |
+| GET | `/admin/context/profiles/{name}` | Agent profile detail |
 
 ### Tool Usage (via Chat)
 
@@ -213,7 +226,7 @@ You don't call tools by name — just describe what you want. The LLM figures ou
 
 ## Configuration
 
-GraphBot uses a layered config system — you can set things in multiple places, and the most specific one wins:
+GBot uses a layered config system — you can set things in multiple places, and the most specific one wins:
 
 Priority order: `.env` > environment variables > `config.yaml` > defaults
 
@@ -224,11 +237,11 @@ GRAPHBOT_PROVIDERS__OPENAI__API_KEY=sk-...
 GRAPHBOT_BACKGROUND__CRON__ENABLED=true
 ```
 
-Full config reference: [`config.example.yaml`](./config.example.yaml)
+Full config reference: [`config/config.example.yaml`](./config/config.example.yaml)
 
 ### Authentication
 
-Authentication is optional — you can run GraphBot wide open for local development, or lock it down with JWT + API keys for production. A single config value controls the switch:
+Authentication is optional — you can run GBot wide open for local development, or lock it down with JWT + API keys for production. A single config value controls the switch:
 
 #### Auth Disabled (default)
 
@@ -377,7 +390,7 @@ auth:
 
 ### Tool System
 
-Tools are organized into 7 groups. By default all groups are enabled (`tools: ["*"]`), but RBAC can restrict which groups each role can access. The `ToolRegistry` resolves group names to actual tool functions automatically via `roles.yaml`:
+Tools are organized into 8 groups (23 tools total). By default all groups are enabled (`tools: ["*"]`), but RBAC can restrict which groups each role can access. The `ToolRegistry` resolves group names to actual tool functions automatically via `roles.yaml`:
 
 | Group | Tools | Description |
 |-------|-------|-------------|
@@ -388,12 +401,13 @@ Tools are organized into 7 groups. By default all groups are enabled (`tools: ["
 | Web | web_search, web_fetch | Brave Search + page fetch (2 tools) |
 | Messaging | send_message_to_user | Cross-channel message delivery (1 tool) |
 | Delegation | delegate, list_scheduled_tasks, cancel_scheduled_task | Background subagent spawn + task management (3 tools) |
+| Skills | load_skill | Progressive disclosure — load skill on demand (1 tool) |
 
 Cron jobs, reminders, and alerts are managed through the delegation system — the LLM-based planner decides the execution strategy (immediate, delayed, recurring, or monitor).
 
 ### Skill System
 
-Skills are like plugins written in plain Markdown — they get injected into the system prompt to give the agent specialized knowledge or behavior. Drop a `.md` file into `workspace/skills/` and it overrides built-in skills of the same name:
+Skills are Markdown plugins injected into the system prompt. Unlike always-loaded prompts, skills use **progressive disclosure** — the agent sees skill descriptions but loads full content on demand via the `load_skill` tool. Drop a `.md` file into `workspace/skills/` and it overrides built-in skills of the same name:
 
 ```markdown
 ---
@@ -408,12 +422,54 @@ metadata:
 ...instructions...
 ```
 
-- `always: true` → always included in system prompt
+- `always: true` → always included in system prompt (no `load_skill` needed)
+- `always: false` (default) → description shown, content loaded on demand
 - Requirements check: skill disabled if binary/env var is missing
+- Per-profile skill config via `agents.yaml`: `skills: ["*"]` (all) or `skills: []` (none)
+
+### Agent Profiles
+
+Agent profiles define per-agent-type configuration — which AGENT.md to use, which skills to enable, and which context layers to build. Profiles are defined in `config/agents.yaml`:
+
+```yaml
+agents:
+  main:
+    agent_md: workspace/AGENT.md
+    skills: ["*"]
+    context_layers: ["*"]      # all 10 layers
+  planner:
+    agent_md: workspace/agents/planner/AGENT.md
+    skills: []
+    context_layers: [identity]  # minimal context
+    template_vars: [tool_catalog, extra_examples]
+  light:
+    agent_md: workspace/agents/light/AGENT.md
+    skills: []
+    # No context_layers — LightAgent has its own context model
+```
+
+### Context Service
+
+The context service builds a layered system prompt for each agent profile. Each layer has metadata (description, source) for full traceability in the admin dashboard:
+
+| Layer | Description | Source |
+|-------|-------------|--------|
+| identity | Agent personality and instructions | AGENT.md |
+| runtime | Current time, model, session info | Runtime state |
+| role | RBAC role description and permissions | roles.yaml |
+| agent_memory | Long-term learned facts about users | agent_memory table |
+| user_context | User notes, preferences, favorites | user_notes/preferences/favorites tables |
+| events | Pending system events and notifications | system_events table |
+| session_summary | Summary from previous sessions | sessions table |
+| skills | Available skill descriptions | workspace/skills/ + builtins |
+| message_history | Active session messages (informational) | messages table |
+| tool_definitions | Tool schemas sent to LLM (informational) | ToolRegistry |
+
+Runtime overrides can enable/disable layers or inject custom content via the admin API.
 
 ### Background Services
 
-GraphBot can do things even when nobody is chatting. Five services run alongside the API server, each with a different responsibility:
+GBot can do things even when nobody is chatting. Five services run alongside the API server, each with a different responsibility:
 
 | Service | What it does |
 |---------|-------------|
@@ -524,7 +580,7 @@ Default role: `guest`. Set user role via `PUT /admin/users/{user_id}/role`.
 
 ### Delegation System
 
-This is where GraphBot gets interesting. Instead of hardcoding "reminder = delayed message" and "cron = scheduled job," there's an LLM-based planner (`DelegationPlanner`) that figures out the best execution strategy for any background request. You just describe what you want, and it picks the right combination:
+This is where GBot gets interesting. Instead of hardcoding "reminder = delayed message" and "cron = scheduled job," there's an LLM-based planner (`DelegationPlanner`) that figures out the best execution strategy for any background request. You just describe what you want, and it picks the right combination:
 
 | Execution | Description |
 |-----------|-------------|
@@ -554,15 +610,21 @@ User: "Check gold price every morning at 9, alert if above $2000"
 
 ## Docker
 
-The easiest way to deploy GraphBot in production. Everything — API server, WAHA (WhatsApp), volumes — is defined in a single compose file:
+The easiest way to deploy GBot in production. Everything — API server, dashboard, WAHA (WhatsApp), volumes — is defined in a single compose file:
 
 ```bash
-docker compose up -d         # start
+docker compose up -d         # start all services
 docker compose logs -f       # follow logs
 docker compose down          # stop
 ```
 
-Data is persisted in named volumes (`graphbot_data`, `graphbot_workspace`), so you can tear down and rebuild containers without losing anything. `config.yaml` is mounted read-only.
+| Service | Port | Description |
+|---------|------|-------------|
+| `graphbot` | 8000 | API server |
+| `dashboard` | 3001 | Admin dashboard (React + nginx) |
+| `waha` | 3000 | WhatsApp gateway (optional) |
+
+The dashboard is optional — it proxies API requests through nginx (`/api/` → graphbot:8000) and runs independently. Data is persisted in named volumes (`graphbot_data`, `graphbot_workspace`).
 
 ---
 
@@ -573,26 +635,30 @@ The codebase is split into two packages: `graphbot` (the core framework) and `gb
 ```
 graphbot/                          # Core framework
 ├── agent/
-│   ├── context.py                 # ContextBuilder (8-layer system prompt)
+│   ├── context/                   # Context service package
+│   │   ├── builder.py             # ContextBuilder (10-layer system prompt)
+│   │   ├── models.py              # LayerResult, ContextBudget models
+│   │   └── service.py             # ContextService facade (admin API)
 │   ├── graph.py                   # StateGraph compile
 │   ├── nodes.py                   # 4 nodes: load_context, reason, execute_tools, respond
 │   ├── runner.py                  # GraphRunner orchestrator
 │   ├── light.py                   # LightAgent (background tasks)
 │   ├── state.py                   # AgentState(MessagesState)
+│   ├── profiles.py                # Agent profiles (agents.yaml loader)
 │   ├── skills/                    # Skill loader + built-ins
 │   ├── delegation.py              # DelegationPlanner (LLM-based task routing)
 │   ├── permissions.py             # RBAC — roles.yaml loader, tool/context filtering
-│   └── tools/                     # 7 tool groups (ToolRegistry)
+│   └── tools/                     # 8 tool groups, 23 tools (ToolRegistry)
 ├── api/
 │   ├── app.py                     # FastAPI app + lifespan
 │   ├── routes.py                  # Chat, health, sessions, user endpoints
-│   ├── admin.py                   # Admin endpoints (owner-only)
+│   ├── admin.py                   # Admin endpoints (owner-only, 18 endpoints)
 │   ├── auth.py                    # JWT + API key auth
 │   ├── ws.py                      # WebSocket chat
 │   └── deps.py                    # Dependency injection
 ├── core/
 │   ├── config/                    # YAML + BaseSettings + .env
-│   ├── providers/                 # LiteLLM wrapper
+│   ├── providers/                 # LiteLLM + OpenRouter SDK
 │   ├── channels/                  # Telegram, WhatsApp (WAHA), base channel
 │   ├── cron/                      # APScheduler + types
 │   └── background/                # Heartbeat + subagent worker
@@ -608,6 +674,21 @@ gbot_cli/                          # CLI package (separate module)
 ├── repl.py                        # Interactive REPL
 ├── slash_commands.py              # Slash command router
 └── output.py                      # Rich formatters
+
+config/                            # Configuration files
+├── config.example.yaml            # Config template (committed)
+├── config.yaml                    # Local config (gitignored)
+├── agents.yaml                    # Agent profiles (main/planner/light)
+└── roles.yaml                     # RBAC role definitions
+
+dashboard/                         # Admin dashboard (React + Vite)
+├── src/
+│   ├── pages/                     # Dashboard, Context, Conversations, Users, Tools, Crons
+│   ├── components/                # Layout + shared components
+│   ├── api/                       # API client + admin/auth endpoints
+│   └── stores/                    # Zustand (auth, theme)
+├── Dockerfile                     # nginx:alpine production build
+└── nginx.conf                     # API proxy configuration
 ```
 
 ## SQLite Tables (15)
@@ -638,12 +719,15 @@ The `workspace/` directory is where you customize the bot's personality and capa
 
 ```
 workspace/
-├── AGENT.md              # Bot identity (system prompt)
+├── AGENT.md              # Main agent identity (system prompt)
+├── agents/
+│   ├── planner/AGENT.md  # Delegation planner identity
+│   └── light/AGENT.md    # Background agent identity
 ├── HEARTBEAT.md          # Heartbeat instructions (optional)
 └── skills/               # User skills (optional)
 ```
 
-`AGENT.md` is the most important file here — it defines who the bot is, how it talks, and what it knows. Think of it as the bot's personality config. If you also set `system_prompt` in `config.yaml`, that takes priority.
+Each agent profile (`config/agents.yaml`) points to its own `AGENT.md`. The main agent's is the most important — it defines who the bot is, how it talks, and what it knows. Planner and light agents have minimal, task-focused identities.
 
 ---
 
@@ -663,8 +747,9 @@ gbot run --reload                      # dev server with auto-reload
 | Component | Technology |
 |-----------|------------|
 | Agent | LangGraph StateGraph |
-| LLM | LiteLLM (multi-provider) |
+| LLM | LiteLLM + OpenRouter SDK (multi-provider) |
 | API | FastAPI + Uvicorn |
+| Dashboard | React 19 + TanStack Query + Zustand + Tailwind CSS 4 |
 | Memory | SQLite (WAL mode) |
 | Config | YAML + pydantic-settings + .env |
 | Background | APScheduler |
