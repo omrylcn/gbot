@@ -46,10 +46,10 @@ Incoming → Webhook Handler → runner.process() → Response → Channel Send
 
 ## Channel Pattern
 
-Her channel aynı pattern'i takip eder:
+Every channel follows the same pattern:
 
 ```python
-# 1. Router tanımı
+# 1. Router definition
 router = APIRouter(tags=["channel_name"])
 
 # 2. Webhook endpoint
@@ -65,7 +65,7 @@ async def send_message(config, chat_id, text):
     # Channel-specific delivery
 ```
 
-**Neden class yok:** Telegram'da class yok, WhatsApp'ta da yok. Route-based handler + düz fonksiyon yeterli. BaseChannel abstract class oluşturmak over-engineering.
+**Why no classes:** Telegram has no class, WhatsApp has no class. Route-based handler + plain function is sufficient. Creating a BaseChannel abstract class would be over-engineering.
 
 ---
 
@@ -82,7 +82,7 @@ channels:
 
 ### Identity
 
-Her kullanıcının kendi Telegram bot token'ı var:
+Each user has their own Telegram bot token:
 
 ```
 user_channels:
@@ -106,9 +106,9 @@ Telegram → POST /webhooks/telegram/{user_id}
 
 ### Message Formatting
 
-- Markdown → HTML dönüşümü (`md_to_html`)
+- Markdown → HTML conversion (`md_to_html`)
 - `**bold**` → `<b>`, `*italic*` → `<i>`, `` `code` `` → `<code>`
-- HTML parse hatası → plain text fallback
+- HTML parse error → plain text fallback
 
 ### Key Files
 
@@ -132,13 +132,13 @@ channels:
     respond_to_dm: false
     monitor_dm: false
     allowed_groups:
-      - "120363407143421687@g.us"  # gbot grubu
+      - "120363407143421687@g.us"  # gbot group
     allowed_dms: []  # empty = no DMs processed
 ```
 
 ### Identity
 
-Tek WAHA session, owner'ın telefonu bağlı:
+Single WAHA session, owner's phone connected:
 
 ```
 user_channels:
@@ -148,18 +148,18 @@ user_channels:
   metadata: {}
 ```
 
-### Telegram vs WhatsApp Farkı
+### Telegram vs WhatsApp
 
 ```
 TELEGRAM                          WHATSAPP (WAHA)
 ─────────                         ──────────────
-Her user kendi bot token'ı →      Tek telefon, tek WAHA →
+Each user has own bot token →     Single phone, single WAHA →
   self-service                      owner-managed
-Bot hesabı ayrı →                 Aynı telefon numarası →
-  kimlik belli                      [gbot] prefix gerekli
+Separate bot account →            Same phone number →
+  identity is clear                 [gbot] prefix required
 ```
 
-### Webhook Flow — Grup Mesajı
+### Webhook Flow — Group Message
 
 ```
 WAHA → POST /webhooks/whatsapp/{user_id}
@@ -203,28 +203,28 @@ POST /webhooks/whatsapp  (no user_id)
 
 ### DM Config Matrix
 
-| `respond_to_dm` | `monitor_dm` | `allowed_dms` | Davranış |
+| `respond_to_dm` | `monitor_dm` | `allowed_dms` | Behavior |
 |:---:|:---:|:---:|----------|
-| false | false | — | DM tamamen ignore (default) |
-| false | true | ["905..."] | Listedeki numaralardan gelen DM'ler session'a kaydedilir |
-| true | — | ["905..."] | Listedeki numaralardan gelen DM'lere `[gbot]` ile cevap verilir |
-| true | — | [] | Hiç DM'e cevap verilmez (allowed_dms boş) |
+| false | false | — | DMs completely ignored (default) |
+| false | true | ["905..."] | DMs from listed numbers are stored in session |
+| true | — | ["905..."] | DMs from listed numbers get `[gbot]` replies |
+| true | — | [] | No DMs answered (allowed_dms empty) |
 
-### `[gbot]` Prefix Kuralları (Mimari Karar #13)
+### `[gbot]` Prefix Rules (Architectural Decision #13)
 
-| Durum | Prefix | Neden |
-|-------|--------|-------|
-| Owner komutu "mesaj at" | Yok | Owner gönderiyor, bot araç |
-| Bot oto-cevap (grup/DM) | `[gbot]` | Bot konuşuyor, alıcı bilmeli |
-| Bot proaktif (reminder/cron) | `[gbot]` | Bot gönderiyor |
+| Scenario | Prefix | Reason |
+|----------|--------|--------|
+| Owner command "send message" | No | Owner is sending, bot is the tool |
+| Bot auto-reply (group/DM) | `[gbot]` | Bot is speaking, recipient should know |
+| Bot proactive (reminder/cron) | `[gbot]` | Bot is sending autonomously |
 
 **Loop prevention:** `fromMe=true` + `text.startswith("[gbot]")` → skip
 
-**Background messaging:** `make_messaging_tools(background=True)` ile oluşturulan tool'lar otomatik `[gbot]` prefix ekler. Interactive session'da prefix yok.
+**Background messaging:** Tools created with `make_messaging_tools(background=True)` automatically add `[gbot]` prefix. No prefix in interactive sessions.
 
 ### Message Splitting
 
-WhatsApp limiti 4096 karakter. Uzun mesajlar paragraph sınırlarından (`\n\n`) bölünür.
+WhatsApp limit is 4096 characters. Long messages are split at paragraph boundaries (`\n\n`).
 
 ### Key Files
 
@@ -237,7 +237,7 @@ WhatsApp limiti 4096 karakter. Uzun mesajlar paragraph sınırlarından (`\n\n`)
 
 ## Cross-Channel Messaging
 
-Channel injection mekanizması tool'lara otomatik channel geçer:
+Channel injection mechanism automatically passes channel to tools:
 
 ```python
 # nodes.py — execute_tools
@@ -250,15 +250,15 @@ if "channel" in tool_fields:
         args["channel"] = state["channel"]
 ```
 
-Bu sayede:
-- WhatsApp'tan "telegramdan hatırlat" → LLM `channel: "telegram"` verir → korunur
-- WhatsApp'tan "hatırlat" (channel belirtmeden) → `channel: "whatsapp"` inject edilir
+This means:
+- From WhatsApp: "remind me via telegram" → LLM sets `channel: "telegram"` → preserved
+- From WhatsApp: "remind me" (no channel specified) → `channel: "whatsapp"` injected
 
 ---
 
 ## Proactive Messaging (Scheduler)
 
-Cron/reminder tetiklendiğinde `_send_to_channel()`:
+When cron/reminder triggers, `_send_to_channel()`:
 
 ```python
 async def _send_to_channel(user_id, channel, text) -> bool:
@@ -275,27 +275,27 @@ async def _send_to_channel(user_id, channel, text) -> bool:
         ws_manager.send_event() or db.add_system_event()
 ```
 
-**Not:** WhatsApp proaktif mesajlarda `[gbot]` prefix eklenir, Telegram'da eklenmez (bot hesabı zaten ayrı).
+**Note:** WhatsApp proactive messages include `[gbot]` prefix; Telegram does not (bot account is already separate).
 
 ---
 
 ## `send_message_to_user` Tool
 
-Kullanıcılar arası mesajlaşma tool'u:
+Cross-user messaging tool:
 
 ```python
 send_message_to_user(target_user, message, channel="telegram")
 ```
 
 **Routing:**
-1. Kullanıcı bulunur (user_id veya name ile)
-2. Belirtilen channel'dan link aranır
-3. Link yoksa fallback: whatsapp → telegram
-4. Channel'a göre delivery
+1. User is resolved (by user_id or name)
+2. Channel link is looked up
+3. If no link found → fallback: whatsapp → telegram
+4. Deliver via channel
 
 **Background prefix:**
-- Interactive session → prefix yok (owner araç olarak kullanıyor)
-- Background/LightAgent → `[gbot]` prefix (bot otonom çalışıyor)
+- Interactive session → no prefix (owner is using bot as a tool)
+- Background/LightAgent → `[gbot]` prefix (bot is acting autonomously)
 
 ---
 
@@ -423,7 +423,7 @@ curl -X POST "http://localhost:8000/webhooks/whatsapp/owner" \
     "payload": {
       "from": "905551234567@c.us",
       "fromMe": false,
-      "body": "Test mesajı"
+      "body": "Test message"
     }
   }'
 ```

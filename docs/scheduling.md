@@ -1,119 +1,119 @@
 # Scheduling System — Reminders, Cron Jobs & Alerts
 
-> Versiyon: v1.14.0 | Son güncelleme: 2026-03-15
+> Version: v1.14.0 | Last updated: 2026-03-15
 
 ---
 
-## 1. Genel Bakis
+## 1. Overview
 
-GBot **3 zamanlama tool'u** sunar. Hepsi ayni altyapiyi kullanir (APScheduler) ama farkli kullanim senaryolari icindir:
+GBot provides **3 scheduling tools**. All use the same infrastructure (APScheduler) but serve different use cases:
 
-| Tool | Ne Zaman | Tekrar | Bildirim | Mod |
-|------|----------|--------|----------|-----|
-| `create_reminder` | X saniye sonra | Tek sefer | Her zaman | Static veya Agent |
-| `add_cron_job` | Cron expression | Tekrarli | Her zaman | Static veya Agent |
-| `create_alert` | Cron expression | Tekrarli | **Sadece kosul saglanirsa** | Sadece Agent |
+| Tool | When | Repeat | Notification | Mode |
+|------|------|--------|--------------|------|
+| `create_reminder` | X seconds later | One-time | Always | Static or Agent |
+| `add_cron_job` | Cron expression | Recurring | Always | Static or Agent |
+| `create_alert` | Cron expression | Recurring | **Only if condition met** | Agent only |
 
 ---
 
-## 2. Tool Detaylari
+## 2. Tool Details
 
-### 2.1 create_reminder — Tek Seferlik Hatirlatma
+### 2.1 create_reminder — One-Time Reminder
 
-**Kullanim:** "X dakika/saat sonra sunu yap"
+**Usage:** "Do X in N minutes/hours"
 
-**Iki modu var:**
+**Two modes:**
 
-**Static mod** — Mesaj olduğu gibi iletilir, LLM çağrılmaz:
+**Static mode** — Message is delivered as-is, no LLM call:
 ```
-Kullanici: "2 saat sonra toplanti var diye hatırlat"
-→ create_reminder(delay_seconds=7200, message="Toplantı hatırlatması!")
-→ 2 saat sonra → kullaniciya "Toplantı hatırlatması!" gider
+User: "Remind me about the meeting in 2 hours"
+→ create_reminder(delay_seconds=7200, message="Meeting reminder!")
+→ 2 hours later → user receives "Meeting reminder!"
 ```
 
-**Agent mod** — LightAgent calistirilir, tool kullanabilir:
+**Agent mode** — LightAgent runs, can use tools:
 ```
-Kullanici: "5 dk sonra Murat'a naber yaz"
+User: "Send 'hello' to Murat in 5 minutes"
 → create_reminder(
     delay_seconds=300,
-    message="Send 'naber' to Murat",
-    agent_prompt="Use send_message_to_user tool to send 'naber' to user Murat.",
+    message="Send 'hello' to Murat",
+    agent_prompt="Use send_message_to_user tool to send 'hello' to user Murat.",
     agent_tools=["send_message_to_user"]
   )
-→ 5 dk sonra → LightAgent → send_message_to_user("Murat", "naber")
+→ 5 min later → LightAgent → send_message_to_user("Murat", "hello")
 ```
 
-**Karar agaci:** `agent_prompt` varsa → Agent mod, yoksa → Static mod.
+**Decision logic:** If `agent_prompt` is set → Agent mode, otherwise → Static mode.
 
 ---
 
-### 2.2 add_cron_job — Tekrarli Gorev
+### 2.2 add_cron_job — Recurring Task
 
-**Kullanim:** "Her gun/saat/dakika sunu yap"
+**Usage:** "Do X every day/hour/minute"
 
-Cron expression kullanir (APScheduler CronTrigger):
+Uses cron expressions (APScheduler CronTrigger):
 ```
-*/10 * * * *     → Her 10 dakikada
-0 9 * * *        → Her gun saat 09:00
-0 9 * * 1-5      → Hafta ici her gun 09:00
-0 */2 * * *      → Her 2 saatte bir
+*/10 * * * *     → Every 10 minutes
+0 9 * * *        → Every day at 09:00
+0 9 * * 1-5      → Weekdays at 09:00
+0 */2 * * *      → Every 2 hours
 ```
 
-**Ornekler:**
+**Examples:**
 
 Static:
 ```
-Kullanici: "Her sabah 9'da 'gunaydin' de"
-→ add_cron_job(cron_expr="0 9 * * *", message="Günaydın!")
-→ Her gun 09:00 → "Günaydın!" gider
+User: "Say 'good morning' every day at 9"
+→ add_cron_job(cron_expr="0 9 * * *", message="Good morning!")
+→ Every day 09:00 → "Good morning!" is sent
 ```
 
 Agent:
 ```
-Kullanici: "Her 10 dk Murat'a selam yaz"
+User: "Send a greeting to Murat every 10 minutes"
 → add_cron_job(
     cron_expr="*/10 * * * *",
     message="Send greeting to Murat",
-    agent_prompt="Send 'selam' to user Murat using send_message_to_user tool.",
+    agent_prompt="Send 'hello' to user Murat using send_message_to_user tool.",
     agent_tools=["send_message_to_user"]
   )
-→ Her 10 dk → LightAgent → Murat'a "selam"
+→ Every 10 min → LightAgent → sends "hello" to Murat
 ```
 
 ---
 
-### 2.3 create_alert — Akilli Izleme
+### 2.3 create_alert — Smart Monitoring
 
-**Kullanim:** "Sunu izle, onemli bir sey olursa bildir"
+**Usage:** "Monitor X, notify me if something important happens"
 
-`create_alert` = `add_cron_job` + **NOTIFY/SKIP mekanizmasi**
+`create_alert` = `add_cron_job` + **NOTIFY/SKIP mechanism**
 
-Her tetiklemede LightAgent calisirir. Agent kontrol eder:
-- Kosul saglandi → Kullaniciya bildirim gider (NOTIFY)
-- Kosul saglanmadi → Sessizce gecilir ([SKIP])
+On each trigger, LightAgent runs and evaluates:
+- Condition met → User receives notification (NOTIFY)
+- Condition not met → Silently skipped ([SKIP])
 
 ```
-Kullanici: "Altin fiyati 7500'u gectiyse bildir, her 30dk kontrol et"
+User: "Check gold price every 30 min, notify if above 7500"
 → create_alert(
     cron_expr="*/30 * * * *",
-    check_message="web_fetch ile altin fiyatlarini kontrol et. Gram altin 7500 TL ustuyse bildir, degilse [SKIP] de."
+    check_message="Use web_fetch to check gold prices. If gram gold is above 7500 TL, notify. Otherwise respond with [SKIP]."
   )
-→ Her 30 dk → LightAgent:
-    1. web_fetch("gold") → fiyat verisini al
-    2. Fiyat < 7500 → "[SKIP]" → kullaniciya bildirim GITMEZ
-    3. Fiyat >= 7500 → "Gram altin 7523 TL!" → kullaniciya bildirim GIDER
+→ Every 30 min → LightAgent:
+    1. web_fetch("gold") → get price data
+    2. Price < 7500 → "[SKIP]" → NO notification sent
+    3. Price >= 7500 → "Gold is at 7523 TL!" → notification SENT
 ```
 
-**ONEMLI:** `check_message` bir **görev talimatidir**, sonuc mesaji degil!
-- Yanlis: `check_message="Altın 7500'ü geçti!"` (sonuc metni)
-- Dogru: `check_message="Altin fiyatini kontrol et, 7500'u gectiyse bildir"` (gorev talimati)
+**IMPORTANT:** `check_message` is a **task instruction**, not a result message!
+- Wrong: `check_message="Gold exceeded 7500!"` (result text)
+- Correct: `check_message="Check gold price, notify if above 7500"` (task instruction)
 
 ---
 
-## 3. Mimari — Nasil Calisiyor?
+## 3. Architecture — How It Works
 
 ```
-Kullanici mesaji
+User message
     │
     ▼
 MainAgent (GraphRunner)
@@ -123,98 +123,98 @@ MainAgent (GraphRunner)
     └─ create_alert()     ──→ APScheduler CronTrigger + NOTIFY/SKIP
                                     │
                                     ▼
-                              Tetikleme zamani
+                              Trigger time
                                     │
                     ┌───────────────┼───────────────┐
                     ▼               ▼               ▼
-              Static mod      Agent mod       Alert (Agent)
-              (mesaj gonder)  (LightAgent)   (LightAgent + SKIP)
+              Static mode      Agent mode       Alert (Agent)
+              (send message)   (LightAgent)    (LightAgent + SKIP)
                     │               │               │
                     ▼               ▼               ▼
-              Telegram/API    Tool calistir    Kosul kontrol
-                              → sonucu gonder  → SKIP veya bildir
+              Telegram/API    Run tools         Check condition
+                              → send result     → SKIP or notify
 ```
 
-### 3.1 Altyapi Bilesenleri
+### 3.1 Infrastructure Components
 
-| Bilesen | Dosya | Gorev |
-|---------|-------|-------|
-| CronScheduler | `gbot/core/cron/scheduler.py` | APScheduler yonetimi, job/reminder CRUD |
-| LightAgent | `gbot/agent/light.py` | Izole agent — kendi graph'i, kisitli tool seti |
-| Background Registry | `gbot/agent/tools/registry.py` | Agent modda kullanilabilecek tool'lar |
+| Component | File | Purpose |
+|-----------|------|---------|
+| CronScheduler | `gbot/core/cron/scheduler.py` | APScheduler management, job/reminder CRUD |
+| LightAgent | `gbot/agent/light.py` | Isolated agent — own graph, restricted tool set |
+| Background Registry | `gbot/agent/tools/registry.py` | Tools available in agent mode |
 | Tool: cron_tool.py | `gbot/agent/tools/cron_tool.py` | add_cron_job, list_cron_jobs, remove_cron_job, create_alert |
 | Tool: reminder.py | `gbot/agent/tools/reminder.py` | create_reminder, list_reminders, cancel_reminder |
 
-### 3.2 Veritabani Tablolari
+### 3.2 Database Tables
 
-**cron_jobs** — Tekrarli gorevler:
+**cron_jobs** — Recurring tasks:
 ```
 job_id, user_id, cron_expr, message, channel, enabled,
 agent_prompt, agent_tools, agent_model, notify_condition,
 consecutive_failures, created_at
 ```
 
-**reminders** — Tek seferlik hatirlatmalar:
+**reminders** — One-time reminders:
 ```
 reminder_id, user_id, channel, message, run_at, status,
 agent_prompt, agent_tools, cron_expr, created_at
 ```
 
-**cron_execution_log** — Her calisma kaydedilir:
+**cron_execution_log** — Every execution is logged:
 ```
 log_id, job_id, result, status (success/error/skipped), duration_ms, executed_at
 ```
 
-### 3.3 Hata Yonetimi
+### 3.3 Error Handling
 
-- **3 ardisik hata** → Job otomatik `paused` olur (`consecutive_failures >= 3`)
-- Basarili calisma → `consecutive_failures` sifirlanir
-- Execution log her calismada yazilir (basarili/basarisiz/skip)
-
----
-
-## 4. Agent Mod — Kullanilabilir Tool'lar
-
-Background agent (LightAgent) su tool'lara erisebilir:
-
-| Tool | Aciklama |
-|------|----------|
-| `send_message_to_user` | Baska kullaniciya mesaj gonder |
-| `web_search` | Web'de arama yap |
-| `web_fetch` | URL veya shortcut'tan veri cek (gold, weather, vb.) |
-| `save_memory` | Agent hafizasina kaydet |
-| `search_memory` | Agent hafizasinda ara |
-
-**Guvenlik:** `filesystem`, `shell`, `delegation`, `scheduling` gruplari background agent'ta **devre disi**dir.
+- **3 consecutive failures** → Job automatically set to `paused` (`consecutive_failures >= 3`)
+- Successful execution → `consecutive_failures` resets to zero
+- Execution log is written for every run (success/error/skip)
 
 ---
 
-## 5. Karar Agaci — Hangisini Kullanmaliyim?
+## 4. Agent Mode — Available Tools
+
+Background agent (LightAgent) can access these tools:
+
+| Tool | Description |
+|------|-------------|
+| `send_message_to_user` | Send a message to another user |
+| `web_search` | Search the web |
+| `web_fetch` | Fetch data from URL or shortcut (gold, weather, etc.) |
+| `save_memory` | Save to agent memory |
+| `search_memory` | Search agent memory |
+
+**Security:** `filesystem`, `shell`, `delegation`, and `scheduling` tool groups are **disabled** for background agents.
+
+---
+
+## 5. Decision Tree — Which Tool Should I Use?
 
 ```
-Kullanici ne istiyor?
+What does the user want?
     │
-    ├─ Tek seferlik?
+    ├─ One-time?
     │   └─ create_reminder
-    │       ├─ Basit hatirlatma → Static (agent_prompt=None)
-    │       └─ Islem gerekiyor → Agent (agent_prompt + agent_tools)
+    │       ├─ Simple reminder → Static (agent_prompt=None)
+    │       └─ Action needed → Agent (agent_prompt + agent_tools)
     │
-    └─ Tekrarli?
-        ├─ Her zaman bildir → add_cron_job
-        │   ├─ Basit mesaj → Static
-        │   └─ Islem gerekiyor → Agent
+    └─ Recurring?
+        ├─ Always notify → add_cron_job
+        │   ├─ Simple message → Static
+        │   └─ Action needed → Agent
         │
-        └─ Sadece kosullu bildir → create_alert
-            └─ check_message = gorev talimati
+        └─ Conditional notify → create_alert
+            └─ check_message = task instruction
 ```
 
 ---
 
-## 6. Bilinen Sinirlamalar
+## 6. Known Limitations
 
-| Sinir | Aciklama | Cozum |
-|-------|----------|-------|
-| Scheduler cache | Cron silindiginde APScheduler'dan silinmiyor | Container restart veya `reload()` (TODO) |
-| Timezone | Container timezone'u kullanilir (`TZ` env var, default: `Europe/Istanbul`) | docker-compose.yml'de `TZ` ayarlanir |
-| Min interval | APScheduler minimum ~1 saniye | Pratik limit: 1 dakika |
-| Tool erişimi | Background agent tum tool'lara erişemez | Guvenlik geregi kisitli |
+| Limitation | Description | Workaround |
+|------------|-------------|------------|
+| Scheduler cache | Deleted cron jobs not removed from APScheduler until restart | Container restart or `reload()` (TODO) |
+| Timezone | Uses container timezone (`TZ` env var, default: `Europe/Istanbul`) | Set `TZ` in docker-compose.yml |
+| Min interval | APScheduler minimum ~1 second | Practical limit: 1 minute |
+| Tool access | Background agent cannot access all tools | Restricted by design for security |
