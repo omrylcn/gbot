@@ -93,7 +93,7 @@ CREATE TABLE user_channels (
 **Example Flow:**
 ```bash
 # Link Telegram bot to user
-gbot user link zynp telegram 8515420556:AAFMMVeoPwNxYOaqvfFPXItqX1mYKsgAFqE
+gbot user link zynp telegram YOUR_TELEGRAM_BOT_TOKEN
 
 # Database insert
 INSERT INTO user_channels (user_id, channel, channel_user_id, metadata)
