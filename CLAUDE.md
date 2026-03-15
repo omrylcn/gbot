@@ -6,6 +6,7 @@ LangGraph-based AI assistant framework. Personal, observable, modular.
 ## DO / DON'T
 
 **DO:**
+- Read gbot-philosophy.md to learn core design philosophy, principles.
 - Communicate in Turkish with user, write code/docstrings in English
 - Use `uv` for everything: `uv sync`, `uv run pytest`, `uv run ruff`
 - Use `Config(BaseSettings)` from pydantic-settings (env_prefix="GBOT_", .env support)
