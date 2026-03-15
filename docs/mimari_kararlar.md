@@ -1,7 +1,7 @@
-# GraphBot - Mimari Kararlar
+# GBot - Mimari Kararlar
 
-> Son güncelleme: 2026-02-19
-> Bu dosya, graphbot projesinin mimari tartışmalarını ve alınan kararları takip eder.
+> Son güncelleme: 2026-03-14
+> Bu dosya, GBot projesinin mimari tartışmalarını ve alınan kararları takip eder.
 
 ---
 
@@ -1272,7 +1272,7 @@ Faz sıralaması iki prensibe göre belirlendi:
 
 ## 7. Sonuç
 
-Toplam **12 mimari karar** alındı:
+Toplam **16 mimari karar** alındı:
 
 | # | Karar | Özet |
 |---|-------|------|
@@ -1288,6 +1288,10 @@ Toplam **12 mimari karar** alındı:
 | 10 | Background Task Mimarisi & LightAgent | İzole, hafif, dinamik agent'lar — koşullu bildirim, model hiyerarşisi |
 | 11 | Auth & API Güvenliği | JWT + API key, geriye uyumlu (kapalı default), rate limiting |
 | 12 | RBAC (Role-Based Access Control) | 3 rol (owner/member/guest), tool grupları, context katman filtreleme |
+| 13 | WhatsApp `[gbot]` Prefix | Bot kimliği, loop prevention, 3 durum 2 davranış |
+| 14 | Agent Profilleri & Progressive Disclosure | agents.yaml, per-profile AGENT.md/skills/layers, load_skill tool |
+| 15 | Context Service & Layer Sistemi | 10-layer context, description/source metadata, ContextService facade |
+| 16 | Admin Dashboard | Ayrı React container, nginx API proxy, opsiyonel bileşen |
 
 ---
 
@@ -2026,13 +2030,13 @@ default_role: guest
 | Dosya | Değişiklik |
 |-------|-----------|
 | `roles.yaml` | **YENİ** — rol tanımları |
-| `graphbot/agent/permissions.py` | **YENİ** — YAML loader + tool/context check |
-| `graphbot/agent/state.py` | `role`, `allowed_tools`, `context_layers` alanları |
-| `graphbot/agent/runner.py` | Rol lookup, allowed_tools hesaplama, guest session |
-| `graphbot/agent/nodes.py` | reason() filtreleme, execute_tools() guard |
-| `graphbot/agent/context.py` | context_layers parametresi, katman filtreleme |
-| `graphbot/memory/store.py` | `set_user_role()` + migration user→member |
-| `graphbot/api/admin.py` | PUT /admin/users/{id}/role endpoint |
+| `gbot/agent/permissions.py` | **YENİ** — YAML loader + tool/context check |
+| `gbot/agent/state.py` | `role`, `allowed_tools`, `context_layers` alanları |
+| `gbot/agent/runner.py` | Rol lookup, allowed_tools hesaplama, guest session |
+| `gbot/agent/nodes.py` | reason() filtreleme, execute_tools() guard |
+| `gbot/agent/context.py` | context_layers parametresi, katman filtreleme |
+| `gbot/memory/store.py` | `set_user_role()` + migration user→member |
+| `gbot/api/admin.py` | PUT /admin/users/{id}/role endpoint |
 
 #### 12.8 Geriye Uyumluluk
 
@@ -2118,3 +2122,303 @@ WhatsApp: 0554... → Murat       (kim gönderdi: owner mı, bot mu? → [gbot] 
 Eğer her kullanıcı kendi telefonunu bağlarsa (WAHA multi-session), prefix kuralları aynen geçerli kalır — her kullanıcının kendi numarasından bot `[gbot]` prefix'i ile konuşur.
 
 **Neden bu tasarım:** Kullanıcı deneyimi. Alıcı, mesajın insan mı bot mu gönderdiğini anında ayırt edebilmeli. Aynı zamanda loop prevention için de kullanılıyor — tek mekanizma, iki fayda.
+
+---
+
+### Karar #14: Agent Profilleri & Progressive Disclosure
+
+**Tarih:** 2026-03-14
+**Bağlam:** Sistem 3 farklı agent türü kullanıyor (main, planner, light) ama hepsi farklı yerlerde hardcode edilmiş prompt ve config ile çalışıyor. AGENT.md sadece main agent için var, planner prompt'u Python string olarak `delegation.py` içinde, light agent'ın base context'i yok.
+
+#### 14.1 Problem
+
+1. **Prompt dağınıklığı:** Main agent'ın identity'si `workspace/AGENT.md`'de ama planner prompt'u `delegation.py`'de 50+ satır Python string. Değiştirmek için kod değişikliği gerekiyor.
+2. **Skill overload:** Main AGENT.md'de scheduling decision tree (42 satır) her konuşmada prompt'a yükleniyor — genellikle gereksiz token tüketimi.
+3. **Config dağınıklığı:** Hangi agent hangi AGENT.md'yi kullanıyor, hangi skill'lere erişebiliyor — bunlar kod içinde implicit.
+
+#### 14.2 Karar: agents.yaml + Progressive Disclosure
+
+**agents.yaml** — Her agent profili tek yerden yönetilir:
+
+```yaml
+agents:
+  main:
+    agent_md: workspace/AGENT.md
+    skills: ["*"]              # tüm skill'ler
+    context_layers: ["*"]      # tüm layer'lar
+  planner:
+    agent_md: workspace/agents/planner/AGENT.md
+    skills: []                 # skill yok
+    context_layers: [identity] # sadece identity layer
+    template_vars: [tool_catalog, extra_examples]
+  light:
+    agent_md: workspace/agents/light/AGENT.md
+    skills: []                 # skill yok
+    # context_layers yok — kendi context modeli var
+```
+
+**Progressive disclosure** — Skill'ler lazy load edilir:
+
+```
+Eski: Tüm skill içerikleri her zaman prompt'ta → ~2000 token overhead
+Yeni: Sadece skill adı + açıklaması gösterilir → agent ihtiyaç duyunca load_skill("scheduling") çağırır
+```
+
+AGENT.md 83 → 41 satıra düştü (%50 küçüldü).
+
+#### 14.3 Profil Loader
+
+`gbot/agent/profiles.py` — aynı pattern'i `permissions.py` gibi kullanır:
+
+```python
+_cache: dict[str, dict] = {}
+
+def get_profile(name: str, path=None) -> dict:
+    """agents.yaml'dan profil yükle, cache'le."""
+
+def get_agent_md(name: str, path=None) -> str:
+    """Profilin AGENT.md içeriğini oku."""
+
+def get_agent_skills(name: str, path=None) -> list[str] | None:
+    """Profilin skill listesi. ["*"] → None (tümü)."""
+
+def get_profile_context_layers(name: str, path=None) -> set[str] | None:
+    """Profilin context layer'ları. ["*"] → None (tümü)."""
+```
+
+#### 14.4 Template Vars (Planner)
+
+Planner AGENT.md'si `{tool_catalog}` ve `{extra_examples}` template değişkenlerini kullanır. Bu değişkenler runtime'da `build_layers(template_vars=...)` ile inject edilir:
+
+```markdown
+# workspace/agents/planner/AGENT.md
+...
+## Available Tools
+{tool_catalog}
+
+## Examples
+{extra_examples}
+```
+
+#### 14.5 `load_skill` Tool
+
+```python
+@tool
+def load_skill(skill_name: str) -> str:
+    """Load full skill instructions by name."""
+```
+
+Agent skill'in var olduğunu bilir (skills index'te adı + açıklaması var) ama içeriğini ancak `load_skill` çağırarak alır. Bu sayede:
+- Context window daha az dolu
+- Agent sadece gerçekten ihtiyaç duyduğu skill'i yükler
+- `always: true` olan skill'ler hala otomatik yüklenir
+
+#### 14.6 Workspace Yapısı
+
+```
+workspace/
+├── AGENT.md                    # Main agent identity
+├── agents/
+│   ├── planner/AGENT.md       # Planner identity + template vars
+│   └── light/AGENT.md         # Light agent base context
+├── skills/                     # User override skills
+└── HEARTBEAT.md               # Heartbeat instructions
+```
+
+**Neden bu karar:**
+- Tek yerden yönetim (agents.yaml) — hangi agent ne kullanıyor hemen görünür
+- Prompt'lar Markdown'da — kod değişikliği olmadan düzenlenebilir
+- Progressive disclosure — token tasarrufu, AGENT.md %50 küçüldü
+- Esneklik — yeni agent tipi eklemek = agents.yaml'a entry + AGENT.md yazmak
+
+---
+
+### Karar #15: Context Service & Layer Sistemi
+
+**Tarih:** 2026-03-14
+**Bağlam:** ContextBuilder 8 layer'lı system prompt oluşturuyor ama bu layer'lar opak — ne içeriyor, kaç token, nereden geliyor görmek mümkün değil. Ayrıca planner ve light agent'ın context'i tamamen ayrı yollarla build ediliyor — dashboard'da gösteremiyoruz.
+
+#### 15.1 Problem
+
+1. **Opak context:** LLM'e giden prompt 3000-6000 token ama "neden bu kadar?" sorusuna cevap yok. Hangi layer ne kadar yer kaplıyor bilinmiyor.
+2. **Debug zorluğu:** Bir kullanıcı neden yanlış cevap alıyor? Context'te ne var? Sunucuya SSH yapıp log okumak gerekiyor.
+3. **Tutarsız profil context'leri:** Main agent `build()` kullanıyor, planner raw string concat, light kendi modeli var — hepsini tek API'den göstermek imkansız.
+
+#### 15.2 Karar: LayerResult + ContextService + Unified Format
+
+**LayerResult** — Her layer'ın metadata'sı:
+
+```python
+class LayerResult(BaseModel):
+    name: str           # "identity", "runtime", "role", ...
+    description: str    # "Agent personality and instructions"
+    source: str         # "AGENT.md", "Runtime state", "roles.yaml"
+    content: str        # actual text
+    chars: int
+    tokens: int
+    budget: int         # max allowed tokens
+    truncated: bool     # budget aşıldıysa True
+    enabled: bool       # False ise devre dışı
+```
+
+**10 Layer** (8 gerçek + 2 bilgilendirme):
+
+| # | Layer | Açıklama | Kaynak |
+|---|-------|----------|--------|
+| 1 | identity | Agent kimliği ve talimatlar | AGENT.md |
+| 2 | runtime | Zaman, model, session bilgisi | Runtime state |
+| 3 | role | RBAC rol açıklaması | roles.yaml |
+| 4 | agent_memory | Uzun süreli öğrenilmiş bilgiler | agent_memory tablosu |
+| 5 | user_context | Notlar, tercihler, favoriler | user_notes/preferences/favorites |
+| 6 | events | Bekleyen sistem bildirimleri | system_events tablosu |
+| 7 | session_summary | Önceki session özetleri | sessions tablosu |
+| 8 | skills | Skill açıklamaları | workspace/skills/ + builtins |
+| 9 | message_history | Aktif session mesajları (bilgilendirme) | messages tablosu |
+| 10 | tool_definitions | LLM'e gönderilen tool şemaları (bilgilendirme) | ToolRegistry |
+
+Layer 9 ve 10 system prompt'a dahil edilmez — LLM zaten bunları ayrı parametrelerle alıyor (messages + tools). Ama dashboard'da "LLM toplam ne görüyor?" sorusuna cevap vermek için gösterilirler.
+
+#### 15.3 ContextService Facade
+
+```python
+class ContextService:
+    def __init__(self, config, db, registry=None):
+        self.builder = ContextBuilder(config, db)
+        self.registry = registry
+
+    def get_layers(self, user_id, ..., profile="main") -> dict[str, LayerResult]:
+        """Profil fark etmez — hep aynı format döner."""
+
+    def get_planner_context(self, user_id, ...) -> dict[str, LayerResult]:
+        """Planner'ın identity layer'ını template_vars ile render eder."""
+
+    def get_light_context(self, task_prompt) -> dict[str, LayerResult]:
+        """Light agent'ın identity + task_prompt'unu LayerResult olarak döner."""
+```
+
+Her profil `dict[str, LayerResult]` döner — dashboard tek format bekler.
+
+#### 15.4 Profile-Aware Layer Filtering
+
+agents.yaml'daki `context_layers` field'ı hangi layer'ların build edileceğini belirler:
+
+```
+main:    context_layers: ["*"]      → 10 layer hepsi
+planner: context_layers: [identity] → sadece identity
+light:   kendi modeli               → identity + task_prompt
+```
+
+#### 15.5 Runtime Overrides
+
+Admin API üzerinden layer'lar runtime'da değiştirilebilir:
+
+```
+POST /admin/context/overrides
+  {layer: "identity", content: "Test prompt", enabled: true}
+```
+
+Override aktifken o layer'ın normal build mantığı bypass edilir — debug ve test için kullanışlı.
+
+#### 15.6 Empty Layer Visibility
+
+Boş layer'lar (örn. yeni kullanıcı için agent_memory, events) `build_layers()`'da döner ama `build()`'da (final prompt) filtrelenir. Dashboard'da "bu layer boş" bilgisi görünür — "neden yok?" sorusuna cevap verir.
+
+**Neden bu karar:**
+- Tam görünürlük — her layer'ın ne içerdiği, kaç token, nereden geldiği belli
+- Debug kolaylığı — dashboard'dan context'i anında inceleyebilirsin
+- Unified format — 3 profil, tek API, tek dashboard sayfası
+- Runtime override — production'da prompt test etmek için sunucuya SSH gerekmez
+
+---
+
+### Karar #16: Admin Dashboard — Ayrı React Bileşeni
+
+**Tarih:** 2026-03-14
+**Bağlam:** Admin API endpoint'leri var ama bunları kullanmak için curl/httpie gerekiyor. Context layer'larını, konuşmaları, tool'ları görsel olarak incelemek mümkün değil.
+
+#### 16.1 Problem
+
+Admin bilgilerine erişmek CLI veya API çağrısı gerektiriyor. Özellikle:
+- Context layer'larını incelemek: `curl /admin/context/main/layers | jq` → JSON duvarı
+- Kullanıcı konuşmalarını okumak: Session ID bul → history al → JSON parse et
+- Tool listesini görmek: `curl /admin/tools | jq`
+
+Bunlar operasyonel görevler — görsel bir arayüz çok daha verimli.
+
+#### 16.2 Karar: Ayrı, Opsiyonel React Uygulaması
+
+Dashboard **agent API'den tamamen bağımsız** çalışır:
+
+```
+┌─────────────────┐     ┌──────────────┐     ┌────────────┐
+│   Dashboard      │────▶│    nginx     │────▶│  GBot API  │
+│   (React SPA)    │     │  /api/ proxy │     │   :8000    │
+│   :3001          │     │              │     │            │
+└─────────────────┘     └──────────────┘     └────────────┘
+```
+
+**Neden ayrı container:**
+- Agent API dashboard'a bağımlı değil — dashboard yoksa API çalışır
+- Frontend build süreci (node, npm) backend'i kirletmez
+- Farklı deploy stratejileri mümkün (dashboard sadece internal network'te)
+- nginx static dosyaları serve eder + API'ye proxy yapar → tek port
+
+#### 16.3 Teknik Stack
+
+| Teknoloji | Neden |
+|-----------|-------|
+| React 19 | Component-based, geniş ekosistem |
+| TanStack Query | Server state management, otomatik cache/refetch |
+| Zustand | Client state (auth, theme) — Redux'tan çok daha basit |
+| Tailwind CSS 4 | Utility-first, hızlı prototipleme |
+| Vite | Hızlı dev server, optimized production build |
+| Lucide | Consistent icon set |
+
+#### 16.4 Sayfalar
+
+| Sayfa | İçerik |
+|-------|--------|
+| Dashboard | Genel istatistikler (user, session, cron, tool sayıları) |
+| Context | Per-profile layer inspector — description, source, content, token/char stats |
+| Conversations | Session browser + message history — owner tüm kullanıcıları görür |
+| Users | Kullanıcı listesi, roller, kanal bağlantıları |
+| Tools | ToolRegistry introspection — grup, tool adı, durum |
+| Crons | Cron job listesi, execution log |
+| Settings | Sanitized config görüntüleme |
+
+#### 16.5 nginx Proxy
+
+```nginx
+location /api/ {
+    resolver 127.0.0.11 valid=30s;
+    set $backend graphbot;
+    rewrite ^/api/(.*) /$1 break;
+    proxy_pass http://$backend:8000;
+}
+```
+
+Docker Compose network'ünde `gbot` hostname'i ile API'ye ulaşır. `/api/` prefix'i strip edilir — frontend `fetch("/api/health")` çağırır, nginx `http://graphbot:8000/health`'e yönlendirir.
+
+#### 16.6 Auth Entegrasyonu
+
+Dashboard JWT auth kullanır — login sayfasından kullanıcı adı/şifre ile token alır, Zustand store'da saklar. Her API çağrısına `Authorization: Bearer <token>` header'ı eklenir.
+
+#### 16.7 docker-compose.yml
+
+```yaml
+dashboard:
+  build: ./dashboard
+  container_name: gbot-dashboard
+  ports:
+    - "127.0.0.1:3001:80"
+  depends_on:
+    graphbot:
+      condition: service_started
+  restart: unless-stopped
+```
+
+**Neden bu karar:**
+- Görsel arayüz operasyonel verimliliği artırır
+- Ayrı container → bağımsız, opsiyonel, agent API etkilenmez
+- nginx proxy → tek port, CORS sorunu yok
+- React + TanStack Query → modern, bakımı kolay, hızlı geliştirme

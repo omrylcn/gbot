@@ -13,10 +13,10 @@ test:
 	uv run pytest
 
 lint:
-	uv run ruff check graphbot/
+	uv run ruff check gbot/
 
 format:
-	uv run ruff format graphbot/
+	uv run ruff format gbot/
 
 run:
-	uv run uvicorn graphbot.api.app:app --reload --port 8000
+	uv run uvicorn gbot.api.app:app --reload --port 8000

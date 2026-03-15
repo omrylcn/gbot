@@ -1,13 +1,13 @@
-"""Tests for graphbot.api.admin (Faz 16)."""
+"""Tests for gbot.api.admin (Faz 16)."""
 
 from __future__ import annotations
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from graphbot.api.app import create_app
-from graphbot.core.config import Config
-from graphbot.memory.store import MemoryStore
+from gbot.api.app import create_app
+from gbot.core.config import Config
+from gbot.memory.store import MemoryStore
 
 
 @pytest.fixture
@@ -21,7 +21,7 @@ def app(tmp_path):
     db = MemoryStore(str(tmp_path / "test.db"))
     from unittest.mock import MagicMock
 
-    from graphbot.agent.runner import GraphRunner
+    from gbot.agent.runner import GraphRunner
 
     runner = MagicMock(spec=GraphRunner)
     application.state.config = config

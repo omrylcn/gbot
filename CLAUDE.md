@@ -26,7 +26,7 @@ LangGraph-based AI assistant framework. Combines nanobot (multi-channel agent) +
 - Use MessageBus — FastAPI handlers call GraphRunner directly
 - Use nanobot's custom Tool ABC — use LangGraph native (@tool, BaseTool)
 - Use markdown memory files — single SQLite layer
-- Use `src/graphbot/` layout — flat `graphbot/` + `gbot_cli/` at repo root
+- Use `src/gbot/` layout — flat `gbot/` + `gbot_cli/` at repo root
 - Over-engineer tests — minimum effort, cover CRUD
 
 ## Architecture (12 rules)
@@ -48,36 +48,36 @@ LangGraph-based AI assistant framework. Combines nanobot (multi-channel agent) +
 
 | Package | Role |
 |---------|------|
-| `graphbot/` | Core framework — agent, API, memory, config, channels, background |
+| `gbot/` | Core framework — agent, API, memory, config, channels, background |
 | `gbot_cli/` | CLI package — Typer commands, REPL, API client, Rich output |
 
-CLI imports from `graphbot` (config, store, runner, auth) but lives in its own package.
+CLI imports from `gbot` (config, store, runner, auth) but lives in its own package.
 Entry point: `gbot` (alias: `graphbot`).
 
 ## Key Files
 
 | File | What |
 |------|------|
-| `graphbot/core/config/schema.py` | Config(BaseSettings) + nested models |
-| `graphbot/core/config/loader.py` | YAML loader → Config(**data) |
-| `graphbot/memory/store.py` | MemoryStore — SQLite 15 tables, full CRUD |
-| `graphbot/memory/models.py` | Item, ItemCard, ChatRequest/Response |
-| `graphbot/agent/state.py` | AgentState(MessagesState) |
-| `graphbot/agent/nodes.py` | Graph node functions |
-| `graphbot/agent/graph.py` | StateGraph compile |
-| `graphbot/agent/context.py` | ContextBuilder (8 layers, RBAC-aware) |
-| `graphbot/agent/runner.py` | GraphRunner orchestrator |
-| `graphbot/agent/permissions.py` | RBAC — roles.yaml loader, tool/context filtering |
-| `graphbot/agent/light.py` | LightAgent — isolated background agent |
-| `graphbot/agent/delegation.py` | DelegationPlanner — LLM-based subagent planning |
-| `graphbot/core/providers/litellm.py` | LiteLLM → AIMessage wrapper |
-| `graphbot/api/admin.py` | Admin API endpoints (owner-only) |
+| `gbot/core/config/schema.py` | Config(BaseSettings) + nested models |
+| `gbot/core/config/loader.py` | YAML loader → Config(**data) |
+| `gbot/memory/store.py` | MemoryStore — SQLite 15 tables, full CRUD |
+| `gbot/memory/models.py` | Item, ItemCard, ChatRequest/Response |
+| `gbot/agent/state.py` | AgentState(MessagesState) |
+| `gbot/agent/nodes.py` | Graph node functions |
+| `gbot/agent/graph.py` | StateGraph compile |
+| `gbot/agent/context.py` | ContextBuilder (8 layers, RBAC-aware) |
+| `gbot/agent/runner.py` | GraphRunner orchestrator |
+| `gbot/agent/permissions.py` | RBAC — roles.yaml loader, tool/context filtering |
+| `gbot/agent/light.py` | LightAgent — isolated background agent |
+| `gbot/agent/delegation.py` | DelegationPlanner — LLM-based subagent planning |
+| `gbot/core/providers/litellm.py` | LiteLLM → AIMessage wrapper |
+| `gbot/api/admin.py` | Admin API endpoints (owner-only) |
 | `gbot_cli/commands.py` | Typer CLI (gbot run, chat, login, status, user, cron) |
 | `gbot_cli/repl.py` | Interactive REPL — Rich banner, autocomplete, slash commands |
 | `gbot_cli/client.py` | GraphBotClient — sync httpx API wrapper |
 | `gbot_cli/slash_commands.py` | SlashCommandRouter — /help, /status, /session, ... |
-| `graphbot/agent/profiles.py` | Agent profiles — agents.yaml loader, AGENT.md/skills per agent type |
-| `graphbot/agent/tools/skill_tools.py` | load_skill tool — progressive disclosure |
+| `gbot/agent/profiles.py` | Agent profiles — agents.yaml loader, AGENT.md/skills per agent type |
+| `gbot/agent/tools/skill_tools.py` | load_skill tool — progressive disclosure |
 | `config/agents.yaml` | Agent profiles (which AGENT.md, skills per agent type) |
 | `config/roles.yaml` | RBAC role definitions (role → groups, no tool names — resolved from ToolRegistry) |
 | `config/config.yaml` | Main configuration — gitignored, contains secrets |
@@ -108,10 +108,10 @@ users, user_channels, sessions, messages, agent_memory, user_notes, activity_log
 - **Private repo** (`origin`) → all branches (dev, feature/*)
 - **Public repo** (`public`) → only `main` + tags
 - Develop on `dev` → merge to `main` → `git push public main --tags`
-- Version: `graphbot/__version__.py` single source (hatch dynamic)
+- Version: `gbot/__version__.py` single source (hatch dynamic)
 
 ## Commands
 ```bash
 uv sync --extra dev && uv run pytest tests/ -v
-uv run ruff check graphbot/ gbot_cli/
+uv run ruff check gbot/ gbot_cli/
 ```

@@ -1,16 +1,16 @@
-"""Tests for graphbot.agent (Faz 2)."""
+"""Tests for gbot.agent (Faz 2)."""
 
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from graphbot.agent.context import ContextBuilder
-from graphbot.agent.graph import create_graph
-from graphbot.agent.nodes import should_continue
-from graphbot.agent.runner import GraphRunner
-from graphbot.core.config import Config
-from graphbot.memory.store import MemoryStore
+from gbot.agent.context import ContextBuilder
+from gbot.agent.graph import create_graph
+from gbot.agent.nodes import should_continue
+from gbot.agent.runner import GraphRunner
+from gbot.core.config import Config
+from gbot.memory.store import MemoryStore
 
 
 @pytest.fixture
@@ -128,7 +128,7 @@ async def test_runner_process(cfg, store):
         response_metadata={"usage": {"total_tokens": 100}},
     )
 
-    with patch("graphbot.agent.nodes.llm_provider.achat", new_callable=AsyncMock, return_value=ai_msg):
+    with patch("gbot.agent.nodes.llm_provider.achat", new_callable=AsyncMock, return_value=ai_msg):
         runner = GraphRunner(cfg, store)
         response, session_id = await runner.process("u1", "api", "selam")
 

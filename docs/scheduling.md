@@ -139,11 +139,11 @@ MainAgent (GraphRunner)
 
 | Bilesen | Dosya | Gorev |
 |---------|-------|-------|
-| CronScheduler | `graphbot/core/cron/scheduler.py` | APScheduler yonetimi, job/reminder CRUD |
-| LightAgent | `graphbot/agent/light.py` | Izole agent — kendi graph'i, kisitli tool seti |
-| Background Registry | `graphbot/agent/tools/registry.py` | Agent modda kullanilabilecek tool'lar |
-| Tool: cron_tool.py | `graphbot/agent/tools/cron_tool.py` | add_cron_job, list_cron_jobs, remove_cron_job, create_alert |
-| Tool: reminder.py | `graphbot/agent/tools/reminder.py` | create_reminder, list_reminders, cancel_reminder |
+| CronScheduler | `gbot/core/cron/scheduler.py` | APScheduler yonetimi, job/reminder CRUD |
+| LightAgent | `gbot/agent/light.py` | Izole agent — kendi graph'i, kisitli tool seti |
+| Background Registry | `gbot/agent/tools/registry.py` | Agent modda kullanilabilecek tool'lar |
+| Tool: cron_tool.py | `gbot/agent/tools/cron_tool.py` | add_cron_job, list_cron_jobs, remove_cron_job, create_alert |
+| Tool: reminder.py | `gbot/agent/tools/reminder.py` | create_reminder, list_reminders, cancel_reminder |
 
 ### 3.2 Veritabani Tablolari
 

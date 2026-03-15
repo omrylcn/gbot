@@ -1,11 +1,11 @@
 """Tests for ContextBuilder.build_layers() and ContextService."""
 
 import pytest
-import graphbot.agent.profiles as profiles_mod
+import gbot.agent.profiles as profiles_mod
 
-from graphbot.agent.context import ContextBuilder, ContextService, LayerResult
-from graphbot.core.config.schema import Config
-from graphbot.memory.store import MemoryStore
+from gbot.agent.context import ContextBuilder, ContextService, LayerResult
+from gbot.core.config.schema import Config
+from gbot.memory.store import MemoryStore
 
 
 @pytest.fixture(autouse=True)

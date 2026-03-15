@@ -7,11 +7,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from graphbot.api.ws import ConnectionManager
-from graphbot.core.background.worker import SubagentWorker
-from graphbot.core.config import Config
-from graphbot.core.cron.scheduler import CronScheduler
-from graphbot.memory.store import MemoryStore
+from gbot.api.ws import ConnectionManager
+from gbot.core.background.worker import SubagentWorker
+from gbot.core.config import Config
+from gbot.core.cron.scheduler import CronScheduler
+from gbot.memory.store import MemoryStore
 
 
 @pytest.fixture
@@ -155,7 +155,7 @@ async def test_worker_ws_push(store, cfg, manager):
     worker = SubagentWorker(cfg, db=store)
     worker.ws_manager = manager
 
-    with patch("graphbot.agent.light.LightAgent") as MockAgent:
+    with patch("gbot.agent.light.LightAgent") as MockAgent:
         mock_agent = AsyncMock()
         mock_agent.run = AsyncMock(return_value=("Research done", 100))
         MockAgent.return_value = mock_agent
@@ -178,7 +178,7 @@ async def test_worker_no_ws_fallback(store, cfg):
     """Worker without WS manager -> event stays undelivered in DB."""
     worker = SubagentWorker(cfg, db=store)
 
-    with patch("graphbot.agent.light.LightAgent") as MockAgent:
+    with patch("gbot.agent.light.LightAgent") as MockAgent:
         mock_agent = AsyncMock()
         mock_agent.run = AsyncMock(return_value=("Research done", 100))
         MockAgent.return_value = mock_agent

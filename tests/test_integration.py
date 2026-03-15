@@ -8,8 +8,8 @@ import httpx
 import pytest
 from typer.testing import CliRunner
 
-from graphbot import __version__
-from graphbot.memory.store import MemoryStore
+from gbot import __version__
+from gbot.memory.store import MemoryStore
 
 pytestmark = pytest.mark.integration
 
@@ -459,7 +459,7 @@ async def test_api_background_task_events(api_client):
 
 
 def test_cli_help(cli_runner):
-    """graphbot --help → shows all commands."""
+    """gbot --help → shows all commands."""
     from gbot_cli.commands import app
 
     result = cli_runner.invoke(app, ["--help"])
@@ -471,7 +471,7 @@ def test_cli_help(cli_runner):
 
 
 def test_cli_status(cli_runner):
-    """graphbot status → shows version, model, DB path."""
+    """gbot status → shows version, model, DB path."""
     from gbot_cli.commands import app
 
     result = cli_runner.invoke(app, ["status"])
@@ -503,7 +503,7 @@ def test_cli_user_add_list_remove(cli_runner):
 
 
 def test_cli_cron_list(cli_runner):
-    """graphbot cron list → no error."""
+    """gbot cron list → no error."""
     from gbot_cli.commands import app
 
     result = cli_runner.invoke(app, ["cron", "list"])
@@ -511,7 +511,7 @@ def test_cli_cron_list(cli_runner):
 
 
 def test_cli_chat_message(cli_runner):
-    """graphbot chat -m 'merhaba' → LLM response."""
+    """gbot chat -m 'merhaba' → LLM response."""
     from gbot_cli.commands import app
 
     result = cli_runner.invoke(app, ["chat", "--local", "-m", "Say hi in one word."])

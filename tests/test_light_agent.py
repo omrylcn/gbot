@@ -7,12 +7,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from graphbot.core.config import Config
-from graphbot.core.cron.scheduler import CronScheduler, _should_skip
-from graphbot.core.cron.types import CronJob
-from graphbot.core.background.worker import SubagentWorker
-from graphbot.memory.store import MemoryStore
-from graphbot.agent.context import ContextBuilder
+from gbot.core.config import Config
+from gbot.core.cron.scheduler import CronScheduler, _should_skip
+from gbot.core.cron.types import CronJob
+from gbot.core.background.worker import SubagentWorker
+from gbot.memory.store import MemoryStore
+from gbot.agent.context import ContextBuilder
 
 
 @pytest.fixture
@@ -158,13 +158,13 @@ def test_reminder_crud(store):
 @pytest.mark.asyncio
 async def test_light_agent_run(cfg):
     """LightAgent runs with mock LLM and returns response."""
-    from graphbot.agent.light import LightAgent
+    from gbot.agent.light import LightAgent
     from langchain_core.messages import AIMessage
 
     mock_response = AIMessage(content="Gold is $1950, all normal. [SKIP]")
 
-    with patch("graphbot.core.providers.litellm.achat", return_value=mock_response):
-        with patch("graphbot.core.providers.litellm.setup_provider"):
+    with patch("gbot.core.providers.litellm.achat", return_value=mock_response):
+        with patch("gbot.core.providers.litellm.setup_provider"):
             agent = LightAgent(config=cfg, prompt="You are a monitor.")
             response, tokens = await agent.run("Check gold price")
 
@@ -174,13 +174,13 @@ async def test_light_agent_run(cfg):
 @pytest.mark.asyncio
 async def test_light_agent_isolated(cfg):
     """LightAgent uses its own tools, not the main agent's."""
-    from graphbot.agent.light import LightAgent
+    from gbot.agent.light import LightAgent
     from langchain_core.messages import AIMessage
 
     mock_response = AIMessage(content="Done")
 
-    with patch("graphbot.core.providers.litellm.achat", return_value=mock_response):
-        with patch("graphbot.core.providers.litellm.setup_provider"):
+    with patch("gbot.core.providers.litellm.achat", return_value=mock_response):
+        with patch("gbot.core.providers.litellm.setup_provider"):
             agent = LightAgent(config=cfg, prompt="Test", tools=[])
             assert agent.tools == []
             response, _ = await agent.run("test")
@@ -200,8 +200,8 @@ async def test_cron_job_with_agent_config(store, mock_runner, cfg):
         message="check gold", agent_prompt="You are a monitor.",
     )
 
-    with patch("graphbot.core.providers.litellm.achat", return_value=mock_response):
-        with patch("graphbot.core.providers.litellm.setup_provider"):
+    with patch("gbot.core.providers.litellm.achat", return_value=mock_response):
+        with patch("gbot.core.providers.litellm.setup_provider"):
             with patch.object(sched, "_send_to_channel", new_callable=AsyncMock):
                 await sched._execute_job(job)
 
@@ -227,7 +227,7 @@ async def test_background_task_persistence(store, cfg):
     """Worker saves result to DB + creates system_event."""
     worker = SubagentWorker(cfg, db=store)
 
-    with patch("graphbot.agent.light.LightAgent") as MockAgent:
+    with patch("gbot.agent.light.LightAgent") as MockAgent:
         mock_agent = AsyncMock()
         mock_agent.run = AsyncMock(return_value=("Done", 100))
         MockAgent.return_value = mock_agent
@@ -248,7 +248,7 @@ async def test_background_task_persistence(store, cfg):
 
 def test_create_alert_tool(store, mock_runner):
     """create_alert tool creates a cron job with notify_skip config."""
-    from graphbot.agent.tools.cron_tool import make_cron_tools
+    from gbot.agent.tools.cron_tool import make_cron_tools
 
     sched = CronScheduler(store, mock_runner)
     with patch.object(sched, "_scheduler"):
@@ -274,7 +274,7 @@ def test_create_alert_tool(store, mock_runner):
 
 def test_create_alert_custom_tools(store, mock_runner):
     """create_alert with explicit agent_tools stores them correctly."""
-    from graphbot.agent.tools.cron_tool import make_cron_tools
+    from gbot.agent.tools.cron_tool import make_cron_tools
 
     sched = CronScheduler(store, mock_runner)
     with patch.object(sched, "_scheduler"):

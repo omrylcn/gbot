@@ -10,7 +10,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added (Faz 20: Context Service, Admin Dashboard & API)
 
-- **`graphbot/agent/context/` package:** Restructured from single file to package — `models.py`, `builder.py`, `service.py` with backward-compatible `__init__.py` re-exports
+- **`gbot/agent/context/` package:** Restructured from single file to package — `models.py`, `builder.py`, `service.py` with backward-compatible `__init__.py` re-exports
 - **`LayerResult` Pydantic model:** Per-layer inspection with name, description, source, content, chars, tokens, budget, truncated, enabled fields
 - **`ContextOverride` Pydantic model:** Runtime layer override definition (content + enabled)
 - **`ContextBuilder.build_layers()`:** Returns `dict[str, LayerResult]` — layer-by-layer breakdown with content. `mark_delivered` parameter controls event side-effects. `template_vars` parameter for planner identity injection
@@ -59,10 +59,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **`config/` directory:** All YAML configs consolidated — `config.yaml`, `roles.yaml`, `agents.yaml` in single directory with backward-compatible fallback to root
 - **`config/agents.yaml`:** Agent profile system — each agent type (main, planner, light) defines which AGENT.md and skills to use
-- **`graphbot/agent/profiles.py`:** AgentProfile loader with global cache, `get_agent_md()`, `get_agent_skills()`, `get_template_vars()` (same pattern as permissions.py)
+- **`gbot/agent/profiles.py`:** AgentProfile loader with global cache, `get_agent_md()`, `get_agent_skills()`, `get_template_vars()` (same pattern as permissions.py)
 - **`workspace/agents/planner/AGENT.md`:** Planner prompt extracted from Python to Markdown — template vars `{tool_catalog}` and `{extra_examples}` preserved
 - **`workspace/agents/light/AGENT.md`:** Base context for LightAgent — identity, language rules, background task guidelines
-- **`graphbot/agent/skills/builtin/scheduling/SKILL.md`:** Scheduling decision tree extracted from main AGENT.md — available via progressive disclosure
+- **`gbot/agent/skills/builtin/scheduling/SKILL.md`:** Scheduling decision tree extracted from main AGENT.md — available via progressive disclosure
 - **`load_skill` tool:** Progressive disclosure — agent loads full skill instructions on demand instead of always-in-context
 - **`skills` tool group:** Added to ToolRegistry and roles.yaml (owner + member)
 - **11 profile tests:** Loading, fallback, cache, AGENT.md resolution, skill filtering
@@ -239,9 +239,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added (CLI Enhancement — API Client + Rich REPL)
 
 - **`gbot` CLI entry point:** Terminal command renamed `graphbot` → `gbot` (`graphbot` kept as alias)
-- **`gbot_cli/` package:** CLI code moved from `graphbot/cli/` to a separate `gbot_cli/` package
+- **`gbot_cli/` package:** CLI code moved from `gbot/cli/` to a separate `gbot_cli/` package
 - **GraphBotClient:** Sync httpx wrapper for all API endpoints (health, chat, login, sessions, user, admin)
-- **Credentials:** Token storage at `~/.graphbot/credentials.json` with `chmod 0600`
+- **Credentials:** Token storage at `~/.gbot/credentials.json` with `chmod 0600`
 - **Interactive REPL:** Rich-rendered chat shell with robot logo, markdown output, spinner, auto session management
 - **Slash command autocomplete:** Real-time `/` completion via `prompt_toolkit`
 - **Slash commands:** `/help`, `/status`, `/session`, `/history`, `/context`, `/config`, `/skill`, `/cron`, `/user`, `/events`, `/clear`, `/exit`
@@ -256,7 +256,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **`chat` command reworked:** Defaults to API-backed REPL mode; `--local` flag preserves standalone mode; `--server`, `--token`, `--api-key` flags for connection config; `-m` for single-shot API calls
 - **`app.py`:** Admin router registered
-- **`graphbot/cli/` removed:** All CLI code moved to `gbot_cli/` package, old directory deleted
+- **`gbot/cli/` removed:** All CLI code moved to `gbot_cli/` package, old directory deleted
 
 ## [1.5.0] - 2026-02-15
 

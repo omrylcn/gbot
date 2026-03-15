@@ -2,16 +2,16 @@
 
 import pytest
 
-from graphbot.agent.context import ContextBuilder
-from graphbot.agent.profiles import reset_cache as reset_profiles_cache
-from graphbot.core.config.schema import Config
-from graphbot.memory.store import MemoryStore
+from gbot.agent.context import ContextBuilder
+from gbot.agent.profiles import reset_cache as reset_profiles_cache
+from gbot.core.config.schema import Config
+from gbot.memory.store import MemoryStore
 
 
 @pytest.fixture(autouse=True)
 def isolate_profiles_cache(monkeypatch):
     """Prevent tests from loading the real agents.yaml."""
-    import graphbot.agent.profiles as profiles_mod
+    import gbot.agent.profiles as profiles_mod
     reset_profiles_cache()
     # Pre-populate cache with empty data so it won't read from CWD
     monkeypatch.setattr(profiles_mod, "_PROFILES_DATA", {})

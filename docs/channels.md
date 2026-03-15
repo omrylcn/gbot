@@ -114,7 +114,7 @@ Telegram → POST /webhooks/telegram/{user_id}
 
 | File | Function |
 |------|----------|
-| `graphbot/core/channels/telegram.py` | `telegram_webhook()`, `send_message()`, `md_to_html()` |
+| `gbot/core/channels/telegram.py` | `telegram_webhook()`, `send_message()`, `md_to_html()` |
 
 ---
 
@@ -230,8 +230,8 @@ WhatsApp limiti 4096 karakter. Uzun mesajlar paragraph sınırlarından (`\n\n`)
 
 | File | Function |
 |------|----------|
-| `graphbot/core/channels/whatsapp.py` | `whatsapp_webhook()`, `whatsapp_webhook_global()`, `send_whatsapp_message()`, `split_message()` |
-| `graphbot/core/channels/waha_client.py` | `WAHAClient` — `send_text()`, `phone_to_chat_id()`, `chat_id_to_phone()` |
+| `gbot/core/channels/whatsapp.py` | `whatsapp_webhook()`, `whatsapp_webhook_global()`, `send_whatsapp_message()`, `split_message()` |
+| `gbot/core/channels/waha_client.py` | `WAHAClient` — `send_text()`, `phone_to_chat_id()`, `chat_id_to_phone()` |
 
 ---
 

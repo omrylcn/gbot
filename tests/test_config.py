@@ -1,14 +1,14 @@
-"""Tests for graphbot.core.config."""
+"""Tests for gbot.core.config."""
 
 import yaml
-from graphbot.core.config import Config, load_config
+from gbot.core.config import Config, load_config
 
 
 def test_defaults():
     cfg = Config()
     assert cfg.assistant.name == "GraphBot"
     assert cfg.assistant.session_token_limit == 30_000
-    assert cfg.database.path == "data/graphbot.db"
+    assert cfg.database.path == "data/gbot.db"
     assert cfg.rag is None
 
 

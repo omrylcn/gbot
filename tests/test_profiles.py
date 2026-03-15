@@ -3,7 +3,7 @@
 import pytest
 import yaml
 
-from graphbot.agent.profiles import (
+from gbot.agent.profiles import (
     get_agent_md,
     get_agent_skills,
     get_profile,

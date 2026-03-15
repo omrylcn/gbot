@@ -1,4 +1,4 @@
-"""Tests for graphbot.api (Faz 4)."""
+"""Tests for gbot.api (Faz 4)."""
 
 from unittest.mock import AsyncMock, patch
 
@@ -6,9 +6,9 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from langchain_core.messages import AIMessage
 
-from graphbot.api.app import create_app
-from graphbot.core.config import Config
-from graphbot.memory.store import MemoryStore
+from gbot.api.app import create_app
+from gbot.core.config import Config
+from gbot.memory.store import MemoryStore
 
 
 @pytest.fixture
@@ -24,13 +24,13 @@ def app(tmp_path):
     application = create_app()
     # Override lifespan state manually
     db = MemoryStore(str(tmp_path / "test.db"))
-    from graphbot.agent.runner import GraphRunner
+    from gbot.agent.runner import GraphRunner
 
     ai_msg = AIMessage(
         content="Test response",
         response_metadata={"usage": {"total_tokens": 50}},
     )
-    with patch("graphbot.agent.nodes.llm_provider.achat", new_callable=AsyncMock, return_value=ai_msg):
+    with patch("gbot.agent.nodes.llm_provider.achat", new_callable=AsyncMock, return_value=ai_msg):
         runner = GraphRunner(config, db)
 
     application.state.config = config
@@ -98,7 +98,7 @@ async def test_chat(client):
         content="Merhaba!",
         response_metadata={"usage": {"total_tokens": 50}},
     )
-    with patch("graphbot.agent.nodes.llm_provider.achat", new_callable=AsyncMock, return_value=ai_msg):
+    with patch("gbot.agent.nodes.llm_provider.achat", new_callable=AsyncMock, return_value=ai_msg):
         resp = await client.post(
             "/chat", json={"user_id": "u1", "message": "selam"}
         )
@@ -115,7 +115,7 @@ async def test_chat_with_session(client):
         content="Reply",
         response_metadata={"usage": {"total_tokens": 50}},
     )
-    with patch("graphbot.agent.nodes.llm_provider.achat", new_callable=AsyncMock, return_value=ai_msg):
+    with patch("gbot.agent.nodes.llm_provider.achat", new_callable=AsyncMock, return_value=ai_msg):
         # First message — get session_id
         resp1 = await client.post("/chat", json={"user_id": "u1", "message": "hi"})
         sid = resp1.json()["session_id"]
@@ -132,7 +132,7 @@ async def test_chat_with_session(client):
 @pytest.mark.asyncio
 async def test_sessions_list(client):
     ai_msg = AIMessage(content="ok", response_metadata={"usage": {"total_tokens": 10}})
-    with patch("graphbot.agent.nodes.llm_provider.achat", new_callable=AsyncMock, return_value=ai_msg):
+    with patch("gbot.agent.nodes.llm_provider.achat", new_callable=AsyncMock, return_value=ai_msg):
         await client.post("/chat", json={"user_id": "u1", "message": "hi"})
 
     resp = await client.get("/sessions/u1")
@@ -144,7 +144,7 @@ async def test_sessions_list(client):
 @pytest.mark.asyncio
 async def test_session_history(client):
     ai_msg = AIMessage(content="ok", response_metadata={"usage": {"total_tokens": 10}})
-    with patch("graphbot.agent.nodes.llm_provider.achat", new_callable=AsyncMock, return_value=ai_msg):
+    with patch("gbot.agent.nodes.llm_provider.achat", new_callable=AsyncMock, return_value=ai_msg):
         resp = await client.post("/chat", json={"user_id": "u1", "message": "hi"})
     sid = resp.json()["session_id"]
 
@@ -156,7 +156,7 @@ async def test_session_history(client):
 @pytest.mark.asyncio
 async def test_session_end(client):
     ai_msg = AIMessage(content="ok", response_metadata={"usage": {"total_tokens": 10}})
-    with patch("graphbot.agent.nodes.llm_provider.achat", new_callable=AsyncMock, return_value=ai_msg):
+    with patch("gbot.agent.nodes.llm_provider.achat", new_callable=AsyncMock, return_value=ai_msg):
         resp = await client.post("/chat", json={"user_id": "u1", "message": "hi"})
     sid = resp.json()["session_id"]
 

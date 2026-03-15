@@ -7,13 +7,13 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from graphbot.core.channels.base import (
+from gbot.core.channels.base import (
     check_allowlist,
     resolve_or_create_user,
 )
-from graphbot.core.channels.telegram import md_to_html
-from graphbot.core.config import Config
-from graphbot.memory.store import MemoryStore
+from gbot.core.channels.telegram import md_to_html
+from gbot.core.config import Config
+from gbot.memory.store import MemoryStore
 
 
 @pytest.fixture
@@ -126,7 +126,7 @@ def telegram_update():
 @pytest.mark.asyncio
 async def test_telegram_webhook(telegram_update, tmp_path):
     """Valid update → runner.process called, response sent."""
-    from graphbot.api.app import create_app
+    from gbot.api.app import create_app
 
     app = create_app()
 
@@ -145,7 +145,7 @@ async def test_telegram_webhook(telegram_update, tmp_path):
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        with patch("graphbot.core.channels.telegram.send_message", new_callable=AsyncMock):
+        with patch("gbot.core.channels.telegram.send_message", new_callable=AsyncMock):
             resp = await client.post("/webhooks/telegram/testuser", json=telegram_update)
 
     assert resp.status_code == 200
@@ -159,7 +159,7 @@ async def test_telegram_webhook(telegram_update, tmp_path):
 @pytest.mark.asyncio
 async def test_telegram_webhook_unknown_user(telegram_update, tmp_path):
     """Unknown user_id in path → 404."""
-    from graphbot.api.app import create_app
+    from gbot.api.app import create_app
 
     app = create_app()
 
@@ -179,7 +179,7 @@ async def test_telegram_webhook_unknown_user(telegram_update, tmp_path):
 @pytest.mark.asyncio
 async def test_telegram_non_message_update(tmp_path):
     """Update without message → 200 OK, no processing."""
-    from graphbot.api.app import create_app
+    from gbot.api.app import create_app
 
     app = create_app()
     app.state.config = Config()
@@ -203,7 +203,7 @@ async def test_telegram_non_message_update(tmp_path):
 @pytest.mark.asyncio
 async def test_stub_endpoints(tmp_path):
     """Discord, Feishu stubs return 501."""
-    from graphbot.api.app import create_app
+    from gbot.api.app import create_app
 
     app = create_app()
     app.state.config = Config()

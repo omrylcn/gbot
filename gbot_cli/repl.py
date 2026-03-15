@@ -9,7 +9,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 
-from graphbot import __version__
+from gbot import __version__
 from gbot_cli.client import APIError, GraphBotClient
 from gbot_cli.slash_commands import SlashCommandRouter
 

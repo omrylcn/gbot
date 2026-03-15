@@ -5,14 +5,14 @@ from unittest.mock import MagicMock
 import pytest
 import yaml
 
-from graphbot.agent.permissions import (
+from gbot.agent.permissions import (
     get_allowed_tools,
     get_context_layers,
     get_default_role,
     get_max_sessions,
     reset_cache,
 )
-from graphbot.agent.tools import ToolRegistry
+from gbot.agent.tools import ToolRegistry
 
 
 @pytest.fixture(autouse=True)

@@ -216,11 +216,11 @@ Bu maliyet, 30k token'lik bir session icin ihmal edilebilir duzeydedir.
 
 | Dosya | Rol |
 |-------|-----|
-| `graphbot/core/providers/litellm.py` | `asummarize()`, `aextract_facts()` |
-| `graphbot/agent/runner.py` | `_rotate_session()`, `_save_extracted_facts()`, `_prepare_summary_messages()` |
-| `graphbot/agent/tools/memory_tools.py` | Preference tool'lari (set/get/remove) |
-| `graphbot/agent/context.py` | ContextBuilder — summary ve user_context enjeksiyonu |
-| `graphbot/memory/store.py` | DB CRUD — `update_preferences()`, `add_note()`, `remove_preference()` |
+| `gbot/core/providers/litellm.py` | `asummarize()`, `aextract_facts()` |
+| `gbot/agent/runner.py` | `_rotate_session()`, `_save_extracted_facts()`, `_prepare_summary_messages()` |
+| `gbot/agent/tools/memory_tools.py` | Preference tool'lari (set/get/remove) |
+| `gbot/agent/context.py` | ContextBuilder — summary ve user_context enjeksiyonu |
+| `gbot/memory/store.py` | DB CRUD — `update_preferences()`, `add_note()`, `remove_preference()` |
 | `roles.yaml` | Tool grubu: memory (preference tool'lari dahil) |
 
 ---

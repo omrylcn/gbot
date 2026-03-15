@@ -7,11 +7,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from langchain_core.messages import AIMessage
 
-from graphbot.agent.context import ContextBuilder
-from graphbot.agent.runner import GraphRunner
-from graphbot.agent.tools.memory_tools import make_memory_tools
-from graphbot.core.config import Config
-from graphbot.memory.store import MemoryStore
+from gbot.agent.context import ContextBuilder
+from gbot.agent.runner import GraphRunner
+from gbot.agent.tools.memory_tools import make_memory_tools
+from gbot.core.config import Config
+from gbot.memory.store import MemoryStore
 
 
 @pytest.fixture
@@ -61,11 +61,11 @@ async def test_rotate_session_calls_asummarize(cfg, store):
     runner.config = cfg
 
     with patch(
-        "graphbot.agent.runner.asummarize",
+        "gbot.agent.runner.asummarize",
         new_callable=AsyncMock,
         return_value="User asked about Python.",
     ) as mock_sum, patch(
-        "graphbot.agent.runner.aextract_facts",
+        "gbot.agent.runner.aextract_facts",
         new_callable=AsyncMock,
         return_value={},
     ):
@@ -93,11 +93,11 @@ async def test_rotate_session_fallback_on_failure(cfg, store):
     runner.config = cfg
 
     with patch(
-        "graphbot.agent.runner.asummarize",
+        "gbot.agent.runner.asummarize",
         new_callable=AsyncMock,
         return_value="",
     ), patch(
-        "graphbot.agent.runner.aextract_facts",
+        "gbot.agent.runner.aextract_facts",
         new_callable=AsyncMock,
         return_value={},
     ):
@@ -119,10 +119,10 @@ async def test_rotate_session_no_messages(cfg, store):
     runner.config = cfg
 
     with patch(
-        "graphbot.agent.runner.asummarize",
+        "gbot.agent.runner.asummarize",
         new_callable=AsyncMock,
     ) as mock_sum, patch(
-        "graphbot.agent.runner.aextract_facts",
+        "gbot.agent.runner.aextract_facts",
         new_callable=AsyncMock,
     ) as mock_ext:
         await runner._rotate_session("u1", sid)
@@ -145,11 +145,11 @@ async def test_rotate_session_always_closes(cfg, store):
     runner.config = cfg
 
     with patch(
-        "graphbot.agent.runner.asummarize",
+        "gbot.agent.runner.asummarize",
         new_callable=AsyncMock,
         side_effect=Exception("LLM down"),
     ), patch(
-        "graphbot.agent.runner.aextract_facts",
+        "gbot.agent.runner.aextract_facts",
         new_callable=AsyncMock,
         return_value={},
     ):
@@ -180,11 +180,11 @@ async def test_rotate_session_extracts_facts(cfg, store):
     }
 
     with patch(
-        "graphbot.agent.runner.asummarize",
+        "gbot.agent.runner.asummarize",
         new_callable=AsyncMock,
         return_value="Summary text.",
     ), patch(
-        "graphbot.agent.runner.aextract_facts",
+        "gbot.agent.runner.aextract_facts",
         new_callable=AsyncMock,
         return_value=facts,
     ):
@@ -210,11 +210,11 @@ async def test_fact_extraction_failure_doesnt_block(cfg, store):
     runner.config = cfg
 
     with patch(
-        "graphbot.agent.runner.asummarize",
+        "gbot.agent.runner.asummarize",
         new_callable=AsyncMock,
         return_value="Good summary.",
     ), patch(
-        "graphbot.agent.runner.aextract_facts",
+        "gbot.agent.runner.aextract_facts",
         new_callable=AsyncMock,
         side_effect=Exception("JSON parse error"),
     ):
@@ -306,7 +306,7 @@ async def test_closed_session_creates_new(cfg, store):
     )
 
     with patch(
-        "graphbot.agent.nodes.llm_provider.achat",
+        "gbot.agent.nodes.llm_provider.achat",
         new_callable=AsyncMock,
         return_value=ai_msg,
     ):
@@ -398,15 +398,15 @@ async def test_process_triggers_full_rotation(store):
     )
 
     with patch(
-        "graphbot.agent.nodes.llm_provider.achat",
+        "gbot.agent.nodes.llm_provider.achat",
         new_callable=AsyncMock,
         return_value=ai_msg,
     ), patch(
-        "graphbot.agent.runner.asummarize",
+        "gbot.agent.runner.asummarize",
         new_callable=AsyncMock,
         return_value="Summary of conversation.",
     ) as mock_sum, patch(
-        "graphbot.agent.runner.aextract_facts",
+        "gbot.agent.runner.aextract_facts",
         new_callable=AsyncMock,
         return_value={"notes": ["test fact"]},
     ) as mock_ext:
