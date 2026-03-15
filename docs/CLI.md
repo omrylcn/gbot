@@ -1,6 +1,6 @@
 # CLI.md — gbot Command Line Interface
 
-`gbot` is the CLI for GraphBot. It provides terminal commands for server management, user administration, and an interactive chat REPL.
+`gbot` is the CLI for GBot. It provides terminal commands for server management, user administration, and an interactive chat REPL.
 
 ## Installation
 
@@ -8,7 +8,7 @@
 uv sync
 ```
 
-Entry point: `gbot` (alias: `gbot`)
+Entry point: `gbot`
 
 ---
 
@@ -282,12 +282,30 @@ gbot user list
 docker compose up -d
 
 # Use CLI commands against the container
-docker compose exec graphbot gbot user add ali --name "Ali"
-docker compose exec graphbot gbot user link ali whatsapp 905551234567
-docker compose exec graphbot gbot cron list
+docker compose exec gbot gbot user add ali --name "Ali"
+docker compose exec gbot gbot user link ali whatsapp 905551234567
+docker compose exec gbot gbot cron list
 
 # Or connect from host (if port exposed)
 gbot login owner -p mypassword
 gbot status
 gbot status -c whatsapp
 ```
+
+---
+
+## Admin Dashboard
+
+GBot includes an optional web dashboard at `http://localhost:3001` (when running via Docker Compose).
+
+| Feature | Description |
+|---------|-------------|
+| Overview | Stats, system info, tool summary |
+| Conversations | Browse sessions/messages per user, filter by status/channel |
+| Context | Inspect context layers, manage overrides, preview rendered prompt |
+| Users | View/manage users, change roles |
+| Tools | Browse registered tools by group |
+| Crons | View cron jobs and execution logs |
+| Settings | Read-only config and agent profiles |
+
+Login with the same credentials used for `gbot login`.

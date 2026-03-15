@@ -1,12 +1,12 @@
 # Scheduling System — Reminders, Cron Jobs & Alerts
 
-> Versiyon: 1.9.0 | Tarih: 2026-02-21
+> Versiyon: v1.14.0 | Son güncelleme: 2026-03-15
 
 ---
 
 ## 1. Genel Bakis
 
-GraphBot **3 zamanlama tool'u** sunar. Hepsi ayni altyapiyi kullanir (APScheduler) ama farkli kullanim senaryolari icindir:
+GBot **3 zamanlama tool'u** sunar. Hepsi ayni altyapiyi kullanir (APScheduler) ama farkli kullanim senaryolari icindir:
 
 | Tool | Ne Zaman | Tekrar | Bildirim | Mod |
 |------|----------|--------|----------|-----|
@@ -215,6 +215,6 @@ Kullanici ne istiyor?
 | Sinir | Aciklama | Cozum |
 |-------|----------|-------|
 | Scheduler cache | Cron silindiginde APScheduler'dan silinmiyor | Container restart veya `reload()` (TODO) |
-| Timezone | Sunucu timezone'u kullanilir | config'e timezone eklenebilir |
+| Timezone | Container timezone'u kullanilir (`TZ` env var, default: `Europe/Istanbul`) | docker-compose.yml'de `TZ` ayarlanir |
 | Min interval | APScheduler minimum ~1 saniye | Pratik limit: 1 dakika |
 | Tool erişimi | Background agent tum tool'lara erişemez | Guvenlik geregi kisitli |

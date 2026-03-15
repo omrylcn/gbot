@@ -1,21 +1,19 @@
-# CLAUDE.md — GraphBot Project Rules
+# CLAUDE.md — GBot Project Rules
 
 ## What is this?
-LangGraph-based AI assistant framework. Combines nanobot (multi-channel agent) + ascibot (FastAPI+SQLite+RAG).
+LangGraph-based AI assistant framework. Personal, observable, modular.
 
 ## DO / DON'T
 
 **DO:**
 - Communicate in Turkish with user, write code/docstrings in English
 - Use `uv` for everything: `uv sync`, `uv run pytest`, `uv run ruff`
-- Use `Config(BaseSettings)` from pydantic-settings (env_prefix="GRAPHBOT_", .env support)
+- Use `Config(BaseSettings)` from pydantic-settings (env_prefix="GBOT_", .env support)
 - Use flat pytest functions (not class-based TestCase)
 - Keep things simple — "basit ama katmanli"
-- Read `mimari_kararlar.md` for detailed architectural reasoning (12 decisions)
-- Read `howtowork-development-plan.md` for phases 0–10 implementation details
-- Read `development-plan2.md` for phases 17–28 detailed plan
-- Read `future_works.md` for strategic directions
-- Check `todo.md` for current progress and priority
+- Read `notes/mimari_kararlar.md` for detailed architectural reasoning (16 decisions)
+- Read `notes/development-plan2.md` for phases 17–28 detailed plan
+- Check `notes/todo.md` for current progress and priority
 - Do finish phase, change version and update `changelog.md`
 - When `config/config.yaml` structure changes, sync `config/config.example.yaml` — replace secrets with `${ENV_VAR}` placeholders, keep comments
 
@@ -29,7 +27,7 @@ LangGraph-based AI assistant framework. Combines nanobot (multi-channel agent) +
 - Use `src/gbot/` layout — flat `gbot/` + `gbot_cli/` at repo root
 - Over-engineer tests — minimum effort, cover CRUD
 
-## Architecture (12 rules)
+## Architecture (16 decisions, 12 core rules)
 
 1. LangGraph = stateless executor (no checkpoint for data)
 2. SQLite = source of truth (15 tables)
@@ -52,7 +50,7 @@ LangGraph-based AI assistant framework. Combines nanobot (multi-channel agent) +
 | `gbot_cli/` | CLI package — Typer commands, REPL, API client, Rich output |
 
 CLI imports from `gbot` (config, store, runner, auth) but lives in its own package.
-Entry point: `gbot` (alias: `graphbot`).
+Entry point: `gbot`.
 
 ## Key Files
 
@@ -82,9 +80,12 @@ Entry point: `gbot` (alias: `graphbot`).
 | `config/roles.yaml` | RBAC role definitions (role → groups, no tool names — resolved from ToolRegistry) |
 | `config/config.yaml` | Main configuration — gitignored, contains secrets |
 | `config/config.example.yaml` | Config template — committed, secrets as `${ENV_VAR}` placeholders |
-| `mimari_kararlar.md` | 13 architectural decisions (detailed reasoning) |
-| `notes.md` | Kullanıcı şifreleri, WAHA kurulum adımları, WhatsApp credentials, memory tasarım notları |
-| `todo.md` | Phase progress tracking |
+| `notes/important_notes.md` | Credentials, WAHA setup, WhatsApp architecture, memory design notes |
+| `notes/mimari_kararlar.md` | 16 architectural decisions (detailed reasoning) |
+| `notes/todo.md` | Phase progress tracking |
+| `notes/rbac_mimari.md` | RBAC architecture (3 roles, tool groups, 2-layer guard) |
+| `notes/session_summarization.md` | Session summarization policy (hybrid LLM + fact extraction) |
+| `notes/development-plan2.md` | Phases 17–28 detailed plan |
 
 ## Progress
 

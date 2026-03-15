@@ -1,6 +1,6 @@
 # Channels — Multi-Channel Messaging Architecture
 
-GraphBot supports multiple messaging channels through a unified webhook + send pattern. Each channel is a FastAPI router that receives incoming messages and a send function for outgoing delivery.
+GBot supports multiple messaging channels through a unified webhook + send pattern. Each channel is a FastAPI router that receives incoming messages and a send function for outgoing delivery.
 
 ---
 
@@ -333,6 +333,52 @@ gbot user list
 
 ---
 
+## API & WebSocket
+
+The default channel — used by the CLI (`gbot chat`) and the admin dashboard.
+
+### REST
+
+```
+POST /chat              → JSON { user_id, message, channel?, session_id? }
+                        ← JSON { response, session_id, token_count }
+```
+
+### WebSocket
+
+```
+WS /ws/chat/{user_id}   → Persistent connection
+                        → Send: JSON { message, session_id? }
+                        ← Receive: JSON { response, session_id, ... }
+                        ← Receive: system events (reminders, cron results)
+```
+
+WebSocket also delivers real-time system events (reminders, cron job results) without polling.
+
+### Key Files
+
+| File | Function |
+|------|----------|
+| `gbot/api/routes.py` | `POST /chat` endpoint |
+| `gbot/api/ws.py` | WebSocket handler, `ConnectionManager` |
+
+---
+
+## Stub Channels (Discord, Feishu)
+
+Discord and Feishu have router stubs that return `501 Not Implemented`. The file structure and config schema are in place — they need the actual bot integration code.
+
+```python
+# discord.py / feishu.py
+@router.post("/webhooks/discord/{user_id}")
+async def discord_webhook(...):
+    raise HTTPException(501, "Discord channel not implemented yet")
+```
+
+To implement, follow the same pattern as Telegram/WhatsApp: webhook endpoint + send function.
+
+---
+
 ## WAHA Setup
 
 ### Prerequisites
@@ -359,7 +405,7 @@ curl -X POST "http://localhost:3000/api/sessions" \
     "start": true,
     "config": {
       "webhooks": [{
-        "url": "http://graphbot:8000/webhooks/whatsapp/owner",
+        "url": "http://gbot:8000/webhooks/whatsapp/owner",
         "events": ["message", "message.any"]
       }]
     }
@@ -389,8 +435,8 @@ curl -X POST "http://localhost:8000/webhooks/whatsapp/owner" \
 curl -s "http://localhost:3000/api/sessions/default" \
   -H "X-Api-Key: YOUR_API_KEY" | python3 -m json.tool
 
-# GraphBot logs
-docker logs graphbot --since 5m 2>&1 | grep -i whatsapp
+# GBot logs
+docker logs gbot --since 5m 2>&1 | grep -i whatsapp
 
 # WAHA logs
 docker logs waha --since 5m 2>&1 | grep -v health
