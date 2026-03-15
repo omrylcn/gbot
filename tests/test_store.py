@@ -1,7 +1,7 @@
-"""Tests for graphbot.memory.store."""
+"""Tests for gbot.memory.store."""
 
 import pytest
-from graphbot.memory.store import MemoryStore
+from gbot.memory.store import MemoryStore
 
 
 @pytest.fixture

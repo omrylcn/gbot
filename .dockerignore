@@ -14,7 +14,6 @@ reference files/
 data/
 workspace/
 tests/
-gbot/
 *.ipynb
 *.md
 !README.md

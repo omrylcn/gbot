@@ -8,14 +8,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from graphbot.core.config import Config
-from graphbot.core.cron.types import CronJob
-from graphbot.core.cron.scheduler import CronScheduler
-from graphbot.core.background.heartbeat import HeartbeatService, _is_empty_content
-from graphbot.core.background.worker import SubagentWorker
-from graphbot.agent.tools.cron_tool import make_cron_tools
-from graphbot.agent.tools.delegate import make_delegate_tools
-from graphbot.memory.store import MemoryStore
+from gbot.core.config import Config
+from gbot.core.cron.types import CronJob
+from gbot.core.cron.scheduler import CronScheduler
+from gbot.core.background.heartbeat import HeartbeatService, _is_empty_content
+from gbot.core.background.worker import SubagentWorker
+from gbot.agent.tools.cron_tool import make_cron_tools
+from gbot.agent.tools.delegate import make_delegate_tools
+from gbot.memory.store import MemoryStore
 
 
 @pytest.fixture
@@ -131,7 +131,7 @@ async def test_worker_spawn(cfg):
     """spawn() creates a background task that runs LightAgent."""
     worker = SubagentWorker(cfg)
 
-    with patch("graphbot.agent.light.LightAgent") as MockAgent:
+    with patch("gbot.agent.light.LightAgent") as MockAgent:
         mock_agent = AsyncMock()
         mock_agent.run = AsyncMock(return_value=("Result", 100))
         MockAgent.return_value = mock_agent
@@ -147,11 +147,11 @@ async def test_worker_spawn(cfg):
 @pytest.mark.asyncio
 async def test_worker_light_agent_prompt(cfg):
     """LightAgent receives correct prompt (not full context)."""
-    from graphbot.core.background.worker import _DELEGATE_PROMPT
+    from gbot.core.background.worker import _DELEGATE_PROMPT
 
     worker = SubagentWorker(cfg)
 
-    with patch("graphbot.agent.light.LightAgent") as MockAgent:
+    with patch("gbot.agent.light.LightAgent") as MockAgent:
         mock_agent = AsyncMock()
         mock_agent.run = AsyncMock(return_value=("Done", 50))
         MockAgent.return_value = mock_agent
@@ -171,7 +171,7 @@ async def test_worker_custom_model(cfg):
     """delegate with model override passes it to LightAgent."""
     worker = SubagentWorker(cfg)
 
-    with patch("graphbot.agent.light.LightAgent") as MockAgent:
+    with patch("gbot.agent.light.LightAgent") as MockAgent:
         mock_agent = AsyncMock()
         mock_agent.run = AsyncMock(return_value=("Done", 30))
         MockAgent.return_value = mock_agent
@@ -188,7 +188,7 @@ async def test_worker_custom_tools(cfg):
     """delegate with tool names resolves to actual tool objects."""
     worker = SubagentWorker(cfg)
 
-    with patch("graphbot.agent.light.LightAgent") as MockAgent:
+    with patch("gbot.agent.light.LightAgent") as MockAgent:
         mock_agent = AsyncMock()
         mock_agent.run = AsyncMock(return_value=("Done", 30))
         MockAgent.return_value = mock_agent
@@ -206,7 +206,7 @@ async def test_worker_default_tools(cfg):
     """No tools specified → default web tools (web_search, web_fetch)."""
     worker = SubagentWorker(cfg)
 
-    with patch("graphbot.agent.light.LightAgent") as MockAgent:
+    with patch("gbot.agent.light.LightAgent") as MockAgent:
         mock_agent = AsyncMock()
         mock_agent.run = AsyncMock(return_value=("Done", 30))
         MockAgent.return_value = mock_agent
@@ -225,7 +225,7 @@ async def test_worker_shutdown(cfg):
     """shutdown() waits for all tasks."""
     worker = SubagentWorker(cfg)
 
-    with patch("graphbot.agent.light.LightAgent") as MockAgent:
+    with patch("gbot.agent.light.LightAgent") as MockAgent:
         mock_agent = AsyncMock()
         mock_agent.run = AsyncMock(return_value=("Result", 50))
         MockAgent.return_value = mock_agent

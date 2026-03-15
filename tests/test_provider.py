@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from graphbot.core.providers.litellm_llm import LiteLLMLLM
-from graphbot.core.providers.openrouter_llm import OpenRouterLLM
+from gbot.core.providers.litellm_llm import LiteLLMLLM
+from gbot.core.providers.openrouter_llm import OpenRouterLLM
 
 
 # ── Fixtures ──────────────────────────────────────────────
@@ -47,7 +47,7 @@ def _make_openrouter_response(content="hello", tool_calls=None, reasoning=None):
 
 def test_setup_provider_openrouter(cfg):
     """openrouter/ model creates OpenRouterLLM as main provider."""
-    from graphbot.core.providers import litellm as facade
+    from gbot.core.providers import litellm as facade
 
     facade.setup_provider(cfg)
     assert isinstance(facade._main_provider, OpenRouterLLM)
@@ -56,7 +56,7 @@ def test_setup_provider_openrouter(cfg):
 
 def test_setup_provider_non_openrouter(cfg):
     """Non-openrouter model creates LiteLLMLLM as main provider."""
-    from graphbot.core.providers import litellm as facade
+    from gbot.core.providers import litellm as facade
 
     cfg.assistant.model = "openai/gpt-4o"
     facade.setup_provider(cfg)
@@ -66,7 +66,7 @@ def test_setup_provider_non_openrouter(cfg):
 
 def test_setup_provider_no_api_key(cfg, monkeypatch):
     """Missing OpenRouter API key falls back to LiteLLM."""
-    from graphbot.core.providers import litellm as facade
+    from gbot.core.providers import litellm as facade
 
     cfg.providers.openrouter.api_key = ""
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
@@ -205,7 +205,7 @@ async def test_openrouter_achat_error_handling():
 @pytest.mark.asyncio
 async def test_facade_routes_openrouter_to_main(cfg):
     """Facade routes openrouter/* models to OpenRouterLLM."""
-    from graphbot.core.providers import litellm as facade
+    from gbot.core.providers import litellm as facade
 
     facade.setup_provider(cfg)
 
@@ -224,11 +224,11 @@ async def test_facade_routes_openrouter_to_main(cfg):
 @pytest.mark.asyncio
 async def test_facade_routes_openai_to_fallback(cfg):
     """Facade routes non-openrouter models to LiteLLMLLM."""
-    from graphbot.core.providers import litellm as facade
+    from gbot.core.providers import litellm as facade
 
     facade.setup_provider(cfg)
 
-    with patch("graphbot.core.providers.litellm_llm.litellm.acompletion",
+    with patch("gbot.core.providers.litellm_llm.litellm.acompletion",
                new_callable=AsyncMock) as mock_llm:
         # Build a litellm-style response
         msg = MagicMock()

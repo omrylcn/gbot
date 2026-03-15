@@ -1,4 +1,4 @@
-"""Credential storage — ~/.graphbot/credentials.json."""
+"""Credential storage — ~/.gbot/credentials.json."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-_CRED_DIR = Path.home() / ".graphbot"
+_CRED_DIR = Path.home() / ".gbot"
 _CRED_FILE = _CRED_DIR / "credentials.json"
 
 

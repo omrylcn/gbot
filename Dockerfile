@@ -9,11 +9,11 @@ RUN apt-get update && \
 
 # Bağımlılıkları önce kopyala (Docker cache)
 COPY pyproject.toml README.md ./
-COPY graphbot/__init__.py graphbot/__version__.py graphbot/
+COPY gbot/__init__.py gbot/__version__.py gbot/
 RUN uv pip install --system --no-cache ".[channels]"
 
 # Kaynak kodu kopyala ve kur
-COPY graphbot/ graphbot/
+COPY gbot/ gbot/
 COPY gbot_cli/ gbot_cli/
 RUN uv pip install --system --no-cache .
 
@@ -25,5 +25,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-ENTRYPOINT ["graphbot"]
+ENTRYPOINT ["gbot"]
 CMD ["run", "--host", "0.0.0.0", "--port", "8000"]

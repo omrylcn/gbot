@@ -6,9 +6,9 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from langchain_core.messages import AIMessage
 
-from graphbot.api.app import create_app
-from graphbot.core.config import Config
-from graphbot.memory.store import MemoryStore
+from gbot.api.app import create_app
+from gbot.core.config import Config
+from gbot.memory.store import MemoryStore
 
 
 @pytest.fixture
@@ -22,14 +22,14 @@ def app(tmp_path):
     )
     application = create_app()
     db = MemoryStore(str(tmp_path / "e2e.db"))
-    from graphbot.agent.runner import GraphRunner
+    from gbot.agent.runner import GraphRunner
 
     ai_msg = AIMessage(
         content="ok",
         response_metadata={"usage": {"total_tokens": 10}},
     )
     with patch(
-        "graphbot.agent.nodes.llm_provider.achat",
+        "gbot.agent.nodes.llm_provider.achat",
         new_callable=AsyncMock,
         return_value=ai_msg,
     ):
@@ -79,7 +79,7 @@ async def test_e2e_chat_with_tool_call(client, app):
     )
 
     with patch(
-        "graphbot.agent.nodes.llm_provider.achat",
+        "gbot.agent.nodes.llm_provider.achat",
         new_callable=AsyncMock,
         side_effect=[tool_call_msg, final_msg],
     ):
@@ -116,7 +116,7 @@ async def test_e2e_session_continuity(client):
     )
 
     with patch(
-        "graphbot.agent.nodes.llm_provider.achat",
+        "gbot.agent.nodes.llm_provider.achat",
         new_callable=AsyncMock,
         return_value=ai_msg,
     ):
@@ -153,7 +153,7 @@ async def test_e2e_multi_user(client, app):
     )
 
     with patch(
-        "graphbot.agent.nodes.llm_provider.achat",
+        "gbot.agent.nodes.llm_provider.achat",
         new_callable=AsyncMock,
         return_value=ai_msg,
     ):

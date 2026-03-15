@@ -6,15 +6,15 @@ from pathlib import Path
 
 import pytest
 
-from graphbot.agent.skills.loader import SkillLoader
-from graphbot.core.config import Config
-from graphbot.memory.store import MemoryStore
+from gbot.agent.skills.loader import SkillLoader
+from gbot.core.config import Config
+from gbot.memory.store import MemoryStore
 
 
 @pytest.fixture
 def builtin_dir():
     """Path to real builtin skills."""
-    return Path(__file__).parent.parent / "graphbot" / "agent" / "skills" / "builtin"
+    return Path(__file__).parent.parent / "gbot" / "agent" / "skills" / "builtin"
 
 
 @pytest.fixture
@@ -161,7 +161,7 @@ def test_build_index(loader):
 
 def test_context_integration(tmp_path):
     """ContextBuilder includes skills layers in system prompt."""
-    from graphbot.agent.context import ContextBuilder
+    from gbot.agent.context import ContextBuilder
 
     ws = tmp_path / "workspace"
     ws.mkdir()

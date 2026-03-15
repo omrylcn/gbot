@@ -11,8 +11,8 @@ faiss = pytest.importorskip("faiss", reason="faiss-cpu not installed")
 
 import numpy as np
 
-from graphbot.core.config.schema import RagConfig
-from graphbot.rag.retriever import SemanticRetriever
+from gbot.core.config.schema import RagConfig
+from gbot.rag.retriever import SemanticRetriever
 
 EMBED_DIM = 32
 
@@ -58,7 +58,7 @@ def _make_retriever(tmp_path: Path, items: list | None = None) -> SemanticRetrie
     )
 
     # Patch SentenceTransformer to avoid downloading a real model
-    import graphbot.rag.retriever as mod
+    import gbot.rag.retriever as mod
 
     original_st = mod.SentenceTransformer
     mod.SentenceTransformer = lambda *a, **kw: FakeEmbedder()
@@ -128,7 +128,7 @@ def test_format_results_empty(tmp_path):
 
 
 def test_search_tools_with_retriever(tmp_path):
-    from graphbot.agent.tools.search import make_search_tools
+    from gbot.agent.tools.search import make_search_tools
 
     retriever = _make_retriever(tmp_path, SAMPLE_ITEMS)
     tools = make_search_tools(retriever)
@@ -138,7 +138,7 @@ def test_search_tools_with_retriever(tmp_path):
 
 
 def test_search_tools_without_retriever():
-    from graphbot.agent.tools.search import make_search_tools
+    from gbot.agent.tools.search import make_search_tools
 
     tools = make_search_tools(retriever=None)
     search = next(t for t in tools if t.name == "search_items")

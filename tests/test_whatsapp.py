@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from graphbot.core.channels.waha_client import WAHAClient
-from graphbot.core.channels.whatsapp import split_message
-from graphbot.core.config import Config
-from graphbot.memory.store import MemoryStore
+from gbot.core.channels.waha_client import WAHAClient
+from gbot.core.channels.whatsapp import split_message
+from gbot.core.config import Config
+from gbot.memory.store import MemoryStore
 
 
 # ── WAHAClient helpers ────────────────────────────────────
@@ -77,10 +77,10 @@ def test_split_empty_message():
 @pytest.mark.asyncio
 async def test_send_whatsapp_message_auto_prefix():
     """send_whatsapp_message auto-prefixes [gbot] if missing."""
-    from graphbot.core.channels.whatsapp import send_whatsapp_message
+    from gbot.core.channels.whatsapp import send_whatsapp_message
 
     wa_config = type("C", (), {"waha_url": "http://x", "session": "s", "api_key": "k"})()
-    with patch("graphbot.core.channels.whatsapp.WAHAClient") as MockClient:
+    with patch("gbot.core.channels.whatsapp.WAHAClient") as MockClient:
         mock_instance = AsyncMock()
         MockClient.return_value = mock_instance
         await send_whatsapp_message(wa_config, "123@c.us", "hello")
@@ -90,10 +90,10 @@ async def test_send_whatsapp_message_auto_prefix():
 @pytest.mark.asyncio
 async def test_send_whatsapp_message_no_double_prefix():
     """send_whatsapp_message does not double-prefix [gbot]."""
-    from graphbot.core.channels.whatsapp import send_whatsapp_message
+    from gbot.core.channels.whatsapp import send_whatsapp_message
 
     wa_config = type("C", (), {"waha_url": "http://x", "session": "s", "api_key": "k"})()
-    with patch("graphbot.core.channels.whatsapp.WAHAClient") as MockClient:
+    with patch("gbot.core.channels.whatsapp.WAHAClient") as MockClient:
         mock_instance = AsyncMock()
         MockClient.return_value = mock_instance
         await send_whatsapp_message(wa_config, "123@c.us", "[gbot] already prefixed")
@@ -144,7 +144,7 @@ def waha_dm_event():
 
 def _make_app(tmp_path, *, config_overrides=None, users=None):
     """Helper to create a test app with db, config, and mock runner."""
-    from graphbot.api.app import create_app
+    from gbot.api.app import create_app
 
     app = create_app()
     mock_runner = AsyncMock()
@@ -186,7 +186,7 @@ async def test_group_message_processed(waha_group_message_event, tmp_path):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         with patch(
-            "graphbot.core.channels.whatsapp.send_whatsapp_message",
+            "gbot.core.channels.whatsapp.send_whatsapp_message",
             new_callable=AsyncMock,
         ):
             resp = await client.post(
@@ -222,7 +222,7 @@ async def test_group_message_no_prefix_also_processed(tmp_path):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         with patch(
-            "graphbot.core.channels.whatsapp.send_whatsapp_message",
+            "gbot.core.channels.whatsapp.send_whatsapp_message",
             new_callable=AsyncMock,
         ) as mock_send:
             resp = await client.post("/webhooks/whatsapp/testuser", json=event)
@@ -258,7 +258,7 @@ async def test_group_response_has_gbot_prefix(tmp_path):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         with patch(
-            "graphbot.core.channels.whatsapp.send_whatsapp_message",
+            "gbot.core.channels.whatsapp.send_whatsapp_message",
             new_callable=AsyncMock,
         ) as mock_send:
             resp = await client.post("/webhooks/whatsapp/testuser", json=event)
@@ -314,7 +314,7 @@ async def test_fromme_group_non_gbot_processed(tmp_path):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         with patch(
-            "graphbot.core.channels.whatsapp.send_whatsapp_message",
+            "gbot.core.channels.whatsapp.send_whatsapp_message",
             new_callable=AsyncMock,
         ):
             resp = await client.post("/webhooks/whatsapp/testuser", json=event)
@@ -424,7 +424,7 @@ async def test_dm_respond_when_enabled(waha_dm_event, tmp_path):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         with patch(
-            "graphbot.core.channels.whatsapp.send_whatsapp_message",
+            "gbot.core.channels.whatsapp.send_whatsapp_message",
             new_callable=AsyncMock,
         ) as mock_send:
             resp = await client.post("/webhooks/whatsapp/owner", json=waha_dm_event)
@@ -643,7 +643,7 @@ async def test_message_any_fromme_processed(tmp_path):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         with patch(
-            "graphbot.core.channels.whatsapp.send_whatsapp_message",
+            "gbot.core.channels.whatsapp.send_whatsapp_message",
             new_callable=AsyncMock,
         ):
             resp = await client.post("/webhooks/whatsapp/testuser", json=event)
@@ -676,7 +676,7 @@ async def test_group_message_creates_whatsapp_session(tmp_path):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         with patch(
-            "graphbot.core.channels.whatsapp.send_whatsapp_message",
+            "gbot.core.channels.whatsapp.send_whatsapp_message",
             new_callable=AsyncMock,
         ):
             resp = await client.post("/webhooks/whatsapp/testuser", json=event)
@@ -710,7 +710,7 @@ async def test_group_session_isolated_from_api(tmp_path):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         with patch(
-            "graphbot.core.channels.whatsapp.send_whatsapp_message",
+            "gbot.core.channels.whatsapp.send_whatsapp_message",
             new_callable=AsyncMock,
         ):
             resp = await client.post("/webhooks/whatsapp/testuser", json=event)
@@ -736,7 +736,7 @@ async def test_global_webhook_routes_group_by_phone(
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         with patch(
-            "graphbot.core.channels.whatsapp.send_whatsapp_message",
+            "gbot.core.channels.whatsapp.send_whatsapp_message",
             new_callable=AsyncMock,
         ):
             resp = await client.post(

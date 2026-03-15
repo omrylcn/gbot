@@ -8,7 +8,7 @@
 uv sync
 ```
 
-Entry point: `gbot` (alias: `graphbot`)
+Entry point: `gbot` (alias: `gbot`)
 
 ---
 
@@ -82,7 +82,7 @@ gbot chat --session abc123        # continue existing session
 
 ### `gbot login`
 
-Authenticate and save credentials to `~/.graphbot/credentials.json`.
+Authenticate and save credentials to `~/.gbot/credentials.json`.
 
 ```bash
 gbot login owner -p mypassword
@@ -229,7 +229,7 @@ Type `/` to see all available commands. Type `/help` for organized help panels.
 
 ## Credentials
 
-Credentials are stored in `~/.graphbot/credentials.json` with 0600 permissions.
+Credentials are stored in `~/.gbot/credentials.json` with 0600 permissions.
 
 ```json
 {

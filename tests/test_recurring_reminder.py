@@ -6,10 +6,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from graphbot.agent.tools.reminder import make_reminder_tools
-from graphbot.api.ws import ConnectionManager
-from graphbot.core.cron.scheduler import CronScheduler
-from graphbot.memory.store import MemoryStore
+from gbot.agent.tools.reminder import make_reminder_tools
+from gbot.api.ws import ConnectionManager
+from gbot.core.cron.scheduler import CronScheduler
+from gbot.memory.store import MemoryStore
 
 
 @pytest.fixture

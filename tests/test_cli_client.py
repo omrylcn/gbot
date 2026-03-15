@@ -1,4 +1,4 @@
-"""Tests for graphbot.cli.client (Faz 16)."""
+"""Tests for gbot.cli.client (Faz 16)."""
 
 from __future__ import annotations
 

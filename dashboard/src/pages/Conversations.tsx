@@ -1,16 +1,20 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { User, MessageCircle, Hash } from "lucide-react";
+import { User, MessageCircle, Hash, Filter } from "lucide-react";
 import { adminApi } from "@/api/admin";
-import type { Message } from "@/api/admin";
+import type { Message, Session } from "@/api/admin";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { Badge, RoleBadge } from "@/components/shared/Badge";
 import { cn, formatDate, truncate } from "@/lib/utils";
 
+type StatusFilter = "all" | "active" | "closed";
+
 export default function ConversationsPage() {
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [channelFilter, setChannelFilter] = useState<string>("all");
 
   const { data: users, isLoading: usersLoading } = useQuery({
     queryKey: ["users"],
@@ -28,6 +32,34 @@ export default function ConversationsPage() {
     queryFn: () => adminApi.getSessionHistory(selectedSession!),
     enabled: !!selectedSession,
   });
+
+  // Derive unique channels from sessions
+  const channels = useMemo(() => {
+    if (!sessions) return [];
+    const set = new Set(sessions.map((s) => s.channel || "api"));
+    return Array.from(set).sort();
+  }, [sessions]);
+
+  // Filter sessions
+  const filteredSessions = useMemo(() => {
+    if (!sessions) return [];
+    return sessions.filter((s) => {
+      if (statusFilter === "active" && s.ended_at) return false;
+      if (statusFilter === "closed" && !s.ended_at) return false;
+      if (channelFilter !== "all" && (s.channel || "api") !== channelFilter) return false;
+      return true;
+    });
+  }, [sessions, statusFilter, channelFilter]);
+
+  // Counts for filter badges
+  const counts = useMemo(() => {
+    if (!sessions) return { all: 0, active: 0, closed: 0 };
+    return {
+      all: sessions.length,
+      active: sessions.filter((s) => !s.ended_at).length,
+      closed: sessions.filter((s) => s.ended_at).length,
+    };
+  }, [sessions]);
 
   return (
     <div className="h-[calc(100vh-8rem)]">
@@ -51,6 +83,8 @@ export default function ConversationsPage() {
                   onClick={() => {
                     setSelectedUser(u.user_id);
                     setSelectedSession(null);
+                    setStatusFilter("all");
+                    setChannelFilter("all");
                   }}
                   className={cn(
                     "w-full px-4 py-3 text-left hover:bg-sidebar-active transition-colors border-b border-border",
@@ -70,46 +104,87 @@ export default function ConversationsPage() {
 
         {/* Sessions Panel */}
         <div className="col-span-3 bg-card border border-border rounded-xl overflow-hidden flex flex-col">
-          <div className="px-4 py-3 border-b border-border">
+          <div className="px-4 py-3 border-b border-border space-y-2">
             <h3 className="text-sm font-medium text-foreground flex items-center gap-2">
               <Hash className="w-4 h-4" /> Sessions
-              {sessions && <Badge variant="default">{sessions.length}</Badge>}
+              {sessions && <Badge variant="default">{filteredSessions.length}</Badge>}
             </h3>
+
+            {/* Filters */}
+            {selectedUser && sessions && sessions.length > 0 && (
+              <div className="space-y-1.5">
+                {/* Status filter */}
+                <div className="flex gap-1">
+                  {(["all", "active", "closed"] as StatusFilter[]).map((f) => (
+                    <button
+                      key={f}
+                      onClick={() => setStatusFilter(f)}
+                      className={cn(
+                        "px-2 py-0.5 text-xs rounded-md transition-colors",
+                        statusFilter === f
+                          ? "bg-accent text-accent-foreground font-medium"
+                          : "text-muted hover:text-foreground hover:bg-sidebar-active"
+                      )}
+                    >
+                      {f === "all" ? "All" : f === "active" ? "Active" : "Closed"}
+                      <span className="ml-1 opacity-60">
+                        {f === "all" ? counts.all : f === "active" ? counts.active : counts.closed}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Channel filter */}
+                {channels.length > 1 && (
+                  <div className="flex gap-1 items-center">
+                    <Filter className="w-3 h-3 text-muted" />
+                    <button
+                      onClick={() => setChannelFilter("all")}
+                      className={cn(
+                        "px-2 py-0.5 text-xs rounded-md transition-colors",
+                        channelFilter === "all"
+                          ? "bg-accent text-accent-foreground font-medium"
+                          : "text-muted hover:text-foreground hover:bg-sidebar-active"
+                      )}
+                    >
+                      All
+                    </button>
+                    {channels.map((ch) => (
+                      <button
+                        key={ch}
+                        onClick={() => setChannelFilter(ch)}
+                        className={cn(
+                          "px-2 py-0.5 text-xs rounded-md transition-colors",
+                          channelFilter === ch
+                            ? "bg-accent text-accent-foreground font-medium"
+                            : "text-muted hover:text-foreground hover:bg-sidebar-active"
+                        )}
+                      >
+                        {ch}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           <div className="flex-1 overflow-y-auto">
             {!selectedUser ? (
               <p className="text-sm text-muted p-4 text-center">Select a user</p>
             ) : sessionsLoading ? (
               <LoadingSpinner />
-            ) : sessions?.length === 0 ? (
-              <p className="text-sm text-muted p-4 text-center">No sessions found</p>
+            ) : filteredSessions.length === 0 ? (
+              <p className="text-sm text-muted p-4 text-center">
+                {sessions?.length === 0 ? "No sessions found" : "No matching sessions"}
+              </p>
             ) : (
-              sessions?.map((s) => (
-                <button
+              filteredSessions.map((s) => (
+                <SessionItem
                   key={s.session_id}
+                  session={s}
+                  selected={selectedSession === s.session_id}
                   onClick={() => setSelectedSession(s.session_id)}
-                  className={cn(
-                    "w-full px-4 py-3 text-left hover:bg-sidebar-active transition-colors border-b border-border",
-                    selectedSession === s.session_id && "bg-sidebar-active"
-                  )}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-mono text-muted">{s.session_id.slice(0, 8)}...</span>
-                    <Badge variant={s.ended_at ? "default" : "success"}>
-                      {s.ended_at ? "Closed" : "Active"}
-                    </Badge>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs text-muted">
-                    <span>{s.channel || "api"}</span>
-                    <span>·</span>
-                    <span>{s.token_count} tok</span>
-                    <span>·</span>
-                    <span>{formatDate(s.started_at)}</span>
-                  </div>
-                  {s.summary && (
-                    <p className="text-xs text-foreground mt-1">{truncate(s.summary, 80)}</p>
-                  )}
-                </button>
+                />
               ))
             )}
           </div>
@@ -131,12 +206,40 @@ export default function ConversationsPage() {
             ) : messages?.length === 0 ? (
               <p className="text-sm text-muted text-center py-8">No messages found</p>
             ) : (
-              messages?.map((m) => <MessageBubble key={m.id} message={m} />)
+              [...messages!].reverse().map((m) => <MessageBubble key={m.id} message={m} />)
             )}
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function SessionItem({ session: s, selected, onClick }: { session: Session; selected: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "w-full px-4 py-3 text-left hover:bg-sidebar-active transition-colors border-b border-border",
+        selected && "bg-sidebar-active"
+      )}
+    >
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs font-mono text-muted">{s.session_id.slice(0, 8)}...</span>
+        <Badge variant={s.ended_at ? "default" : "success"}>
+          {s.ended_at ? "Closed" : "Active"}
+        </Badge>
+      </div>
+      <div className="flex items-center gap-2 text-xs text-muted">
+        <Badge variant="outline">{s.channel || "api"}</Badge>
+        <span>{s.token_count} tok</span>
+        <span>·</span>
+        <span>{formatDate(s.started_at)}</span>
+      </div>
+      {s.summary && (
+        <p className="text-xs text-foreground mt-1">{truncate(s.summary, 80)}</p>
+      )}
+    </button>
   );
 }
 

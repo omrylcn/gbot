@@ -1,7 +1,7 @@
 services:
-  graphbot:
+  gbot:
     build: .
-    container_name: graphbot
+    container_name: gbot
     ports:
       - "127.0.0.1:8000:8000"
     environment:
@@ -20,7 +20,7 @@ services:
     ports:
       - "127.0.0.1:3001:80"
     depends_on:
-      graphbot:
+      gbot:
         condition: service_started
     restart: unless-stopped
 

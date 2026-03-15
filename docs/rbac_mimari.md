@@ -133,13 +133,13 @@ Graph tüm tool'larla bir kez compile edilir. Per-request filtreleme `reason()` 
 | Dosya | Değişiklik |
 |-------|-----------|
 | `roles.yaml` | **YENİ** — rol tanımları (~60 satır) |
-| `graphbot/agent/permissions.py` | **YENİ** — YAML loader + tool/context check (~80 satır) |
-| `graphbot/agent/state.py` | `role`, `allowed_tools` alanları |
-| `graphbot/agent/runner.py` | Rol lookup, allowed_tools hesaplama, guest session |
-| `graphbot/agent/nodes.py` | reason() filtreleme, execute_tools() guard |
-| `graphbot/agent/context.py` | context_layers parametresi, katman filtreleme |
-| `graphbot/memory/store.py` | `set_user_role()` metodu, migration |
-| `graphbot/api/admin.py` | PUT /admin/users/{id}/role endpoint |
+| `gbot/agent/permissions.py` | **YENİ** — YAML loader + tool/context check (~80 satır) |
+| `gbot/agent/state.py` | `role`, `allowed_tools` alanları |
+| `gbot/agent/runner.py` | Rol lookup, allowed_tools hesaplama, guest session |
+| `gbot/agent/nodes.py` | reason() filtreleme, execute_tools() guard |
+| `gbot/agent/context.py` | context_layers parametresi, katman filtreleme |
+| `gbot/memory/store.py` | `set_user_role()` metodu, migration |
+| `gbot/api/admin.py` | PUT /admin/users/{id}/role endpoint |
 
 ---
 

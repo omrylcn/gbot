@@ -50,9 +50,19 @@ Edit `config/config.yaml` — set your owner info and preferred model:
 assistant:
   name: "GBot"
   owner:
-    username: "yourname"
-    name: "Your Name"
-  model: "openrouter/google/gemini-3-flash-preview"   # or openai/gpt-4o-mini, etc.
+    username: "ali"
+    name: "Ali"
+  model: "openai/gpt-4o-mini"
+
+providers:
+  openai:
+    api_key: "sk-..."     # or set via .env
+```
+
+Or use environment variables (`.env`):
+```
+GBOT_PROVIDERS__OPENAI__API_KEY=sk-...
+>>>>>>> dev
 ```
 
 ### 3. Run
@@ -135,7 +145,7 @@ gbot user link ali telegram 12345
 
 Credentials:
 ```bash
-gbot login ali -s http://localhost:8000  # saves token to ~/.graphbot/
+gbot login ali -s http://localhost:8000  # saves token to ~/.gbot/
 gbot logout
 ```
 
@@ -231,10 +241,10 @@ GBot uses a layered config system — you can set things in multiple places, and
 Priority order: `.env` > environment variables > `config.yaml` > defaults
 
 ```bash
-# .env uses GRAPHBOT_ prefix with __ separator
-GRAPHBOT_ASSISTANT__MODEL=openai/gpt-4o-mini
-GRAPHBOT_PROVIDERS__OPENAI__API_KEY=sk-...
-GRAPHBOT_BACKGROUND__CRON__ENABLED=true
+# .env uses GBOT_ prefix with __ separator
+GBOT_ASSISTANT__MODEL=openai/gpt-4o-mini
+GBOT_PROVIDERS__OPENAI__API_KEY=sk-...
+GBOT_BACKGROUND__CRON__ENABLED=true
 ```
 
 Full config reference: [`config/config.example.yaml`](./config/config.example.yaml)
@@ -272,7 +282,7 @@ auth:
 
 Or via `.env`:
 ```bash
-GRAPHBOT_AUTH__JWT_SECRET_KEY=your-secret-key-at-least-32-characters
+GBOT_AUTH__JWT_SECRET_KEY=your-secret-key-at-least-32-characters
 ```
 
 | State | `auth.jwt_secret_key` | Access |
@@ -310,7 +320,7 @@ gbot user remove ali
 
 Once a user exists, they can authenticate:
 
-**CLI login** — saves token to `~/.graphbot/credentials.json`:
+**CLI login** — saves token to `~/.gbot/credentials.json`:
 
 ```bash
 gbot login ali -s http://localhost:8000   # prompts for password
@@ -620,20 +630,20 @@ docker compose down          # stop
 
 | Service | Port | Description |
 |---------|------|-------------|
-| `graphbot` | 8000 | API server |
+| `gbot` | 8000 | API server |
 | `dashboard` | 3001 | Admin dashboard (React + nginx) |
 | `waha` | 3000 | WhatsApp gateway (optional) |
 
-The dashboard is optional — it proxies API requests through nginx (`/api/` → graphbot:8000) and runs independently. Data is persisted in named volumes (`graphbot_data`, `graphbot_workspace`).
+The dashboard is optional — it proxies API requests through nginx (`/api/` → gbot:8000) and runs independently. Uses named volumes (`gbot_data`, `gbot_workspace`) and `config.yaml` as read-only bind mount.
 
 ---
 
 ## Project Structure
 
-The codebase is split into two packages: `graphbot` (the core framework) and `gbot_cli` (the CLI client). They're independent — the CLI talks to the framework over HTTP, so you could swap it for your own client.
+The codebase is split into two packages: `gbot` (the core framework) and `gbot_cli` (the CLI client). They're independent — the CLI talks to the framework over HTTP, so you could swap it for your own client.
 
 ```
-graphbot/                          # Core framework
+gbot/                          # Core framework
 ├── agent/
 │   ├── context/                   # Context service package
 │   │   ├── builder.py             # ContextBuilder (10-layer system prompt)
@@ -670,7 +680,7 @@ graphbot/                          # Core framework
 gbot_cli/                          # CLI package (separate module)
 ├── commands.py                    # Typer CLI entry points
 ├── client.py                      # GraphBotClient (httpx)
-├── credentials.py                 # Token storage (~/.graphbot/)
+├── credentials.py                 # Token storage (~/.gbot/)
 ├── repl.py                        # Interactive REPL
 ├── slash_commands.py              # Slash command router
 └── output.py                      # Rich formatters
@@ -736,8 +746,8 @@ Each agent profile (`config/agents.yaml`) points to its own `AGENT.md`. The main
 ```bash
 uv sync --extra dev                    # install dependencies
 uv run pytest tests/ -v                # run tests
-uv run ruff check graphbot/ gbot_cli/  # lint
-uv run ruff format graphbot/ gbot_cli/ # format
+uv run ruff check gbot/ gbot_cli/  # lint
+uv run ruff format gbot/ gbot_cli/ # format
 gbot run --reload                      # dev server with auto-reload
 ```
 

@@ -1,16 +1,16 @@
-"""Tests for graphbot.agent.tools (Faz 3)."""
+"""Tests for gbot.agent.tools (Faz 3)."""
 
 
 import pytest
 
-from graphbot.agent.tools import ToolRegistry, make_tools
-from graphbot.agent.tools.filesystem import make_filesystem_tools
-from graphbot.agent.tools.memory_tools import make_memory_tools
-from graphbot.agent.tools.search import make_search_tools
-from graphbot.agent.tools.shell import make_shell_tools
-from graphbot.agent.tools.web import make_web_tools
-from graphbot.core.config import Config
-from graphbot.memory.store import MemoryStore
+from gbot.agent.tools import ToolRegistry, make_tools
+from gbot.agent.tools.filesystem import make_filesystem_tools
+from gbot.agent.tools.memory_tools import make_memory_tools
+from gbot.agent.tools.search import make_search_tools
+from gbot.agent.tools.shell import make_shell_tools
+from gbot.agent.tools.web import make_web_tools
+from gbot.core.config import Config
+from gbot.memory.store import MemoryStore
 
 
 @pytest.fixture

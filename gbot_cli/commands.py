@@ -8,7 +8,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from graphbot import __version__
+from gbot import __version__
 
 app = typer.Typer(
     name="gbot",
@@ -54,7 +54,7 @@ def run(
     import uvicorn
 
     console.print(f"[green]Starting gbot API on {host}:{port}[/green]")
-    uvicorn.run("graphbot.api.app:app", host=host, port=port, reload=reload)
+    uvicorn.run("gbot.api.app:app", host=host, port=port, reload=reload)
 
 
 # ════════════════════════════════════════════════════════════
@@ -127,9 +127,9 @@ def chat(
 
 def _chat_local(message: str | None, session: str) -> None:
     """Legacy local standalone chat (direct GraphRunner, no API)."""
-    from graphbot.agent.runner import GraphRunner
-    from graphbot.core.config.loader import load_config
-    from graphbot.memory.store import MemoryStore
+    from gbot.agent.runner import GraphRunner
+    from gbot.core.config.loader import load_config
+    from gbot.memory.store import MemoryStore
 
     config = load_config()
     db = MemoryStore(config.database.path)
@@ -226,10 +226,10 @@ def status(
     from rich.panel import Panel
     from rich.text import Text
 
-    from graphbot.agent.context import ContextBuilder
-    from graphbot.agent.tools import make_tools
-    from graphbot.core.config.loader import load_config
-    from graphbot.memory.store import MemoryStore
+    from gbot.agent.context import ContextBuilder
+    from gbot.agent.tools import make_tools
+    from gbot.core.config.loader import load_config
+    from gbot.memory.store import MemoryStore
 
     config = load_config()
     db = MemoryStore(config.database.path)
@@ -392,8 +392,8 @@ app.add_typer(cron_app, name="cron")
 @cron_app.command("list")
 def cron_list() -> None:
     """List all cron jobs."""
-    from graphbot.core.config.loader import load_config
-    from graphbot.memory.store import MemoryStore
+    from gbot.core.config.loader import load_config
+    from gbot.memory.store import MemoryStore
 
     config = load_config()
     db = MemoryStore(config.database.path)
@@ -428,8 +428,8 @@ def cron_remove(
     job_id: str = typer.Argument(help="Cron job ID to remove"),
 ) -> None:
     """Remove a cron job by ID."""
-    from graphbot.core.config.loader import load_config
-    from graphbot.memory.store import MemoryStore
+    from gbot.core.config.loader import load_config
+    from gbot.memory.store import MemoryStore
 
     config = load_config()
     db = MemoryStore(config.database.path)
@@ -454,8 +454,8 @@ def user_add(
     telegram: str | None = typer.Option(None, "--telegram", "-t", help="Telegram bot token"),
 ) -> None:
     """Add a new user, optionally with password and Telegram link."""
-    from graphbot.core.config.loader import load_config
-    from graphbot.memory.store import MemoryStore
+    from gbot.core.config.loader import load_config
+    from gbot.memory.store import MemoryStore
 
     config = load_config()
     db = MemoryStore(config.database.path)
@@ -468,7 +468,7 @@ def user_add(
     console.print(f"[green]User created:[/green] {username}")
 
     if password:
-        from graphbot.api.auth import hash_password
+        from gbot.api.auth import hash_password
 
         db.set_password(username, hash_password(password))
         console.print("  [dim]Password set[/dim]")
@@ -481,8 +481,8 @@ def user_add(
 @user_app.command("list")
 def user_list() -> None:
     """List all users and their linked channels."""
-    from graphbot.core.config.loader import load_config
-    from graphbot.memory.store import MemoryStore
+    from gbot.core.config.loader import load_config
+    from gbot.memory.store import MemoryStore
 
     config = load_config()
     db = MemoryStore(config.database.path)
@@ -512,8 +512,8 @@ def user_remove(
     username: str = typer.Argument(help="User ID to remove"),
 ) -> None:
     """Remove a user and their channel links."""
-    from graphbot.core.config.loader import load_config
-    from graphbot.memory.store import MemoryStore
+    from gbot.core.config.loader import load_config
+    from gbot.memory.store import MemoryStore
 
     config = load_config()
     db = MemoryStore(config.database.path)
@@ -530,9 +530,9 @@ def user_set_password(
     password: str = typer.Argument(help="New password"),
 ) -> None:
     """Set or change password for an existing user."""
-    from graphbot.api.auth import hash_password
-    from graphbot.core.config.loader import load_config
-    from graphbot.memory.store import MemoryStore
+    from gbot.api.auth import hash_password
+    from gbot.core.config.loader import load_config
+    from gbot.memory.store import MemoryStore
 
     config = load_config()
     db = MemoryStore(config.database.path)
@@ -552,8 +552,8 @@ def user_link(
     channel_user_id: str = typer.Argument(help="User's ID on that channel"),
 ) -> None:
     """Link a channel identity to a user."""
-    from graphbot.core.config.loader import load_config
-    from graphbot.memory.store import MemoryStore
+    from gbot.core.config.loader import load_config
+    from gbot.memory.store import MemoryStore
 
     config = load_config()
     db = MemoryStore(config.database.path)

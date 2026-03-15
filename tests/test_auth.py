@@ -6,10 +6,10 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from langchain_core.messages import AIMessage
 
-from graphbot.api.app import create_app
-from graphbot.api.auth import create_access_token, hash_password, verify_password
-from graphbot.core.config import Config
-from graphbot.memory.store import MemoryStore
+from gbot.api.app import create_app
+from gbot.api.auth import create_access_token, hash_password, verify_password
+from gbot.core.config import Config
+from gbot.memory.store import MemoryStore
 
 
 # ── Fixtures ─────────────────────────────────────────────────
@@ -32,8 +32,8 @@ def _app_no_auth(tmp_path):
     db.get_or_create_user("owner", name="Owner")
 
     ai_msg = AIMessage(content="ok", response_metadata={"usage": {"total_tokens": 10}})
-    with patch("graphbot.agent.nodes.llm_provider.achat", new_callable=AsyncMock, return_value=ai_msg):
-        from graphbot.agent.runner import GraphRunner
+    with patch("gbot.agent.nodes.llm_provider.achat", new_callable=AsyncMock, return_value=ai_msg):
+        from gbot.agent.runner import GraphRunner
         runner = GraphRunner(config, db)
 
     application.state.config = config
@@ -56,8 +56,8 @@ def _app_with_auth(tmp_path):
     db.set_password("owner", hash_password("ownerpass"))
 
     ai_msg = AIMessage(content="ok", response_metadata={"usage": {"total_tokens": 10}})
-    with patch("graphbot.agent.nodes.llm_provider.achat", new_callable=AsyncMock, return_value=ai_msg):
-        from graphbot.agent.runner import GraphRunner
+    with patch("gbot.agent.nodes.llm_provider.achat", new_callable=AsyncMock, return_value=ai_msg):
+        from gbot.agent.runner import GraphRunner
         runner = GraphRunner(config, db)
 
     application.state.config = config
@@ -95,14 +95,14 @@ def test_password_hash_verify():
 
 
 def test_jwt_create_decode():
-    from graphbot.api.auth import decode_token
+    from gbot.api.auth import decode_token
 
     token = create_access_token("user1", "mysecret", "HS256", 60)
     assert decode_token(token, "mysecret", "HS256") == "user1"
 
 
 def test_jwt_expired():
-    from graphbot.api.auth import decode_token
+    from gbot.api.auth import decode_token
 
     token = create_access_token("user1", "mysecret", "HS256", expire_minutes=-1)
     with pytest.raises(Exception):
@@ -146,7 +146,7 @@ def test_store_api_keys(db):
 async def test_auth_disabled_passthrough(client_no_auth):
     """When auth disabled, all endpoints open without token."""
     ai_msg = AIMessage(content="hello", response_metadata={"usage": {"total_tokens": 10}})
-    with patch("graphbot.agent.nodes.llm_provider.achat", new_callable=AsyncMock, return_value=ai_msg):
+    with patch("gbot.agent.nodes.llm_provider.achat", new_callable=AsyncMock, return_value=ai_msg):
         resp = await client_no_auth.post("/chat", json={"message": "hi"})
     assert resp.status_code == 200
 
@@ -204,7 +204,7 @@ async def test_auth_enabled_with_token(client_auth):
 
     # Use token
     ai_msg = AIMessage(content="authed!", response_metadata={"usage": {"total_tokens": 10}})
-    with patch("graphbot.agent.nodes.llm_provider.achat", new_callable=AsyncMock, return_value=ai_msg):
+    with patch("gbot.agent.nodes.llm_provider.achat", new_callable=AsyncMock, return_value=ai_msg):
         resp = await client_auth.post(
             "/chat",
             json={"message": "hi"},
@@ -285,7 +285,7 @@ async def test_api_key_auth(client_auth, _app_with_auth):
 
     # Use API key to access /chat
     ai_msg = AIMessage(content="api-key!", response_metadata={"usage": {"total_tokens": 10}})
-    with patch("graphbot.agent.nodes.llm_provider.achat", new_callable=AsyncMock, return_value=ai_msg):
+    with patch("gbot.agent.nodes.llm_provider.achat", new_callable=AsyncMock, return_value=ai_msg):
         resp = await client_auth.post(
             "/chat",
             json={"message": "hi"},

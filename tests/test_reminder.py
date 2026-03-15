@@ -6,10 +6,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from graphbot.agent.tools.reminder import make_reminder_tools
-from graphbot.core.config import Config
-from graphbot.core.cron.scheduler import CronScheduler
-from graphbot.memory.store import MemoryStore
+from gbot.agent.tools.reminder import make_reminder_tools
+from gbot.core.config import Config
+from gbot.core.cron.scheduler import CronScheduler
+from gbot.memory.store import MemoryStore
 
 
 @pytest.fixture
@@ -128,7 +128,7 @@ async def test_scheduler_execute_reminder(store, mock_runner, cfg):
     }
 
     with patch(
-        "graphbot.core.channels.telegram.send_message", new_callable=AsyncMock
+        "gbot.core.channels.telegram.send_message", new_callable=AsyncMock
     ) as mock_send:
         await sched._execute_reminder(row)
         mock_send.assert_called_once()

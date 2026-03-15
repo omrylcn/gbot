@@ -7,16 +7,16 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from graphbot.agent.delegation import DelegationPlanner
-from graphbot.agent.tools.delegate import make_delegate_tools
-from graphbot.agent.tools.registry import (
+from gbot.agent.delegation import DelegationPlanner
+from gbot.agent.tools.delegate import make_delegate_tools
+from gbot.agent.tools.registry import (
     build_background_tool_registry,
     get_tool_catalog,
     resolve_tools,
 )
-from graphbot.core.config import Config
-from graphbot.core.cron.scheduler import CronScheduler
-from graphbot.memory.store import MemoryStore
+from gbot.core.config import Config
+from gbot.core.cron.scheduler import CronScheduler
+from gbot.memory.store import MemoryStore
 
 
 @pytest.fixture
@@ -161,7 +161,7 @@ async def test_planner_plan_calls_llm(cfg):
         "prompt": "Research the topic.",
         "model": None,
     })
-    with patch("graphbot.agent.delegation.llm_provider.achat", return_value=mock_response):
+    with patch("gbot.agent.delegation.llm_provider.achat", return_value=mock_response):
         result = await planner.plan("Bitcoin fiyatını araştır")
     assert result["tools"] == ["web_search"]
     assert result["prompt"] == "Research the topic."
@@ -202,7 +202,7 @@ def test_scheduler_parse_tools_invalid_json(cfg, store):
 @pytest.mark.asyncio
 async def test_delegate_with_planner(cfg):
     """delegate tool with planner calls planner.plan then routes correctly."""
-    from graphbot.core.background.worker import SubagentWorker
+    from gbot.core.background.worker import SubagentWorker
 
     worker = SubagentWorker(cfg)
     planner = AsyncMock()
@@ -583,7 +583,7 @@ async def test_run_by_processor_agent(cfg, store):
         "tools": ["web_search"],
         "model": None,
     }
-    with patch("graphbot.agent.light.LightAgent") as MockAgent:
+    with patch("gbot.agent.light.LightAgent") as MockAgent:
         mock_instance = AsyncMock()
         mock_instance.run_with_meta = AsyncMock(return_value=("Sunny, 22°C", 150, {"send_message_to_user"}))
         MockAgent.return_value = mock_instance
@@ -715,7 +715,7 @@ async def test_run_by_processor_runner(cfg, store):
 @pytest.mark.asyncio
 async def test_delegate_runner_immediate_downgrade(cfg, store):
     """immediate+runner downgrades to immediate+agent (loop prevention)."""
-    from graphbot.core.background.worker import SubagentWorker
+    from gbot.core.background.worker import SubagentWorker
 
     worker = SubagentWorker(cfg)
     planner = AsyncMock()

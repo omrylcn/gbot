@@ -1,4 +1,4 @@
-"""Tests for graphbot.cli (Faz 8)."""
+"""Tests for gbot.cli (Faz 8)."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -8,9 +8,9 @@ from gbot_cli.commands import app
 
 runner = CliRunner()
 
-_PATCH_CONFIG = "graphbot.core.config.loader.load_config"
-_PATCH_STORE = "graphbot.memory.store.MemoryStore"
-_PATCH_RUNNER = "graphbot.agent.runner.GraphRunner"
+_PATCH_CONFIG = "gbot.core.config.loader.load_config"
+_PATCH_STORE = "gbot.memory.store.MemoryStore"
+_PATCH_RUNNER = "gbot.agent.runner.GraphRunner"
 
 
 def test_cli_help():
@@ -85,8 +85,8 @@ def test_status_output(tmp_path):
     with (
         patch(_PATCH_CONFIG, return_value=fake_config),
         patch(_PATCH_STORE, return_value=fake_db),
-        patch("graphbot.agent.tools.make_tools", return_value=fake_registry),
-        patch("graphbot.agent.context.ContextBuilder.get_context_stats", return_value=fake_stats),
+        patch("gbot.agent.tools.make_tools", return_value=fake_registry),
+        patch("gbot.agent.context.ContextBuilder.get_context_stats", return_value=fake_stats),
     ):
         result = runner.invoke(app, ["status"])
 
@@ -194,8 +194,8 @@ def test_user_list_empty(tmp_path):
 
 
 def test_main_module():
-    """python -m graphbot entry point is importable."""
-    from graphbot.__main__ import app as main_app
+    """python -m gbot entry point is importable."""
+    from gbot.__main__ import app as main_app
 
     from gbot_cli.commands import app as cli_app
 
