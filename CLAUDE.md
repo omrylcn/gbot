@@ -101,9 +101,10 @@ Entry point: `gbot`.
 - [x] Faz 18: Tool Registry — ToolRegistry class, auto group mapping, roles.yaml simplified, /admin/tools (283 tests)
 - [x] Faz 19: AGENT.md & Skills — config/ dir, agents.yaml profiles, prompt extraction, load_skill tool, progressive disclosure (334 tests)
 - [x] Faz 20: Context Service — context/ package, build_layers(), ContextService facade, 8 admin API endpoints, runtime overrides (348 tests)
+- [x] Faz 21: Unified BackgroundTask — 5 tables → 2 (background_tasks + task_executions), deleted cron_tool/reminder, /admin/tasks, dashboard Tasks page (337 tests)
 
-## SQLite Tables (14)
-users, user_channels, sessions, messages, agent_memory, user_notes, favorites, preferences, cron_jobs, cron_execution_log, reminders, system_events, background_tasks, api_keys
+## SQLite Tables (12)
+users, user_channels, sessions, messages, agent_memory, user_notes, favorites, preferences, background_tasks, task_executions, system_events, api_keys
 
 ## Git & Release Strategy
 
