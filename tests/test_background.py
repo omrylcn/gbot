@@ -13,7 +13,6 @@ from gbot.core.cron.types import CronJob
 from gbot.core.cron.scheduler import CronScheduler
 from gbot.core.background.heartbeat import HeartbeatService, _is_empty_content
 from gbot.core.background.worker import SubagentWorker
-from gbot.agent.tools.cron_tool import make_cron_tools
 from gbot.agent.tools.delegate import make_delegate_tools
 from gbot.memory.store import MemoryStore
 
@@ -236,37 +235,6 @@ async def test_worker_shutdown(cfg):
         await worker.shutdown()
         assert worker.get_running_count() == 0
         assert mock_agent.run.call_count == 2
-
-
-# ── Cron Tool Integration ──────────────────────────────────
-
-
-def test_cron_tools_none():
-    """No scheduler → empty list."""
-    assert make_cron_tools(None) == []
-
-
-def test_cron_tools_created(store, mock_runner):
-    """With scheduler → 4 tools."""
-    sched = CronScheduler(store, mock_runner)
-    tools = make_cron_tools(sched)
-    assert len(tools) == 4
-    names = {t.name for t in tools}
-    assert names == {"add_cron_job", "list_cron_jobs", "remove_cron_job", "create_alert"}
-
-
-def test_cron_tool_add_job(store, mock_runner):
-    """add_cron_job tool → scheduler.add_job → result string."""
-    sched = CronScheduler(store, mock_runner)
-    with patch.object(sched, "_scheduler"):
-        tools = make_cron_tools(sched)
-        add = next(t for t in tools if t.name == "add_cron_job")
-        result = add.invoke({
-            "user_id": "u1",
-            "cron_expr": "0 9 * * *",
-            "message": "Good morning",
-        })
-        assert "created" in result.lower()
 
 
 # ── Delegate Tool Integration ───────────────────────────────

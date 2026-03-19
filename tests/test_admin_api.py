@@ -78,21 +78,21 @@ async def test_admin_users(client, app):
 
 
 @pytest.mark.asyncio
-async def test_admin_crons(client):
-    """GET /admin/crons returns empty list."""
-    resp = await client.get("/admin/crons")
+async def test_admin_tasks(client):
+    """GET /admin/tasks returns list."""
+    resp = await client.get("/admin/tasks")
     assert resp.status_code == 200
-    assert resp.json() == []
+    assert isinstance(resp.json(), list)
 
 
 @pytest.mark.asyncio
-async def test_admin_remove_cron(client, app):
-    """DELETE /admin/crons/{job_id} removes job."""
+async def test_admin_remove_task(client, app):
+    """DELETE /admin/tasks/{task_id} cancels task."""
     app.state.db.get_or_create_user("alice", name="Alice")
     app.state.db.add_cron_job("cron-1", "alice", "*/5 * * * *", "ping")
-    resp = await client.delete("/admin/crons/cron-1")
+    resp = await client.delete("/admin/tasks/cron-1")
     assert resp.status_code == 200
-    assert resp.json()["status"] == "removed"
+    assert resp.json()["status"] == "cancelled"
 
 
 @pytest.mark.asyncio

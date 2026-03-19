@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from gbot.agent.tools.reminder import make_reminder_tools
 from gbot.core.config import Config
 from gbot.core.cron.scheduler import CronScheduler
 from gbot.memory.store import MemoryStore
@@ -125,6 +124,8 @@ async def test_scheduler_execute_reminder(store, mock_runner, cfg):
         "message": "Time to wake up",
         "channel": "telegram",
         "run_at": "2026-12-31T10:00:00",
+        "processor": "static",
+        "execution_type": "delayed",
     }
 
     with patch(
@@ -151,35 +152,3 @@ async def test_scheduler_cancel_reminder(store, mock_runner, cfg):
     assert len(sched.list_reminders("u1")) == 0
 
 
-# ── Reminder tools ─────────────────────────────────────────
-
-
-def test_reminder_tool_create(store, mock_runner, cfg):
-    sched = CronScheduler(store, mock_runner, config=cfg)
-    with patch.object(sched, "_scheduler"):
-        tools = make_reminder_tools(sched)
-        create = next(t for t in tools if t.name == "create_reminder")
-        result = create.invoke({
-            "user_id": "u1", "delay_seconds": 600, "message": "Check oven",
-            "channel": "telegram",
-        })
-    assert "Reminder set" in result
-    reminders = store.get_pending_reminders("u1")
-    assert reminders
-    assert reminders[0]["channel"] == "telegram"
-
-
-def test_reminder_tool_list(store, mock_runner, cfg):
-    sched = CronScheduler(store, mock_runner, config=cfg)
-    store.add_reminder("r1", "u1", "2026-12-31T10:00:00", "Test", "telegram")
-
-    tools = make_reminder_tools(sched)
-    list_tool = next(t for t in tools if t.name == "list_reminders")
-    result = list_tool.invoke({"user_id": "u1"})
-    assert "r1" in result
-    assert "Test" in result
-
-
-def test_reminder_tool_none_scheduler():
-    tools = make_reminder_tools(scheduler=None)
-    assert tools == []

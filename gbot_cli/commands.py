@@ -313,10 +313,10 @@ def status(
             "SELECT COUNT(*) FROM messages"
         ).fetchone()[0]
         cron_count = conn.execute(
-            "SELECT COUNT(*) FROM cron_jobs WHERE enabled = 1"
+            "SELECT COUNT(*) FROM background_tasks WHERE execution_type IN ('recurring', 'monitor') AND enabled = 1"
         ).fetchone()[0]
         reminder_count = conn.execute(
-            "SELECT COUNT(*) FROM reminders WHERE status = 'pending'"
+            "SELECT COUNT(*) FROM background_tasks WHERE execution_type = 'delayed' AND status = 'pending'"
         ).fetchone()[0]
         note_count = conn.execute(
             "SELECT COUNT(*) FROM user_notes"

@@ -113,8 +113,8 @@ class SubagentWorker:
                 if session:
                     self.db.add_message(
                         session["session_id"],
-                        role="assistant",
-                        content=f"[Background task result — task:{task_id}]\n\n{response}",
+                        role="system",
+                        content=f"[task:{task_id}] Delivered to {channel}: {response[:200]}",
                     )
                     logger.info(f"Subagent {task_id} result added to session {session['session_id']}")
 

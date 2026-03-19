@@ -177,7 +177,7 @@ class SlashCommandRouter:
         info_table.add_row("Total Tokens", f"{sessions.get('total_tokens', 0):,}")
         info_table.add_row("Messages", f"{db_data.get('messages', 0):,}")
         info_table.add_row("Users", str(db_data.get("users", 0)))
-        info_table.add_row("Cron Jobs", str(db_data.get("cron_jobs", 0)))
+        info_table.add_row("Active Tasks", str(db_data.get("recurring_tasks", 0)))
         c.print(Panel(info_table, title="Overview", border_style="magenta"))
 
         # ── Active Session ──

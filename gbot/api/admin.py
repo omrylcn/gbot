@@ -1,4 +1,4 @@
-"""Admin API endpoints — server status, config, users, crons, skills, logs, context."""
+"""Admin API endpoints — server status, config, users, tasks, skills, logs, context."""
 
 from __future__ import annotations
 
@@ -140,29 +140,30 @@ async def set_user_role(
     return {"user_id": user_id, "role": body.role}
 
 
-@router.get("/crons")
-async def admin_crons(
+@router.get("/tasks")
+async def admin_tasks(
+    execution_type: str | None = Query(default=None),
+    status: str | None = Query(default=None),
     current_user: str = Depends(get_current_user),
     config: Config = Depends(get_config),
     db: MemoryStore = Depends(get_db),
 ):
-    """List all cron jobs."""
+    """List background tasks with optional filters."""
     _require_owner(current_user, config)
-    jobs = db.get_cron_jobs()
-    return [dict(j) for j in jobs]
+    return db.get_tasks(execution_type=execution_type, status=status)
 
 
-@router.delete("/crons/{job_id}")
-async def admin_remove_cron(
-    job_id: str,
+@router.delete("/tasks/{task_id}")
+async def admin_remove_task(
+    task_id: str,
     current_user: str = Depends(get_current_user),
     config: Config = Depends(get_config),
     db: MemoryStore = Depends(get_db),
 ):
-    """Remove a cron job."""
+    """Cancel/remove a task."""
     _require_owner(current_user, config)
-    db.remove_cron_job(job_id)
-    return {"status": "removed", "job_id": job_id}
+    db.cancel_task(task_id)
+    return {"status": "cancelled", "task_id": task_id}
 
 
 @router.get("/tools")
@@ -220,10 +221,10 @@ async def admin_stats(
             "SELECT COUNT(*) FROM messages"
         ).fetchone()[0]
         cron_count = conn.execute(
-            "SELECT COUNT(*) FROM cron_jobs WHERE enabled = 1"
+            "SELECT COUNT(*) FROM background_tasks WHERE execution_type IN ('recurring', 'monitor') AND enabled = 1"
         ).fetchone()[0]
         reminder_count = conn.execute(
-            "SELECT COUNT(*) FROM reminders WHERE status = 'pending'"
+            "SELECT COUNT(*) FROM background_tasks WHERE execution_type = 'delayed' AND status = 'pending'"
         ).fetchone()[0]
         note_count = conn.execute(
             "SELECT COUNT(*) FROM user_notes"
@@ -255,8 +256,8 @@ async def admin_stats(
             "messages": total_messages,
             "notes": note_count,
             "memories": memory_count,
-            "cron_jobs": cron_count,
-            "reminders": reminder_count,
+            "recurring_tasks": cron_count,
+            "pending_delayed": reminder_count,
         },
     }
 
@@ -268,15 +269,9 @@ async def admin_logs(
     config: Config = Depends(get_config),
     db: MemoryStore = Depends(get_db),
 ):
-    """Recent delegation logs."""
+    """Recent delegation/execution logs."""
     _require_owner(current_user, config)
-
-    with db._get_conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM delegation_log ORDER BY created_at DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
-    return [dict(r) for r in rows]
+    return db.get_executions(limit=limit)
 
 
 # ── Context Inspection ─────────────────────────────────

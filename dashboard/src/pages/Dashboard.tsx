@@ -34,7 +34,7 @@ export default function DashboardPage() {
         <StatCard title="Users" value={formatNumber(stats.data.users)} icon={Users} />
         <StatCard title="Active Sessions" value={formatNumber(stats.sessions.active)} icon={Activity} />
         <StatCard title="Total Messages" value={formatNumber(stats.data.messages)} icon={MessageSquare} />
-        <StatCard title="Cron Jobs" value={formatNumber(stats.data.cron_jobs)} icon={Clock} />
+        <StatCard title="Active Tasks" value={formatNumber(stats.data.recurring_tasks)} icon={Clock} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
@@ -61,7 +61,7 @@ export default function DashboardPage() {
             <InfoRow label="Total Sessions" value={formatNumber(stats.sessions.total)} />
             <InfoRow label="Total Tokens" value={formatNumber(stats.sessions.total_tokens)} />
             <InfoRow label="Notes" value={formatNumber(stats.data.notes)} />
-            <InfoRow label="Reminders" value={formatNumber(stats.data.reminders)} />
+            <InfoRow label="Pending Tasks" value={formatNumber(stats.data.pending_delayed)} />
           </div>
         </div>
       </div>
@@ -94,11 +94,11 @@ export default function DashboardPage() {
             {logs.map((log) => (
               <div key={log.id} className="flex items-start gap-3 py-2 border-b border-border last:border-0">
                 <Badge variant={log.processor_type === "runner" ? "primary" : "warning"}>
-                  {log.processor_type}
+                  {log.processor_type || log.status}
                 </Badge>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-foreground truncate">{log.task_description}</p>
-                  <p className="text-xs text-muted">{formatDate(log.created_at)}</p>
+                  <p className="text-sm text-foreground truncate">{log.result || log.task_description || ""}</p>
+                  <p className="text-xs text-muted">{formatDate(log.executed_at || log.created_at || "")}</p>
                 </div>
               </div>
             ))}
