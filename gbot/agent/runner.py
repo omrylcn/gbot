@@ -46,6 +46,8 @@ class GraphRunner:
             self.registry = make_tools(config, db)
         self.tools = self.registry.get_all_tools()
         setup_provider(config)
+        
+        # TODO: asign graph type langchain type
         self._graph = create_graph(config, db, self.tools)
 
     async def process(
