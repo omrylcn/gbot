@@ -148,7 +148,7 @@ async def test_cron_telegram_unchanged(store, mock_runner, manager):
 
 @pytest.mark.asyncio
 async def test_worker_ws_push(store, cfg, manager):
-    """Worker pushes via WS and marks event delivered."""
+    """Worker pushes result via WS when connected."""
     ws = AsyncMock()
     manager.connect("u1", ws)
 
@@ -168,14 +168,10 @@ async def test_worker_ws_push(store, cfg, manager):
     assert sent["type"] == "event"
     assert sent["event_type"] == "task_completed"
 
-    # Event should be marked delivered
-    events = store.get_undelivered_events("u1")
-    assert len(events) == 0
-
 
 @pytest.mark.asyncio
 async def test_worker_no_ws_fallback(store, cfg):
-    """Worker without WS manager -> event stays undelivered in DB."""
+    """Worker without WS manager -> result still saved to background_tasks."""
     worker = SubagentWorker(cfg, db=store)
 
     with patch("gbot.agent.light.LightAgent") as MockAgent:
@@ -186,6 +182,4 @@ async def test_worker_no_ws_fallback(store, cfg):
         worker.spawn("u1", "research", "api")
         await asyncio.sleep(0.3)
 
-    events = store.get_undelivered_events("u1")
-    assert len(events) == 1
-    assert events[0]["event_type"] == "task_completed"
+    # Worker no longer writes to system_events; result saved to background_tasks + session

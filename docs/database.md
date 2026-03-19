@@ -6,14 +6,14 @@ GBot uses **SQLite with WAL mode** as its single source of truth for all persist
 
 **Key Principles:**
 - **SQLite is the source of truth** — LangGraph checkpointing is NOT used
-- **15 tables** organized into 5 functional groups
+- **14 tables** organized into 5 functional groups
 - **Request-scoped operations** — data flows through FastAPI → GraphRunner → MemoryStore → SQLite
 - **Foreign keys enforced** — maintains referential integrity
 - **Indexes on frequent queries** — optimized for user/session lookups
 
 ---
 
-## Database Structure (15 Tables)
+## Database Structure (14 Tables)
 
 ### 📊 Table Groups
 
@@ -21,7 +21,7 @@ GBot uses **SQLite with WAL mode** as its single source of truth for all persist
 |-------|--------|---------|
 | **Identity & Auth** | `users`, `user_channels`, `api_keys` | User accounts, cross-channel links, API access |
 | **Conversations** | `sessions`, `messages` | Chat history and lifecycle |
-| **Memory & Context** | `agent_memory`, `user_notes`, `activity_logs`, `favorites`, `preferences` | Long-term learning and personalization |
+| **Memory & Context** | `agent_memory`, `user_notes`, `favorites`, `preferences` | Long-term learning and personalization |
 | **Scheduling** | `cron_jobs`, `cron_execution_log`, `reminders` | Periodic tasks and one-shot notifications |
 | **Background Tasks** | `system_events`, `background_tasks` | Async subagent work and event delivery |
 
@@ -315,46 +315,7 @@ context = "User notes:\n" + "\n".join([f"- {n['note']}" for n in notes])
 
 ---
 
-### 7. `activity_logs` — User Activity Tracking
-
-**Purpose:** Records user actions for analytics and context (adapted from ascibot's meal_logs).
-
-**Schema:**
-```sql
-CREATE TABLE activity_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT NOT NULL,
-    item_id TEXT,                     -- Optional reference to external item
-    item_title TEXT NOT NULL,         -- "Completed task X", "Used feature Y"
-    activity_type TEXT DEFAULT 'used',
-    activity_date DATE DEFAULT CURRENT_DATE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(user_id)
-);
-CREATE INDEX idx_activity_user ON activity_logs(user_id, activity_date DESC);
-```
-
-**Data Source:**
-- **Agent tool:** `log_activity()` — LLM tracks significant events
-- **Admin API:** `GET /admin/logs` — view recent activities
-
-**Example Flow:**
-```python
-# User completes a task
-Agent calls: log_activity(user_id="zynp", item_title="Finished report")
-
-# Stored in database
-INSERT INTO activity_logs (user_id, item_title, activity_type, activity_date)
-VALUES ('zynp', 'Finished report', 'used', '2026-02-16');
-```
-
-**Usage:**
-- `get_recent_activities(user_id, days=7)` → "Show what I did last week"
-- Admin dashboard analytics
-
----
-
-### 8. `favorites` — User Favorites
+### 7. `favorites` — User Favorites
 
 **Purpose:** Save items the user marks as favorites.
 
@@ -381,7 +342,7 @@ Agent: [calls add_favorite(user_id="owner", item_id="doc123", item_title="GBot G
 
 ---
 
-### 9. `preferences` — User Settings
+### 8. `preferences` — User Settings
 
 **Purpose:** Flexible JSON storage for user preferences (theme, language, notification settings, etc.).
 
@@ -414,7 +375,7 @@ CREATE TABLE preferences (
 
 ---
 
-### 10. `cron_jobs` — Scheduled Tasks
+### 9. `cron_jobs` — Scheduled Tasks
 
 **Purpose:** Periodic tasks with LLM processing (daily reports, monitoring, recurring queries).
 
@@ -481,7 +442,7 @@ else:
 
 ---
 
-### 11. `cron_execution_log` — Job Execution History
+### 10. `cron_execution_log` — Job Execution History
 
 **Purpose:** Audit trail for cron job runs.
 
@@ -509,7 +470,7 @@ VALUES ('job-abc', 'No new GitHub stars.', 'success', 150, 1200);
 
 ---
 
-### 12. `reminders` — One-Shot & Recurring Notifications
+### 11. `reminders` — One-Shot & Recurring Notifications
 
 **Purpose:** Simple message delivery without LLM processing (cheaper than cron_jobs).
 
@@ -562,17 +523,19 @@ VALUES ('rem-xyz', 'zynp', 'Toplantı var!', 'telegram', '2026-02-16T14:00:00Z',
 
 ---
 
-### 13. `system_events` — Background → Agent Communication
+### 12. `system_events` — Delivery Queue for API/WS Channels
 
-**Purpose:** Queue events from background tasks for agent notification (used with WebSocket or polling).
+**Purpose:** Message queue for API/WS channels when no active connection exists. Used for polling and WebSocket push.
 
 **Schema:**
 ```sql
 CREATE TABLE system_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
-    source TEXT,                      -- 'task:abc', 'cron:job-xyz'
-    event_type TEXT,                  -- 'task_completed', 'alert_triggered'
+    channel TEXT,                     -- 'api', 'ws' (channel the event targets)
+    session_id TEXT,                  -- Session context (if available)
+    source TEXT,                      -- 'cron', 'task:abc'
+    event_type TEXT,                  -- 'message', 'task_completed'
     payload TEXT,                     -- Event data (JSON or text)
     is_delivered BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -617,7 +580,7 @@ db.add_system_event(
 
 ---
 
-### 14. `background_tasks` — Subagent Results
+### 13. `background_tasks` — Subagent Results
 
 **Purpose:** Stores background task metadata and results (delegated work via LightAgent).
 
@@ -663,7 +626,7 @@ print(task["status"], task["result"])
 
 ---
 
-### 15. `api_keys` — API Access Tokens
+### 14. `api_keys` — API Access Tokens
 
 **Purpose:** Alternative authentication method (API keys instead of JWT).
 
@@ -733,7 +696,6 @@ curl -H "Authorization: Bearer gbot_sk_abc123xyz" https://gbot-assistant.cloud/c
 │ - messages: user + assistant + tool         │
 │ - sessions: update token_count              │
 │ - user_notes: if agent called save_note()   │
-│ - activity_logs: if agent logged activity   │
 │ - favorites: if agent added favorite        │
 └─────────────────────────────────────────────┘
 ```
@@ -831,9 +793,9 @@ curl -H "Authorization: Bearer gbot_sk_abc123xyz" https://gbot-assistant.cloud/c
 ┌─────────────────────────────────────────────┐
 │ On Completion                               │
 │ - UPDATE background_tasks (result, status)  │
-│ - INSERT INTO system_events                 │
+│ - INSERT into session history               │
 │ - Push via WebSocket (if connected)         │
-│ - OR user polls: GET /events/{user_id}      │
+│ - OR deliver via channel (Telegram/WA)      │
 └─────────────────────────────────────────────┘
 ```
 
@@ -949,7 +911,6 @@ GROUP BY s.session_id;
 SELECT
     (SELECT COUNT(*) FROM user_notes WHERE user_id='owner') as notes_count,
     (SELECT COUNT(*) FROM favorites WHERE user_id='owner') as favorites_count,
-    (SELECT COUNT(*) FROM activity_logs WHERE user_id='owner') as activities_count,
     (SELECT data FROM preferences WHERE user_id='owner') as preferences;
 ```
 
@@ -990,7 +951,6 @@ Current indexes optimize these queries:
 - `idx_sessions_user` → User's recent sessions
 - `idx_messages_session` → Session history retrieval
 - `idx_notes_user` → User context building
-- `idx_activity_user` → Recent activity lookups
 
 ### WAL Mode
 
@@ -1068,7 +1028,6 @@ docker compose restart
 | `messages` | Every chat request (API, Telegram) | Every message exchange |
 | `agent_memory` | Manual insert, planned admin API | System knowledge seeding |
 | `user_notes` | Agent tool `save_user_note()` | When LLM learns facts |
-| `activity_logs` | Agent tool `log_activity()` | When LLM tracks actions |
 | `favorites` | Agent tool `add_favorite()` | User favorites management |
 | `preferences` | Agent learning, planned API | User settings storage |
 | `cron_jobs` | Agent tool `add_cron_job()` | Scheduled task creation |
@@ -1084,20 +1043,19 @@ docker compose restart
 | Tool Name | Tables Modified | Example Usage |
 |-----------|----------------|---------------|
 | `save_user_note` | `user_notes` | "Remember I prefer dark theme" |
-| `log_activity` | `activity_logs` | "I completed the report" |
 | `add_favorite` | `favorites` | "Add this to favorites" |
 | `create_reminder` | `reminders` | "Remind me in 2 hours" |
 | `create_recurring_reminder` | `reminders` | "Every morning at 9am..." |
 | `add_cron_job` | `cron_jobs` | "Daily check GitHub stars" |
 | `create_alert` | `cron_jobs` | "Alert if price > $2000" |
-| `delegate` | `background_tasks`, `system_events` | "Research in background" |
+| `delegate` | `background_tasks`, `messages` | "Research in background" |
 
 ---
 
 ## Conclusion
 
 GBot's database is the **single source of truth** for all state:
-- ✅ **15 tables** covering identity, conversations, memory, scheduling, and background work
+- ✅ **14 tables** covering identity, conversations, memory, scheduling, and background work
 - ✅ **Request-scoped operations** — no long-running state in LangGraph
 - ✅ **Tool-driven data** — LLM decides when to save notes, schedule tasks, etc.
 - ✅ **Automated backups** — daily snapshots with 7-day retention

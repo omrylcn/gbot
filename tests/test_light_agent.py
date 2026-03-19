@@ -126,16 +126,15 @@ def test_system_events_crud(store):
     assert len(store.get_undelivered_events("u1")) == 0
 
 
-def test_system_events_in_context(store, cfg):
-    """Undelivered events appear in context prompt."""
-    store.add_system_event("u1", "task:abc", "task_completed", "Research done")
+def test_system_events_crud(store):
+    """System events CRUD: add, get undelivered, mark delivered."""
+    eid = store.add_system_event("u1", "task:abc", "task_completed", "Research done", channel="api")
+    events = store.get_undelivered_events("u1")
+    assert len(events) == 1
+    assert events[0]["source"] == "task:abc"
+    assert events[0]["channel"] == "api"
 
-    builder = ContextBuilder(cfg, store)
-    prompt = builder.build("u1")
-    assert "Background Notifications" in prompt
-    assert "Research done" in prompt
-
-    # After build, events should be marked delivered
+    store.mark_events_delivered([eid])
     assert len(store.get_undelivered_events("u1")) == 0
 
 
@@ -224,8 +223,11 @@ async def test_cron_job_legacy_fallback(store, mock_runner):
 
 @pytest.mark.asyncio
 async def test_background_task_persistence(store, cfg):
-    """Worker saves result to DB + creates system_event."""
+    """Worker saves result to DB + injects into session history."""
     worker = SubagentWorker(cfg, db=store)
+
+    # Create session so worker can inject result
+    sid = store.create_session("u1", channel="api")
 
     with patch("gbot.agent.light.LightAgent") as MockAgent:
         mock_agent = AsyncMock()
@@ -240,10 +242,11 @@ async def test_background_task_persistence(store, cfg):
     assert task["status"] == "completed"
     assert task["result"] == "Done"
 
-    events = store.get_undelivered_events("u1")
-    assert len(events) == 1
-    assert events[0]["source"] == f"task:{task_id}"
-    assert events[0]["event_type"] == "task_completed"
+    # Result should be in session history
+    msgs = store.get_session_messages(sid)
+    assistant_msgs = [m for m in msgs if m["role"] == "assistant"]
+    assert len(assistant_msgs) >= 1
+    assert f"task:{task_id}" in assistant_msgs[-1]["content"]
 
 
 def test_create_alert_tool(store, mock_runner):

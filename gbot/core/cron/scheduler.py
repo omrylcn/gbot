@@ -300,8 +300,8 @@ class CronScheduler:
                 logger.info(f"Event pushed via WS to user={user_id}")
                 return True
 
-        # Fallback: save as system_event for polling / context injection
-        self.db.add_system_event(user_id, "cron", "message", text)
+        # Fallback: save as system_event for polling
+        self.db.add_system_event(user_id, "cron", "message", text, channel=channel)
         logger.info(f"Event saved to DB for user={user_id} (no active WS)")
         return False
 
@@ -315,7 +315,7 @@ class CronScheduler:
         processor: str,
         source_id: str,
     ) -> None:
-        """Record proactive message to user's session and system_events.
+        """Record proactive message to user's active session.
 
         Ensures the main agent knows about messages sent by background
         services (cron jobs, reminders). Mirrors SubagentWorker pattern.
@@ -325,10 +325,10 @@ class CronScheduler:
             session = self.db.get_active_session(user_id)
         if session:
             prefix = {
-                "static": "Hatırlatma",
-                "function": "Otomatik işlem",
-                "agent": "Arka plan görev sonucu",
-            }.get(processor, "Proaktif mesaj")
+                "static": "Reminder",
+                "function": "Automated action",
+                "agent": "Background task result",
+            }.get(processor, "Proactive message")
             self.db.add_message(
                 session["session_id"],
                 role="assistant",
@@ -337,13 +337,6 @@ class CronScheduler:
             logger.debug(
                 f"Proactive message recorded to session {session['session_id']}"
             )
-
-        self.db.add_system_event(
-            user_id,
-            source=source_id,
-            event_type="proactive_message",
-            payload=response[:2000],
-        )
 
     # ── Processor execution ──────────────────────────────────
 

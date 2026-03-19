@@ -836,14 +836,16 @@ class MemoryStore:
         source: str,
         event_type: str,
         payload: str,
+        channel: str | None = None,
+        session_id: str | None = None,
     ) -> int:
         """Create a system event. Returns the event ID."""
         with self._get_conn() as conn:
             cur = conn.execute(
                 """INSERT INTO system_events
-                   (user_id, source, event_type, payload)
-                   VALUES (?, ?, ?, ?)""",
-                (user_id, source, event_type, payload),
+                   (user_id, channel, session_id, source, event_type, payload)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (user_id, channel, session_id, source, event_type, payload),
             )
             conn.commit()
             return cur.lastrowid
@@ -1130,10 +1132,12 @@ CREATE TABLE IF NOT EXISTS reminders (
     FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
 
--- 13. System events (background → agent communication)
+-- 13. System events (delivery queue for API/WS channels)
 CREATE TABLE IF NOT EXISTS system_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
+    channel TEXT,
+    session_id TEXT,
     source TEXT,
     event_type TEXT,
     payload TEXT,
