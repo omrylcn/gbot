@@ -6,6 +6,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.14.1] - 2026-03-19
+
+### Improved
+
+- **CronScheduler proactive message recording:** Cron jobs and reminders now record their responses to the user's active session and `system_events` table via `_record_proactive_message()` helper. Previously, agent-processor messages were delivered directly via `send_message_to_user` but the main agent had no context about what was sent. Recording is now independent of `should_deliver` flag — works for all processor types (static, function, agent).
+
 ## [1.14.0] - 2026-03-14
 
 ### Added (Faz 20: Context Service, Admin Dashboard & API)
