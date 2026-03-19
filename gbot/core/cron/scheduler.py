@@ -305,6 +305,46 @@ class CronScheduler:
         logger.info(f"Event saved to DB for user={user_id} (no active WS)")
         return False
 
+    # ── Post-process: record proactive messages ─────────────
+
+    async def _record_proactive_message(
+        self,
+        user_id: str,
+        channel: str,
+        response: str,
+        processor: str,
+        source_id: str,
+    ) -> None:
+        """Record proactive message to user's session and system_events.
+
+        Ensures the main agent knows about messages sent by background
+        services (cron jobs, reminders). Mirrors SubagentWorker pattern.
+        """
+        session = self.db.get_active_session(user_id, channel=channel)
+        if not session:
+            session = self.db.get_active_session(user_id)
+        if session:
+            prefix = {
+                "static": "Hatırlatma",
+                "function": "Otomatik işlem",
+                "agent": "Arka plan görev sonucu",
+            }.get(processor, "Proaktif mesaj")
+            self.db.add_message(
+                session["session_id"],
+                role="assistant",
+                content=f"[{prefix} — {source_id}]\n\n{response}",
+            )
+            logger.debug(
+                f"Proactive message recorded to session {session['session_id']}"
+            )
+
+        self.db.add_system_event(
+            user_id,
+            source=source_id,
+            event_type="proactive_message",
+            payload=response[:2000],
+        )
+
     # ── Processor execution ──────────────────────────────────
 
     async def _run_by_processor(
@@ -445,6 +485,14 @@ class CronScheduler:
                     )
             else:
                 logger.info(f"Cron job {job.job_id} executed (no delivery)")
+
+            # Record to session + system_event so main agent knows
+            # (regardless of should_deliver — agent processor sends its own)
+            if response:
+                await self._record_proactive_message(
+                    job.user_id, job.channel, response,
+                    processor, f"cron:{job.job_id}",
+                )
         except Exception as e:
             duration_ms = int((time.time() - start) * 1000)
             logger.error(f"Cron job {job.job_id} failed: {e}")
@@ -522,6 +570,14 @@ class CronScheduler:
                     return
             else:
                 logger.info(f"Reminder {reminder_id} executed (no delivery)")
+
+            # Record to session + system_event so main agent knows
+            # (regardless of should_deliver — agent processor sends its own)
+            if response:
+                await self._record_proactive_message(
+                    user_id, channel, response,
+                    processor, f"reminder:{reminder_id}",
+                )
 
             # Mark one-shot reminders as sent
             if not is_recurring:
