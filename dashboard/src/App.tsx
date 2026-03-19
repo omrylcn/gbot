@@ -6,7 +6,7 @@ import ConversationsPage from "@/pages/Conversations";
 import ContextPage from "@/pages/Context";
 import UsersPage from "@/pages/Users";
 import ToolsPage from "@/pages/Tools";
-import CronsPage from "@/pages/Crons";
+import TasksPage from "@/pages/Crons";
 import SettingsPage from "@/pages/Settings";
 
 export default function App() {
@@ -19,7 +19,7 @@ export default function App() {
         <Route path="context" element={<ContextPage />} />
         <Route path="users" element={<UsersPage />} />
         <Route path="tools" element={<ToolsPage />} />
-        <Route path="crons" element={<CronsPage />} />
+        <Route path="crons" element={<TasksPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

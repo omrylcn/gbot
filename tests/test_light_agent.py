@@ -99,7 +99,8 @@ async def test_consecutive_failures_pause(store, mock_runner):
     store.add_cron_job("j1", "u1", "0 9 * * *", "check", "api")
     mock_runner.process = AsyncMock(side_effect=Exception("API error"))
     sched = CronScheduler(store, mock_runner)
-    job = CronJob(job_id="j1", user_id="u1", cron_expr="0 9 * * *", message="check")
+    job = CronJob(job_id="j1", user_id="u1", cron_expr="0 9 * * *", message="check",
+                  execution_type="recurring")
 
     with patch.object(sched, "_scheduler"):
         for _ in range(3):
@@ -126,16 +127,15 @@ def test_system_events_crud(store):
     assert len(store.get_undelivered_events("u1")) == 0
 
 
-def test_system_events_in_context(store, cfg):
-    """Undelivered events appear in context prompt."""
-    store.add_system_event("u1", "task:abc", "task_completed", "Research done")
+def test_system_events_crud(store):
+    """System events CRUD: add, get undelivered, mark delivered."""
+    eid = store.add_system_event("u1", "task:abc", "task_completed", "Research done", channel="api")
+    events = store.get_undelivered_events("u1")
+    assert len(events) == 1
+    assert events[0]["source"] == "task:abc"
+    assert events[0]["channel"] == "api"
 
-    builder = ContextBuilder(cfg, store)
-    prompt = builder.build("u1")
-    assert "Background Notifications" in prompt
-    assert "Research done" in prompt
-
-    # After build, events should be marked delivered
+    store.mark_events_delivered([eid])
     assert len(store.get_undelivered_events("u1")) == 0
 
 
@@ -224,8 +224,11 @@ async def test_cron_job_legacy_fallback(store, mock_runner):
 
 @pytest.mark.asyncio
 async def test_background_task_persistence(store, cfg):
-    """Worker saves result to DB + creates system_event."""
+    """Worker saves result to DB + injects into session history."""
     worker = SubagentWorker(cfg, db=store)
+
+    # Create session so worker can inject result
+    sid = store.create_session("u1", channel="api")
 
     with patch("gbot.agent.light.LightAgent") as MockAgent:
         mock_agent = AsyncMock()
@@ -240,56 +243,10 @@ async def test_background_task_persistence(store, cfg):
     assert task["status"] == "completed"
     assert task["result"] == "Done"
 
-    events = store.get_undelivered_events("u1")
-    assert len(events) == 1
-    assert events[0]["source"] == f"task:{task_id}"
-    assert events[0]["event_type"] == "task_completed"
+    # Result should be in session history
+    msgs = store.get_session_messages(sid)
+    system_msgs = [m for m in msgs if m["role"] == "system"]
+    assert len(system_msgs) >= 1
+    assert f"task:{task_id}" in system_msgs[-1]["content"]
 
 
-def test_create_alert_tool(store, mock_runner):
-    """create_alert tool creates a cron job with notify_skip config."""
-    from gbot.agent.tools.cron_tool import make_cron_tools
-
-    sched = CronScheduler(store, mock_runner)
-    with patch.object(sched, "_scheduler"):
-        tools = make_cron_tools(sched)
-        alert = next(t for t in tools if t.name == "create_alert")
-        result = alert.invoke({
-            "user_id": "u1",
-            "cron_expr": "*/10 * * * *",
-            "check_message": "Check gold price",
-        })
-
-    assert "Alert created" in result
-    jobs = store.get_cron_jobs("u1")
-    assert len(jobs) == 1
-    assert jobs[0]["notify_condition"] == "notify_skip"
-    assert jobs[0]["agent_prompt"] is not None
-    # Default agent_tools should be set (web_search + web_fetch)
-    import json
-    agent_tools = json.loads(jobs[0]["agent_tools"])
-    assert "web_search" in agent_tools
-    assert "web_fetch" in agent_tools
-
-
-def test_create_alert_custom_tools(store, mock_runner):
-    """create_alert with explicit agent_tools stores them correctly."""
-    from gbot.agent.tools.cron_tool import make_cron_tools
-
-    sched = CronScheduler(store, mock_runner)
-    with patch.object(sched, "_scheduler"):
-        tools = make_cron_tools(sched)
-        alert = next(t for t in tools if t.name == "create_alert")
-        result = alert.invoke({
-            "user_id": "u1",
-            "cron_expr": "*/30 * * * *",
-            "check_message": "Use web_fetch('gold') to check prices",
-            "agent_tools": ["web_fetch"],
-        })
-
-    assert "Alert created" in result
-    jobs = store.get_cron_jobs("u1")
-    assert len(jobs) == 1
-    import json
-    agent_tools = json.loads(jobs[0]["agent_tools"])
-    assert agent_tools == ["web_fetch"]

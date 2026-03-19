@@ -660,9 +660,10 @@ def test_delegation_log_crud(store):
     store.log_delegation("u1", "Research BTC", "immediate", "agent", reference_id="bg:abc")
     logs = store.get_delegation_log("u1")
     assert len(logs) >= 1
-    assert logs[0]["task_description"] == "Research BTC"
+    assert logs[0]["result"] == "Research BTC"
     assert logs[0]["execution_type"] == "immediate"
     assert logs[0]["processor_type"] == "agent"
+    assert logs[0]["status"] == "planned"
 
 
 # ── Runner processor (self-reminder) ─────────────────────

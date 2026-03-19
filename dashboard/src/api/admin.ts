@@ -6,7 +6,7 @@ export interface SystemStats {
   context: { layers: { layer: string; chars: number; tokens: number }[]; total_chars: number; total_tokens: number };
   tools: { total: number; available: number; groups: Record<string, string[]> };
   sessions: { active: number; total: number; total_tokens: number };
-  data: { users: number; messages: number; notes: number; memories: number; cron_jobs: number; reminders: number };
+  data: { users: number; messages: number; notes: number; memories: number; recurring_tasks: number; pending_delayed: number };
 }
 
 export interface ServerStatus {
@@ -25,16 +25,25 @@ export interface User {
   channels?: { channel: string; channel_user_id: string }[];
 }
 
-export interface CronJob {
-  job_id: string;
+export interface BackgroundTask {
+  task_id: string;
   user_id: string;
-  cron_expr: string;
+  execution_type: string;
+  processor: string;
   message: string;
   channel: string;
+  cron_expr: string | null;
+  run_at: string | null;
   enabled: number;
+  status: string;
   agent_prompt: string | null;
-  processor: string | null;
+  created_at: string;
+  // Legacy compat
+  job_id?: string;
 }
+
+// Legacy alias
+export type CronJob = BackgroundTask;
 
 export interface ToolsResponse {
   tools: { name: string; description: string; group: string }[];
@@ -84,12 +93,18 @@ export interface ProfileDetail extends AgentProfile {
 
 export interface DelegationLog {
   id: number;
+  task_id: string;
   user_id: string;
-  task_description: string;
-  processor_type: string;
+  execution_type: string | null;
+  processor_type: string | null;
+  status: string;
+  result: string | null;
   reference_id: string | null;
   plan_json: string | null;
-  created_at: string;
+  executed_at: string;
+  // Legacy compat
+  task_description?: string;
+  created_at?: string;
 }
 
 export interface ServerConfig {
@@ -132,8 +147,11 @@ export const adminApi = {
   getUsers: () => api.get<User[]>("/admin/users"),
   setUserRole: (userId: string, role: string) =>
     api.put<{ user_id: string; role: string }>(`/admin/users/${userId}/role`, { role }),
-  getCrons: () => api.get<CronJob[]>("/admin/crons"),
-  deleteCron: (jobId: string) => api.delete<{ status: string }>(`/admin/crons/${jobId}`),
+  getTasks: () => api.get<BackgroundTask[]>("/admin/tasks"),
+  deleteTask: (taskId: string) => api.delete<{ status: string }>(`/admin/tasks/${taskId}`),
+  // Legacy aliases
+  getCrons: () => api.get<BackgroundTask[]>("/admin/tasks"),
+  deleteCron: (taskId: string) => api.delete<{ status: string }>(`/admin/tasks/${taskId}`),
   getTools: () => api.get<ToolsResponse>("/admin/tools"),
   getLogs: (limit = 50) => api.get<DelegationLog[]>(`/admin/logs?limit=${limit}`),
   getContextLayers: (profile: string, userId?: string) =>

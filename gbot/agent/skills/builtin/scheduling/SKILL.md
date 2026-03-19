@@ -1,52 +1,35 @@
 ---
 name: scheduling
-description: Zamanlama araçları karar ağacı — hatırlatıcı, cron job ve alert oluşturma rehberi
+description: Scheduling decision tree — delegate tool handles all scheduling
 always: false
 metadata:
   requires: {}
 ---
 
-# Zamanlama Araçları — Karar Ağacı
+# Scheduling — Decision Tree
 
-Kullanıcı zamanlama ile ilgili istekte bulunursa, aşağıdaki karar ağacını takip et:
+All scheduling goes through the `delegate` tool. The DelegationPlanner decides execution type and processor automatically.
 
-## Tek seferlik mi, tekrarlı mı?
+## Examples
 
-**Tek seferlik** → `create_reminder`
-- "2 saat sonra toplantıyı hatırlat" → `create_reminder(delay_seconds=7200, message="Toplantı!")`
-- "5 dk sonra Murat'a mesaj at" → `create_reminder(delay_seconds=300, message="Send message to Murat", agent_prompt="...", agent_tools=["send_message_to_user"])`
+**One-shot reminder:**
+- "2 saat sonra toplantıyı hatırlat" → `delegate(task="2 saat sonra toplantı hatırlatması gönder")`
 
-**Tekrarlı, her zaman bildir** → `add_cron_job`
-- "Her sabah 9'da günaydın de" → `add_cron_job(cron_expr="0 9 * * *", message="Günaydın!")`
-- "Her 10 dk Murat'a selam yaz" → `add_cron_job(cron_expr="*/10 * * * *", message="Send greeting", agent_prompt="...", agent_tools=["send_message_to_user"])`
+**Recurring job:**
+- "Her sabah 9'da günaydın de" → `delegate(task="Her sabah 9'da günaydın mesajı gönder")`
 
-**Tekrarlı, sadece koşul sağlanırsa bildir** → `create_alert`
-- "Altın 7500'ü geçerse bildir, her 30 dk kontrol et" → `create_alert(cron_expr="*/30 * * * *", check_message="web_fetch('gold') ile altın fiyatını kontrol et. Gram altın 7500 TL üstüyse fiyatı bildir, değilse [SKIP] de.", agent_tools=["web_fetch"])`
+**Monitoring alert:**
+- "Altın 7500'ü geçerse bildir" → `delegate(task="Her 30 dk altın fiyatını kontrol et, 7500 TL üstüyse bildir")`
 
-## create_alert Kullanım Kuralları
+## How it works
 
-**ÖNEMLİ:** `check_message` bir GÖREV TALİMATIDIR, bildirim metni DEĞİLDİR.
+The `delegate` tool sends your task to the DelegationPlanner which picks:
+- **Execution type**: immediate / delayed / recurring / monitor
+- **Processor**: static (plain text) / function (tool call) / agent (LightAgent)
 
-- YANLIŞ: `check_message="Altın fiyatı 7500'ü geçti!"` ← Bu bir sonuç, görev değil
-- DOĞRU: `check_message="web_fetch('gold') ile altın fiyatını kontrol et. 7500 TL üstüyse bildir, değilse [SKIP]."` ← Bu bir görev talimatı
+You do NOT need to specify cron expressions, delay seconds, or processor types. Just describe what you want in natural language.
 
-`check_message` içinde şu bilgiler olmalı:
-1. Hangi tool ile ne kontrol edilecek (örneğin web_fetch('gold'))
-2. Koşul nedir (örneğin 7500 TL üstü)
-3. Koşul sağlanmazsa [SKIP] dönülmesi gerektiği
+## Listing & Cancelling
 
-`agent_tools` parametresini mutlaka belirt — agent'ın koşulu kontrol etmesi için hangi araçlara ihtiyacı olduğunu.
-
-## Agent Mod vs Static Mod
-
-- `agent_prompt` parametresi **varsa** → Agent mod (LightAgent çalışır, tool kullanır)
-- `agent_prompt` parametresi **yoksa** → Static mod (mesaj olduğu gibi iletilir)
-
-Agent mod gereken durumlar: mesaj gönderme, web'den veri çekme, bilgi arama
-Static mod yeterli durumlar: basit hatırlatma, sabit metin bildirimi
-
-## Model Seçim Kuralları
-
-- Basit bildirim/mesaj → ucuz model (haiku/flash sınıfı)
-- Analiz/akıl yürütme → standart model
-- Ana agent her zaman hangi modelin kullanılacağına karar verir
+- `list_scheduled_tasks(user_id)` — shows active tasks
+- `cancel_scheduled_task(task_id)` — cancels a task

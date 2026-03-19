@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from loguru import logger
 
 from gbot.agent.graph import create_graph
@@ -163,6 +163,8 @@ class GraphRunner:
             elif role == "tool":
                 tc_id = row.get("tool_call_id") or ""
                 messages.append(ToolMessage(content=content, tool_call_id=tc_id))
+            elif role == "system":
+                messages.append(SystemMessage(content=content))
         return messages
 
     def _extract_response(self, state: dict) -> str:

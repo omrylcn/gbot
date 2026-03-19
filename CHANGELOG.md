@@ -6,11 +6,36 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.15.0] - 2026-03-20 — Faz 21: Unified BackgroundTask
+
+### Changed
+
+- **Unified task tables:** 5 scheduling tables (`cron_jobs`, `reminders`, `background_tasks`, `cron_execution_log`, `delegation_log`) merged into 2 tables: `background_tasks` (unified) + `task_executions` (audit log). Auto-migration preserves all existing data.
+- **`background_tasks` schema:** `execution_type` (immediate/delayed/recurring/monitor) + `processor` (static/function/agent/runner) columns replace implicit table-based classification.
+- **`BackgroundTask` model:** Replaces `CronJob` in `gbot/core/cron/types.py`. `CronJob` kept as alias for backward compatibility. Accepts `job_id` and `reminder_id` as aliases for `task_id`.
+- **Unified `_execute_task()`:** `CronScheduler._execute_job()` and `_execute_reminder()` merged into single `_execute_task()` method.
+- **Proactive messages as `role="system"`:** Background task results recorded to session as `SystemMessage` — agent sees delivery info but doesn't repeat content.
+- **API:** `/admin/crons` → `/admin/tasks` with `execution_type` and `status` query filters. Stats response: `cron_jobs` → `recurring_tasks`, `reminders` → `pending_delayed`.
+- **Dashboard Tasks page:** Renamed from "Crons", shows all task types with Active/All/Completed filter tabs.
+- **SKILL.md (scheduling):** Simplified — all scheduling through `delegate` tool, no more `create_reminder`/`add_cron_job` references.
+
+### Removed
+
+- **`gbot/agent/tools/cron_tool.py`** — `add_cron_job`, `list_cron_jobs`, `remove_cron_job`, `create_alert` tools deleted. `delegate` handles all scheduling.
+- **`gbot/agent/tools/reminder.py`** — `create_reminder`, `list_reminders`, `cancel_reminder` tools deleted.
+- **`activity_logs` table** — Never implemented, references removed from docs and CLAUDE.md.
+- **ContextBuilder `events` layer** — Removed (duplicate with session history recording).
+
+### Fixed
+
+- **Proactive message duplication:** Agent no longer repeats background task results as its own message. System role prevents confusion.
+- **Function processor recording:** `_record_proactive_message` now called for all processor types including `function` (previously skipped when `response=None`).
+
 ## [1.14.1] - 2026-03-19
 
 ### Improved
 
-- **CronScheduler proactive message recording:** Cron jobs and reminders now record their responses to the user's active session and `system_events` table via `_record_proactive_message()` helper. Previously, agent-processor messages were delivered directly via `send_message_to_user` but the main agent had no context about what was sent. Recording is now independent of `should_deliver` flag — works for all processor types (static, function, agent).
+- **CronScheduler proactive message recording:** Cron jobs and reminders now record their responses to the user's active session via `_record_proactive_message()` helper.
 
 ## [1.14.0] - 2026-03-14
 

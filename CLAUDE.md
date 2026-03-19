@@ -38,7 +38,7 @@ LangGraph-based AI assistant framework. Personal, observable, modular.
 6. Tools = LangGraph native @tool / BaseTool
 7. Sessions = token-based (30k limit, LLM summary on transition)
 8. Graph = 4 nodes: load_context → reason ⇄ execute_tools → respond
-9. ContextBuilder = 8 layers (identity, runtime, role, agent_memory, user_ctx, events, session_summary, skills)
+9. ContextBuilder = 7 layers (identity, runtime, role, agent_memory, user_ctx, session_summary, skills)
 10. Copy & adapt from reference code, never import as dependency
 11. Write code docstrings as numpy style, but not too long. Always use English.
 12. RBAC = 3 roles (owner/member/guest), roles.yaml, 2-layer guard (reason filter + execute guard)
@@ -64,7 +64,7 @@ Entry point: `gbot`.
 | `gbot/agent/state.py` | AgentState(MessagesState) |
 | `gbot/agent/nodes.py` | Graph node functions |
 | `gbot/agent/graph.py` | StateGraph compile |
-| `gbot/agent/context.py` | ContextBuilder (8 layers, RBAC-aware) |
+| `gbot/agent/context.py` | ContextBuilder (7 layers, RBAC-aware) |
 | `gbot/agent/runner.py` | GraphRunner orchestrator |
 | `gbot/agent/permissions.py` | RBAC — roles.yaml loader, tool/context filtering |
 | `gbot/agent/light.py` | LightAgent — isolated background agent |
@@ -101,9 +101,10 @@ Entry point: `gbot`.
 - [x] Faz 18: Tool Registry — ToolRegistry class, auto group mapping, roles.yaml simplified, /admin/tools (283 tests)
 - [x] Faz 19: AGENT.md & Skills — config/ dir, agents.yaml profiles, prompt extraction, load_skill tool, progressive disclosure (334 tests)
 - [x] Faz 20: Context Service — context/ package, build_layers(), ContextService facade, 8 admin API endpoints, runtime overrides (348 tests)
+- [x] Faz 21: Unified BackgroundTask — 5 tables → 2 (background_tasks + task_executions), deleted cron_tool/reminder, /admin/tasks, dashboard Tasks page (337 tests)
 
-## SQLite Tables (15)
-users, user_channels, sessions, messages, agent_memory, user_notes, activity_logs, favorites, preferences, cron_jobs, cron_execution_log, reminders, system_events, background_tasks, api_keys
+## SQLite Tables (12)
+users, user_channels, sessions, messages, agent_memory, user_notes, favorites, preferences, background_tasks, task_executions, system_events, api_keys
 
 ## Git & Release Strategy
 

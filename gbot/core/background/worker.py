@@ -113,21 +113,14 @@ class SubagentWorker:
                 if session:
                     self.db.add_message(
                         session["session_id"],
-                        role="assistant",
-                        content=f"[Arka plan araştırma sonucu — task:{task_id}]\n\n{response}",
+                        role="system",
+                        content=f"[task:{task_id}] Delivered to {channel}: {response[:200]}",
                     )
                     logger.info(f"Subagent {task_id} result added to session {session['session_id']}")
 
-                event_id = self.db.add_system_event(
-                    user_id,
-                    source=f"task:{task_id}",
-                    event_type="task_completed",
-                    payload=response[:2000],
-                )
-
                 # Deliver result to user's channel
                 delivered = await self._deliver_result(
-                    user_id, channel, response[:2000], event_id
+                    user_id, channel, response[:2000]
                 )
                 if delivered:
                     logger.info(f"Task {task_id} result delivered via {channel}")
@@ -137,7 +130,7 @@ class SubagentWorker:
                 self.db.fail_background_task(task_id, error=str(e))
 
     async def _deliver_result(
-        self, user_id: str, channel: str, text: str, event_id: int
+        self, user_id: str, channel: str, text: str
     ) -> bool:
         """Deliver task result to user's channel. Returns True if delivered."""
         # Telegram: send directly
@@ -153,7 +146,6 @@ class SubagentWorker:
                         f"token={link['channel_user_id'][:10]}..."
                     )
                     await send_message(link["channel_user_id"], int(chat_id), text)
-                    self.db.mark_events_delivered([event_id])
                     return True
                 logger.warning(f"No chat_id for user {user_id}")
             else:
@@ -170,7 +162,6 @@ class SubagentWorker:
                 chat_id = link["metadata"].get("chat_id")
                 if chat_id:
                     await send_whatsapp_message(wa_config, chat_id, text)
-                    self.db.mark_events_delivered([event_id])
                     logger.info(f"Task result delivered via WhatsApp to {chat_id}")
                     return True
             return False
@@ -185,12 +176,10 @@ class SubagentWorker:
                 "payload": text,
             })
             if sent:
-                self.db.mark_events_delivered([event_id])
                 logger.info(f"Task result pushed via WebSocket to {user_id}")
                 return True
 
-        # Fallback: event saved to DB for polling
-        logger.info(f"Task result saved to DB for {user_id} (no active delivery)")
+        logger.info(f"Task result not delivered for {user_id} (no active channel)")
         return False
 
     def get_running_count(self) -> int:

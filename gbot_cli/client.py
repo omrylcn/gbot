@@ -122,13 +122,17 @@ class GraphBotClient:
         """GET /admin/skills."""
         return self._request("GET", "/admin/skills")
 
-    def admin_cron_jobs(self) -> list:
-        """GET /admin/crons."""
-        return self._request("GET", "/admin/crons")
+    def admin_tasks(self) -> list:
+        """GET /admin/tasks."""
+        return self._request("GET", "/admin/tasks")
 
-    def admin_remove_cron(self, job_id: str) -> dict:
-        """DELETE /admin/crons/{job_id}."""
-        return self._request("DELETE", f"/admin/crons/{job_id}")
+    def admin_remove_task(self, task_id: str) -> dict:
+        """DELETE /admin/tasks/{task_id}."""
+        return self._request("DELETE", f"/admin/tasks/{task_id}")
+
+    # Legacy aliases
+    admin_cron_jobs = admin_tasks
+    admin_remove_cron = admin_remove_task
 
     def admin_stats(self) -> dict:
         """GET /admin/stats."""

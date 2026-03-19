@@ -20,10 +20,9 @@ class ContextBuilder:
       2. Runtime info (user_id, datetime)
       3. Current role (if configured)
       4. Agent memory (agent_memory table)
-      5. User context (notes, activities, favorites, preferences)
-      6. Undelivered events (background notifications)
-      7. Previous session summary
-      8. Skills (always-on + index)
+      5. User context (notes, favorites, preferences)
+      6. Previous session summary
+      7. Skills (always-on + index)
     """
 
     def __init__(self, config: Config, db: MemoryStore, profile: str = "main"):
@@ -75,7 +74,6 @@ class ContextBuilder:
             "role": ("RBAC role description (guest only)", "config/roles.yaml"),
             "agent_memory": ("Long-term facts the bot remembers", "agent_memory table (SQLite)"),
             "user_context": ("Notes, preferences, favorites", "user_notes + preferences + favorites (SQLite)"),
-            "events": ("Undelivered background notifications", "system_events table (SQLite)"),
             "session_summary": ("Previous session LLM summary", "sessions table (SQLite)"),
             "skills": ("Always-on skill content", "SKILL.md files (workspace + builtin)"),
             "skills_index": ("Available skills for load_skill()", "SKILL.md files (workspace + builtin)"),
@@ -153,18 +151,7 @@ class ContextBuilder:
             else:
                 _add_empty("user_context")
 
-        # 6. Undelivered events
-        if _allowed("events"):
-            events = self.db.get_undelivered_events(user_id, limit=5)
-            if events:
-                lines = [f"- [{e['source']}] {e['payload']}" for e in events]
-                _add("events", "# Background Notifications\n\n" + "\n".join(lines))
-                if mark_delivered:
-                    self.db.mark_events_delivered([e["id"] for e in events])
-            else:
-                _add_empty("events")
-
-        # 7. Previous session summary
+        # 6. Previous session summary
         if _allowed("session_summary"):
             summary = self.db.get_last_session_summary(user_id)
             if summary:

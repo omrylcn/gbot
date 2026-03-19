@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from gbot.agent.tools.reminder import make_reminder_tools
 from gbot.api.ws import ConnectionManager
 from gbot.core.cron.scheduler import CronScheduler
 from gbot.memory.store import MemoryStore
@@ -225,42 +224,3 @@ async def test_recurring_db_fallback(store, mock_runner):
     assert "Offline ping" in events[0]["payload"]
 
 
-# ── Tool: create_reminder (agent mode) ─────────────────────
-
-
-def test_create_reminder_agent_mode(store, mock_runner):
-    """create_reminder with agent_prompt creates an agent-mode reminder."""
-    sched = CronScheduler(store, mock_runner)
-    with patch.object(sched, "_scheduler"):
-        tools = make_reminder_tools(sched)
-        create_rem = next(t for t in tools if t.name == "create_reminder")
-        result = create_rem.invoke({
-            "user_id": "u1",
-            "delay_seconds": 300,
-            "message": "Send hello to Murat",
-            "channel": "ws",
-            "agent_prompt": "Use send_message_to_user to deliver the message.",
-            "agent_tools": ["send_message_to_user"],
-        })
-    assert "agent" in result
-    assert "id:" in result
-
-    reminders = store.get_pending_reminders("u1")
-    assert len(reminders) == 1
-    assert reminders[0]["agent_prompt"] is not None
-
-
-def test_list_reminders_shows_recurring(store, mock_runner):
-    sched = CronScheduler(store, mock_runner)
-    store.add_reminder(
-        "r1", "u1", "2026-01-01T00:00:00", "Recurring", "ws",
-        cron_expr="0 9 * * *",
-    )
-    store.add_reminder("r2", "u1", "2026-12-31T10:00:00", "One-shot", "ws")
-
-    tools = make_reminder_tools(sched)
-    list_tool = next(t for t in tools if t.name == "list_reminders")
-    result = list_tool.invoke({"user_id": "u1"})
-
-    assert "recurring (0 9 * * *)" in result
-    assert "One-shot" in result
