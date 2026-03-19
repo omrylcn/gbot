@@ -62,7 +62,6 @@ providers:
 Or use environment variables (`.env`):
 ```
 GBOT_PROVIDERS__OPENAI__API_KEY=sk-...
->>>>>>> dev
 ```
 
 ### 3. Run
@@ -83,7 +82,7 @@ GBot deliberately separates the "thinking" from the "remembering." LangGraph han
 | Principle | Description |
 |-----------|-------------|
 | **LangGraph = stateless** | No checkpoint — used purely as an execution engine |
-| **SQLite = source of truth** | 15 tables for sessions, memory, users, tasks, events |
+| **SQLite = source of truth** | 12 tables for sessions, memory, users, tasks, events |
 | **GraphRunner = orchestrator** | Request-scoped bridge between SQLite and LangGraph |
 | **LiteLLM = multi-provider** | OpenAI, Anthropic, DeepSeek, Groq, Gemini, OpenRouter |
 
@@ -99,18 +98,18 @@ GBot isn't just a chatbot wrapper — it's a full operational platform. Here's w
 |---------|-------------|
 | Multi-provider LLM | 6+ providers via LiteLLM + direct OpenRouter SDK |
 | Multi-channel | Telegram (active), WhatsApp via WAHA (active), Discord/Feishu (stub) |
-| Long-term memory | Notes, preferences, favorites, activity logs in SQLite |
+| Long-term memory | Notes, preferences, favorites in SQLite |
 | Session management | Token-limit based with automatic LLM summary on transition |
 | RBAC | 3 roles (owner/member/guest), roles.yaml, 2-layer guard |
 | 8 tool groups (23 tools) | Memory, search, filesystem, shell, web, messaging, delegation, skills |
 | Skill system | Markdown-based, progressive disclosure via `load_skill` tool |
 | Agent profiles | `agents.yaml` — per-profile AGENT.md, skills, context layers |
-| Context service | 10-layer system prompt with description/source metadata |
-| Background tasks | Cron scheduler, one-shot reminders, heartbeat, async subagents |
+| Context service | 7-layer system prompt with description/source metadata |
+| Background tasks | Unified task scheduler (recurring/delayed/immediate/monitor), heartbeat, async subagents |
 | Delegation | LLM-based planner — immediate, delayed, recurring, monitor |
 | Interactive CLI | `gbot` — Rich REPL with slash commands and autocomplete |
-| Admin API | Server status, config, skills, tools, users, stats, cron, context, logs |
-| Admin Dashboard | React web UI — context inspector, conversations, users, tools, crons |
+| Admin API | Server status, config, skills, tools, users, stats, tasks, context, logs |
+| Admin Dashboard | React web UI — context inspector, conversations, users, tools, tasks |
 | RAG | Optional FAISS + sentence-transformers semantic search |
 | WebSocket | Real-time chat + event delivery |
 | Docker | Single-command deployment with docker-compose |
@@ -149,10 +148,10 @@ gbot login ali -s http://localhost:8000  # saves token to ~/.gbot/
 gbot logout
 ```
 
-Cron jobs:
+Tasks:
 ```bash
-gbot cron list
-gbot cron remove <job_id>
+gbot cron list               # list recurring/monitor tasks
+gbot cron remove <task_id>   # remove a task
 ```
 
 ### REPL Slash Commands
@@ -169,7 +168,7 @@ Type `/` inside the REPL for autocomplete:
 | `/model` | Active model |
 | `/config` | Server configuration |
 | `/skill` | Skill list |
-| `/cron list\|remove <id>` | Cron management |
+| `/cron list\|remove <id>` | Task management |
 | `/user` | User list |
 | `/events` | Pending events |
 | `/clear` | Clear screen |
@@ -207,10 +206,10 @@ Type `/` inside the REPL for autocomplete:
 | GET | `/admin/tools` | Registered tools (ToolRegistry introspection) |
 | GET | `/admin/users` | User list with roles |
 | PUT | `/admin/users/{user_id}/role` | Set user role |
-| GET | `/admin/crons` | Cron job list |
-| DELETE | `/admin/crons/{job_id}` | Delete cron job |
+| GET | `/admin/tasks` | Background tasks (filter by execution_type, status) |
+| DELETE | `/admin/tasks/{task_id}` | Cancel/remove task |
 | GET | `/admin/stats` | System stats (context, tools, sessions, data) |
-| GET | `/admin/logs` | Delegation logs |
+| GET | `/admin/logs` | Execution logs |
 | GET | `/admin/context/{profile}/layers` | Context layers for profile (main/planner/light) |
 | GET | `/admin/context/{profile}/preview` | Full context preview for profile |
 | GET | `/admin/context/budget` | Token budget breakdown |
@@ -226,10 +225,10 @@ You don't call tools by name — just describe what you want. The LLM figures ou
 
 ```
 "Save this note: meeting tomorrow"                   → save_user_note
-"Set a reminder in 5 minutes: take medicine"          → create_reminder
-"Check the weather every morning at 9"                → add_cron_job
-"Alert me if gold goes above $2000"                   → create_alert
-"Do this in the background: research topic X"         → delegate
+"Set a reminder in 5 minutes: take medicine"          → delegate (delayed/static)
+"Check the weather every morning at 9"                → delegate (recurring/agent)
+"Alert me if gold goes above $2000"                   → delegate (monitor/agent)
+"Do this in the background: research topic X"         → delegate (immediate/agent)
 ```
 
 ---
@@ -446,7 +445,7 @@ agents:
   main:
     agent_md: workspace/AGENT.md
     skills: ["*"]
-    context_layers: ["*"]      # all 10 layers
+    context_layers: ["*"]      # all 7 layers
   planner:
     agent_md: workspace/agents/planner/AGENT.md
     skills: []
@@ -469,11 +468,8 @@ The context service builds a layered system prompt for each agent profile. Each 
 | role | RBAC role description and permissions | roles.yaml |
 | agent_memory | Long-term learned facts about users | agent_memory table |
 | user_context | User notes, preferences, favorites | user_notes/preferences/favorites tables |
-| events | Pending system events and notifications | system_events table |
 | session_summary | Summary from previous sessions | sessions table |
 | skills | Available skill descriptions | workspace/skills/ + builtins |
-| message_history | Active session messages (informational) | messages table |
-| tool_definitions | Tool schemas sent to LLM (informational) | ToolRegistry |
 
 Runtime overrides can enable/disable layers or inject custom content via the admin API.
 
@@ -485,9 +481,8 @@ GBot can do things even when nobody is chatting. Five services run alongside the
 |---------|-------------|
 | **CronScheduler** | Loads jobs and reminders from SQLite into APScheduler. Manages both recurring cron jobs (CronTrigger) and one-shot reminders (DateTrigger). Handles execution, delivery, SKIP/NOTIFY logic, and auto-pauses jobs after 3 consecutive failures. |
 | **LightAgent** | Stripped-down LangGraph agent for background tasks — no session, no context loading, just a prompt + restricted tool set. Can override the model (e.g. cheaper model for monitoring). Used by both CronScheduler and SubagentWorker. |
-| **SubagentWorker** | Spawns async background tasks via `asyncio.create_task`. Persists status to `background_tasks` table, injects results into the user's active session, and creates `system_event` entries so the main agent sees the outcome. |
+| **SubagentWorker** | Spawns async background tasks via `asyncio.create_task`. Persists status to `background_tasks` table and injects delivery notes into the user's active session so the main agent sees the outcome. |
 | **HeartbeatService** | Periodic wake-up loop. Reads `HEARTBEAT.md` from workspace — if it has actionable content, triggers the full GraphRunner. Otherwise stays silent. |
-| **Reminder** | Not a separate service — reminders are stored in their own SQLite table and loaded into CronScheduler at startup. One-shot reminders auto-delete after firing; recurring ones keep running. |
 
 The scheduler has 4 processor types that determine *how* a job executes:
 
@@ -504,7 +499,7 @@ The scheduler has 4 processor types that determine *how* a job executes:
 User: "Do this in the background: research topic X"
   → delegate tool → DelegationPlanner (LLM) → plan: {execution: immediate, processor: agent}
   → SubagentWorker.spawn() → LightAgent runs with web tools
-  → Result → background_tasks table + system_event + channel delivery
+  → Result → background_tasks table + session note + channel delivery
 ```
 
 ### RAG (Optional)
@@ -580,8 +575,8 @@ Not every user should have access to everything. RBAC lets you define who can us
 
 | Role | Tool Groups | Context Layers | Sessions |
 |------|-------------|---------------|----------|
-| **owner** | all 7 groups | all 8 layers | unlimited |
-| **member** | memory, search, web, messaging, delegation | all 8 layers | unlimited |
+| **owner** | all 8 groups | all 7 layers | unlimited |
+| **member** | memory, search, web, messaging, delegation | all 7 layers | unlimited |
 | **guest** | web only | identity, runtime, role | max 1 |
 
 Default role: `guest`. Set user role via `PUT /admin/users/{user_id}/role`.
@@ -673,7 +668,7 @@ gbot/                          # Core framework
 │   ├── cron/                      # APScheduler + types
 │   └── background/                # Heartbeat + subagent worker
 ├── memory/
-│   ├── store.py                   # MemoryStore — SQLite 15 tables
+│   ├── store.py                   # MemoryStore — SQLite 12 tables
 │   └── models.py                  # Pydantic models
 └── rag/                           # Optional FAISS retriever
 
@@ -693,7 +688,7 @@ config/                            # Configuration files
 
 dashboard/                         # Admin dashboard (React + Vite)
 ├── src/
-│   ├── pages/                     # Dashboard, Context, Conversations, Users, Tools, Crons
+│   ├── pages/                     # Dashboard, Context, Conversations, Users, Tools, Tasks
 │   ├── components/                # Layout + shared components
 │   ├── api/                       # API client + admin/auth endpoints
 │   └── stores/                    # Zustand (auth, theme)
@@ -701,27 +696,24 @@ dashboard/                         # Admin dashboard (React + Vite)
 └── nginx.conf                     # API proxy configuration
 ```
 
-## SQLite Tables (15)
+## SQLite Tables (12)
 
 Everything lives in a single SQLite file. No Postgres, no Redis, no external dependencies. WAL mode is enabled for concurrent reads:
 
 | Table | Purpose |
 |-------|---------|
 | `users` | User records |
-| `user_channels` | Channel links (telegram, discord, ...) |
+| `user_channels` | Channel links (telegram, whatsapp, ...) |
 | `sessions` | Chat sessions with token tracking |
 | `messages` | Chat messages |
 | `agent_memory` | Key-value long-term memory |
 | `user_notes` | Learned information about users |
 | `favorites` | User favorites |
 | `preferences` | User preferences (JSON) |
-| `cron_jobs` | Scheduled tasks |
-| `cron_execution_log` | Cron execution history |
-| `reminders` | One-shot reminders |
-| `system_events` | Background notification queue |
-| `background_tasks` | Subagent task records |
+| `background_tasks` | Unified task table (immediate/delayed/recurring/monitor) |
+| `task_executions` | Task execution audit log |
+| `system_events` | Delivery queue for API/WS channels |
 | `api_keys` | API key management |
-| `delegation_log` | Delegation planner decision history |
 
 ## Workspace
 
