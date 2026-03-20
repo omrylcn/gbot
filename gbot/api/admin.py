@@ -232,6 +232,9 @@ async def admin_stats(
         memory_count = conn.execute(
             "SELECT COUNT(*) FROM agent_memory"
         ).fetchone()[0]
+        fact_count = conn.execute(
+            "SELECT COUNT(*) FROM memory_facts WHERE valid_until IS NULL"
+        ).fetchone()[0]
 
     return {
         "system": {
@@ -256,6 +259,7 @@ async def admin_stats(
             "messages": total_messages,
             "notes": note_count,
             "memories": memory_count,
+            "memory_facts": fact_count,
             "recurring_tasks": cron_count,
             "pending_delayed": reminder_count,
         },
@@ -272,6 +276,29 @@ async def admin_logs(
     """Recent delegation/execution logs."""
     _require_owner(current_user, config)
     return db.get_executions(limit=limit)
+
+
+# ── Memory ─────────────────────────────────────────────
+
+
+@router.get("/memory/{user_id}")
+async def admin_memory(
+    user_id: str,
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    db: MemoryStore = Depends(get_db),
+):
+    """Memory overview for a user: notes, facts, processing log."""
+    _require_owner(current_user, config)
+    return {
+        "user_id": user_id,
+        "notes": db.get_notes(user_id, limit=50),
+        "preferences": db.get_preferences(user_id),
+        "favorites": db.get_favorites(user_id),
+        "facts": db.get_facts(user_id, valid_only=False, limit=100),
+        "fact_stats": db.get_fact_stats(user_id),
+        "processing_log": db.get_processing_log(user_id, limit=10),
+    }
 
 
 # ── Context Inspection ─────────────────────────────────

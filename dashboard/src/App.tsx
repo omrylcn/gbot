@@ -7,6 +7,7 @@ import ContextPage from "@/pages/Context";
 import UsersPage from "@/pages/Users";
 import ToolsPage from "@/pages/Tools";
 import TasksPage from "@/pages/Crons";
+import MemoryPage from "@/pages/Memory";
 import SettingsPage from "@/pages/Settings";
 
 export default function App() {
@@ -20,6 +21,7 @@ export default function App() {
         <Route path="users" element={<UsersPage />} />
         <Route path="tools" element={<ToolsPage />} />
         <Route path="crons" element={<TasksPage />} />
+        <Route path="memory" element={<MemoryPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

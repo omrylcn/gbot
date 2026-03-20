@@ -155,6 +155,15 @@ class CronConfig(BaseModel):
     enabled: bool = True
 
 
+class MemoryConfig(BaseModel):
+    """Memory extraction configuration."""
+
+    enabled: bool = True
+    model: str = ""  # empty → falls back to assistant.model
+    extraction_every_n: int = 5  # extract facts every N user messages
+    max_facts_per_user: int = 500
+
+
 class HeartbeatConfig(BaseModel):
     enabled: bool = False
     interval_s: int = 1800
@@ -172,6 +181,7 @@ class BackgroundConfig(BaseModel):
     cron: CronConfig = Field(default_factory=CronConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
     delegation: DelegationConfig = Field(default_factory=DelegationConfig)
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
 
 
 # Auth

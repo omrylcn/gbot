@@ -6,6 +6,32 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.16.0] - 2026-03-20 — Faz 22A: Memory Layer
+
+### Added
+
+- **`memory_facts` table:** Typed fact storage with confidence, importance, category, keywords. 4 fact types: semantic, episodic, preference, procedural.
+- **`memory_processing_log` table:** Audit trail for extraction runs (trigger, counts, duration).
+- **`MemoryService`:** Unified memory processing — session summarization + fact extraction via `agents.yaml` memory profile.
+- **Memory agent profile:** `config/agents.yaml` memory entry + `workspace/agents/memory/AGENT.md` prompt.
+- **Hot-path extraction:** Every N user messages (configurable `background.memory.extraction_every_n`, default 5), fire-and-forget async extraction.
+- **`MemoryConfig`:** `background.memory` config section — enabled, model, extraction_every_n, max_facts_per_user.
+- **ContextBuilder:** `user_context` layer now includes "LEARNED FACTS" from `memory_facts` alongside explicit notes/prefs/favs.
+- **Admin API:** `GET /admin/memory/{user_id}` — facts, stats, processing log. Stats include `memory_facts` count.
+- **Dashboard Memory page:** Facts table with type filter tabs, notes/preferences/favorites panel, processing log.
+
+### Changed
+
+- **Unified `user_notes` table:** `user_notes` + `preferences` + `favorites` → single `user_notes` table with `note_type` column (note/preference/favorite). All legacy method signatures preserved.
+- **Runner `_rotate_session()`:** Delegates to `MemoryService.process_session()` via fire-and-forget `asyncio.create_task`. Runner no longer imports `asummarize`/`aextract_facts` directly.
+- **Extraction decoupled from `litellm_llm.py`:** MemoryService uses `achat` with memory agent profile, not hardcoded prompts.
+
+### Removed
+
+- **`_save_extracted_facts()` in runner.py** — Logic moved to `MemoryService.extract_and_save()`.
+- **Backward compat writes:** MemoryService no longer duplicates facts into `user_notes` — `memory_facts` and `user_notes` are separate layers.
+
+
 ## [1.15.0] - 2026-03-20 — Faz 21: Unified BackgroundTask
 
 ### Changed

@@ -81,3 +81,8 @@ background:
     interval_s: 1800
   delegation:
     model: "openrouter/google/gemini-3-flash-preview"
+  memory:
+    enabled: true
+    model: ""  # empty = uses assistant.model
+    extraction_every_n: 5  # extract facts every N user messages
+    max_facts_per_user: 500

@@ -1,7 +1,7 @@
 import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard, MessageSquare, Layers, Users,
-  Wrench, Clock, Settings,
+  Wrench, Clock, Brain, Settings,
 } from "lucide-react";
 import { useAuthStore } from "@/stores/auth";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { to: "/dashboard/users", icon: Users, label: "Users" },
   { to: "/dashboard/tools", icon: Wrench, label: "Tools" },
   { to: "/dashboard/crons", icon: Clock, label: "Tasks" },
+  { to: "/dashboard/memory", icon: Brain, label: "Memory" },
   { to: "/dashboard/settings", icon: Settings, label: "Settings" },
 ];
 

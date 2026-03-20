@@ -6,14 +6,14 @@ GBot uses **SQLite with WAL mode** as its single source of truth for all persist
 
 **Key Principles:**
 - **SQLite is the source of truth** — LangGraph checkpointing is NOT used
-- **14 tables** organized into 5 functional groups
+- **12 tables** organized into 5 functional groups
 - **Request-scoped operations** — data flows through FastAPI → GraphRunner → MemoryStore → SQLite
 - **Foreign keys enforced** — maintains referential integrity
 - **Indexes on frequent queries** — optimized for user/session lookups
 
 ---
 
-## Database Structure (14 Tables)
+## Database Structure (12 Tables)
 
 ### 📊 Table Groups
 
@@ -22,8 +22,8 @@ GBot uses **SQLite with WAL mode** as its single source of truth for all persist
 | **Identity & Auth** | `users`, `user_channels`, `api_keys` | User accounts, cross-channel links, API access |
 | **Conversations** | `sessions`, `messages` | Chat history and lifecycle |
 | **Memory & Context** | `agent_memory`, `user_notes`, `favorites`, `preferences` | Long-term learning and personalization |
-| **Scheduling** | `cron_jobs`, `cron_execution_log`, `reminders` | Periodic tasks and one-shot notifications |
-| **Background Tasks** | `system_events`, `background_tasks` | Async subagent work and event delivery |
+| **Scheduling & Tasks** | `background_tasks`, `task_executions` | Unified task scheduling (immediate/delayed/recurring/monitor) + audit log |
+| **Events** | `system_events` | Async event delivery queue |
 
 ---
 
@@ -375,155 +375,113 @@ CREATE TABLE preferences (
 
 ---
 
-### 9. `cron_jobs` — Scheduled Tasks
+### 9. `background_tasks` — Unified Task Table
 
-**Purpose:** Periodic tasks with LLM processing (daily reports, monitoring, recurring queries).
+**Purpose:** Single table for ALL scheduled/background work: recurring jobs, delayed reminders, immediate subagent tasks, and monitoring alerts. Replaces old `cron_jobs`, `reminders`, and `background_tasks` tables (unified in v1.15.0).
 
 **Schema:**
 ```sql
-CREATE TABLE cron_jobs (
-    job_id TEXT PRIMARY KEY,          -- UUID
+CREATE TABLE background_tasks (
+    task_id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
-    cron_expr TEXT NOT NULL DEFAULT '',  -- '0 9 * * *' = every day at 9am
-    message TEXT NOT NULL,            -- Task description / prompt
-    channel TEXT DEFAULT 'api',       -- Where to send results
-    enabled INTEGER DEFAULT 1,        -- 0 = paused
-    run_at TEXT,                      -- Next execution time
-    agent_prompt TEXT,                -- Optional custom system prompt
-    agent_tools TEXT,                 -- JSON list of allowed tools
-    agent_model TEXT,                 -- Override default model
-    notify_condition TEXT DEFAULT 'always',  -- 'always', 'notify_skip'
+    execution_type TEXT NOT NULL DEFAULT 'immediate',
+        -- immediate | delayed | recurring | monitor
+    processor TEXT NOT NULL DEFAULT 'agent',
+        -- static | function | agent | runner
+    message TEXT NOT NULL,
+    channel TEXT DEFAULT 'api',
+    cron_expr TEXT,                    -- recurring/monitor
+    run_at TEXT,                       -- delayed one-shot
+    enabled INTEGER DEFAULT 1,        -- recurring: pause/resume
+    agent_prompt TEXT,
+    agent_tools TEXT,                  -- JSON list
+    agent_model TEXT,
+    notify_condition TEXT DEFAULT 'always',
+    plan_json TEXT,
+    status TEXT DEFAULT 'pending',
+        -- pending | running | completed | failed | cancelled | paused
+    result TEXT,
+    error TEXT,
+    retry_count INTEGER DEFAULT 0,
     consecutive_failures INTEGER DEFAULT 0,
     last_error TEXT,
+    parent_session TEXT,
+    fallback_channel TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(user_id)
-);
-```
-
-**Data Source:**
-- **Agent tool:** `add_cron_job()`, `create_alert()` — LLM creates jobs
-- **CLI:** `gbot cron add` (planned)
-
-**Example Flow:**
-```
-User: "Every morning at 9am, check my GitHub stars and notify if there are new ones"
-
-Agent calls:
-add_cron_job(
-    user_id="owner",
-    cron_expr="0 9 * * *",
-    message="Check GitHub stars, report if new",
-    channel="telegram",
-    agent_prompt="You are a monitoring agent...",
-    notify_condition="notify_skip"  # Only send if there are new stars
-)
-
-# Stored in database
-INSERT INTO cron_jobs (job_id, user_id, cron_expr, message, ...)
-VALUES ('job-abc', 'owner', '0 9 * * *', 'Check GitHub stars...', ...);
-```
-
-**Execution:**
-- **Background worker** (`CronScheduler`) checks jobs every minute
-- Runs task via `LightAgent` (isolated, cheap execution)
-- Results saved to `cron_execution_log`
-- Sends notification via configured channel
-
-**notify_skip Logic:**
-```python
-# Monitoring alerts only notify when needed
-if notify_condition == "notify_skip" and response.strip().upper() == "[SKIP]":
-    # Don't send notification, just log
-    pass
-else:
-    # Send notification
-    await send_message(channel, user_id, response)
-```
-
----
-
-### 10. `cron_execution_log` — Job Execution History
-
-**Purpose:** Audit trail for cron job runs.
-
-**Schema:**
-```sql
-CREATE TABLE cron_execution_log (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_id TEXT NOT NULL,
-    executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    result TEXT,                      -- LLM response
-    status TEXT DEFAULT 'success',    -- 'success', 'error', 'skipped'
-    tokens_used INTEGER DEFAULT 0,
-    duration_ms INTEGER DEFAULT 0
-);
-```
-
-**Data Source:**
-- **Auto-created** after each cron job execution by `CronScheduler`
-
-**Example:**
-```sql
-INSERT INTO cron_execution_log (job_id, result, status, tokens_used, duration_ms)
-VALUES ('job-abc', 'No new GitHub stars.', 'success', 150, 1200);
-```
-
----
-
-### 11. `reminders` — One-Shot & Recurring Notifications
-
-**Purpose:** Simple message delivery without LLM processing (cheaper than cron_jobs).
-
-**Schema:**
-```sql
-CREATE TABLE reminders (
-    reminder_id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    message TEXT NOT NULL,            -- Exact message to send
-    channel TEXT DEFAULT 'telegram',
-    run_at TEXT NOT NULL,             -- ISO timestamp for one-shot
-    cron_expr TEXT,                   -- If set, recurring reminder
-    status TEXT DEFAULT 'pending',    -- 'pending', 'sent', 'cancelled', 'failed'
-    retry_count INTEGER DEFAULT 0,
-    last_error TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
     sent_at TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
 ```
 
+**execution_type × processor Matrix:**
+
+| execution_type | processor | Use Case |
+|---------------|-----------|----------|
+| `immediate` | `agent` | Background research, delegation |
+| `delayed` | `static` | Simple reminder ("2 saat sonra hatırlat") |
+| `delayed` | `agent` | Scheduled LLM task |
+| `recurring` | `static` | Periodic notification (no LLM) |
+| `recurring` | `agent` | Daily summary report (LLM) |
+| `monitor` | `agent` | Price alert with NOTIFY/SKIP logic |
+
 **Data Source:**
-- **Agent tools:** `create_reminder()`, `create_recurring_reminder()`
+- **Agent tool:** `delegate()` — DelegationPlanner creates tasks
+- **CronScheduler:** Registers with APScheduler on startup
 
-**Example Flow:**
+**Example Flows:**
+```python
+# Recurring monitor
+db.create_task("task-abc", "owner", "Check gold price",
+    execution_type="monitor", processor="agent",
+    cron_expr="0 9 * * *", channel="telegram",
+    agent_prompt="You are a price monitor...",
+    notify_condition="notify_skip")
+
+# Simple delayed reminder
+db.create_task("task-xyz", "owner", "Toplantı var!",
+    execution_type="delayed", processor="static",
+    run_at="2026-03-19T14:00:00", channel="telegram")
+
+# Immediate background task
+db.create_task("task-123", "owner", "Research competitors",
+    execution_type="immediate", processor="agent",
+    channel="api")
 ```
-User (Telegram): "2 saat sonra hatırlat toplantı var"
-
-Agent calls:
-create_reminder(user_id="zynp", delay_seconds=7200, message="Toplantı var!", channel="telegram")
-
-# Database insert
-INSERT INTO reminders (reminder_id, user_id, message, channel, run_at, status)
-VALUES ('rem-xyz', 'zynp', 'Toplantı var!', 'telegram', '2026-02-16T14:00:00Z', 'pending');
-```
-
-**Execution:**
-- **Background worker** checks `reminders` table every minute
-- Sends message at scheduled time (no LLM involved)
-- Updates `status='sent'` and `sent_at`
-- For recurring: schedules next run based on `cron_expr`
-
-**Difference from cron_jobs:**
-| Feature | `reminders` | `cron_jobs` |
-|---------|-------------|-------------|
-| LLM processing | ❌ No | ✅ Yes |
-| Cost | Free (just message send) | Tokens charged |
-| Use case | "Remind me to..." | "Daily summary report" |
-| Message | Static text | Dynamic LLM response |
 
 ---
 
-### 12. `system_events` — Delivery Queue for API/WS Channels
+### 10. `task_executions` — Task Execution History
+
+**Purpose:** Unified audit trail for all task executions. Replaces old `cron_execution_log` and `delegation_log` tables.
+
+**Schema:**
+```sql
+CREATE TABLE task_executions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    execution_type TEXT,
+    processor_type TEXT,
+    status TEXT DEFAULT 'success',    -- success | error | skipped | planned
+    result TEXT,
+    error TEXT,
+    tokens_used INTEGER DEFAULT 0,
+    duration_ms INTEGER DEFAULT 0,
+    plan_json TEXT,
+    reference_id TEXT,
+    executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+**Data Source:**
+- **CronScheduler:** Logs after each task execution
+- **DelegationPlanner:** Logs planned tasks (status='planned')
+
+---
+
+### 11. `system_events` — Delivery Queue for API/WS Channels
 
 **Purpose:** Message queue for API/WS channels when no active connection exists. Used for polling and WebSocket push.
 
@@ -580,53 +538,7 @@ db.add_system_event(
 
 ---
 
-### 13. `background_tasks` — Subagent Results
-
-**Purpose:** Stores background task metadata and results (delegated work via LightAgent).
-
-**Schema:**
-```sql
-CREATE TABLE background_tasks (
-    task_id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    parent_session TEXT,              -- Session that spawned the task
-    fallback_channel TEXT,            -- Where to send result if WS unavailable
-    task_description TEXT NOT NULL,
-    status TEXT DEFAULT 'running',    -- 'running', 'completed', 'failed'
-    result TEXT,                      -- LLM response
-    error TEXT,
-    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    completed_at TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(user_id)
-);
-```
-
-**Data Source:**
-- **Agent tool:** `delegate()` (spawns background task)
-- **SubagentWorker:** Updates status on completion/failure
-
-**Example:**
-```sql
--- Task created
-INSERT INTO background_tasks (task_id, user_id, task_description, status)
-VALUES ('task-123', 'owner', 'Research GBot competitors', 'running');
-
--- Task completed
-UPDATE background_tasks
-SET status='completed', result='Found 5 competitors: ...', completed_at=CURRENT_TIMESTAMP
-WHERE task_id='task-123';
-```
-
-**Query:**
-```python
-# Check task status
-task = db.get_background_task("task-123")
-print(task["status"], task["result"])
-```
-
----
-
-### 14. `api_keys` — API Access Tokens
+### 12. `api_keys` — API Access Tokens
 
 **Purpose:** Alternative authentication method (API keys instead of JWT).
 
@@ -700,102 +612,50 @@ curl -H "Authorization: Bearer gbot_sk_abc123xyz" https://gbot-assistant.cloud/c
 └─────────────────────────────────────────────┘
 ```
 
-### 📅 Cron Job Flow
+### 📅 Unified Task Flow (Recurring / Delayed / Immediate)
 
 ```
-┌─────────────────────────────────────────────┐
-│ Agent creates cron job                      │
-│ add_cron_job(cron_expr="0 9 * * *", ...)   │
-└──────┬──────────────────────────────────────┘
-       │
-       v
-┌─────────────────────────────────────────────┐
-│ Database Insert                             │
-│ INSERT INTO cron_jobs (job_id, ...)         │
-└──────┬──────────────────────────────────────┘
-       │
-       v
-┌─────────────────────────────────────────────┐
-│ Background Worker (CronScheduler)           │
-│ - Checks every minute                       │
-│ - Finds jobs where run_at <= now            │
-│ - Executes via LightAgent                   │
-└──────┬──────────────────────────────────────┘
-       │
-       v
-┌─────────────────────────────────────────────┐
-│ Execution Results                           │
-│ - cron_execution_log: INSERT                │
-│ - Send notification to channel              │
-│ - Update job.run_at (next execution)        │
-└─────────────────────────────────────────────┘
-```
-
-### ⏰ Reminder Flow
-
-```
-┌─────────────────────────────────────────────┐
-│ User: "Remind me in 2 hours"                │
-└──────┬──────────────────────────────────────┘
-       │
-       v
-┌─────────────────────────────────────────────┐
-│ Agent calls create_reminder()               │
-│ (delay_seconds=7200)                        │
-└──────┬──────────────────────────────────────┘
-       │
-       v
-┌─────────────────────────────────────────────┐
-│ Database Insert                             │
-│ INSERT INTO reminders                       │
-│ (run_at = now + 7200 seconds)               │
-└──────┬──────────────────────────────────────┘
-       │
-       v
-┌─────────────────────────────────────────────┐
-│ Background Worker                           │
-│ - Checks every minute                       │
-│ - Finds reminders where run_at <= now       │
-│ - Sends message (no LLM)                    │
-│ - Updates status='sent'                     │
-└─────────────────────────────────────────────┘
-```
-
-### 🔧 Background Task (Delegation) Flow
-
-```
-┌─────────────────────────────────────────────┐
-│ User: "Research competitors in background"  │
-└──────┬──────────────────────────────────────┘
-       │
-       v
 ┌─────────────────────────────────────────────┐
 │ Agent calls delegate()                      │
+│ DelegationPlanner → execution_type +        │
+│ processor + schedule                        │
 └──────┬──────────────────────────────────────┘
        │
        v
 ┌─────────────────────────────────────────────┐
-│ SubagentWorker.spawn()                      │
-│ - INSERT INTO background_tasks              │
-│ - Create asyncio task                       │
-│ - Returns task_id immediately               │
+│ Database Insert                             │
+│ INSERT INTO background_tasks                │
+│ (task_id, execution_type, processor, ...)   │
+└──────┬──────────────────────────────────────┘
+       │
+       ├── immediate → SubagentWorker.spawn()
+       │                (async LightAgent)
+       │
+       ├── delayed   → APScheduler DateTrigger
+       │                (fire once at run_at)
+       │
+       ├── recurring → APScheduler CronTrigger
+       │                (fire on cron_expr)
+       │
+       └── monitor   → APScheduler CronTrigger
+                        (NOTIFY/SKIP logic)
+       │
+       v
+┌─────────────────────────────────────────────┐
+│ Execution                                   │
+│ - static: send message directly             │
+│ - agent: LightAgent isolated run            │
+│ - runner: full GraphRunner.process()        │
+│ - function: call Python function            │
 └──────┬──────────────────────────────────────┘
        │
        v
 ┌─────────────────────────────────────────────┐
-│ LightAgent executes (async)                 │
-│ - Runs in background                        │
-│ - No conversation history                   │
-│ - Limited tool access                       │
-└──────┬──────────────────────────────────────┘
-       │
-       v
-┌─────────────────────────────────────────────┐
-│ On Completion                               │
-│ - UPDATE background_tasks (result, status)  │
-│ - INSERT into session history               │
-│ - Push via WebSocket (if connected)         │
-│ - OR deliver via channel (Telegram/WA)      │
+│ Results                                     │
+│ - task_executions: INSERT (audit log)       │
+│ - background_tasks: UPDATE (status/result)  │
+│ - Deliver via channel (WS/Telegram/WA)      │
+│ - Inject into session history               │
 └─────────────────────────────────────────────┘
 ```
 
@@ -811,18 +671,18 @@ curl -H "Authorization: Bearer gbot_sk_abc123xyz" https://gbot-assistant.cloud/c
 class MemoryStore:
     def __init__(self, db_path: str):
         self._db_path = db_path
-        self._init_db()  # Executes CREATE TABLE IF NOT EXISTS for all 15 tables
+        self._init_db()  # Executes CREATE TABLE IF NOT EXISTS for all 12 tables
 ```
 
 **First run:**
 ```bash
 docker compose up -d
 
-# Container starts → MemoryStore.__init__() → _SCHEMA executed
-# All 15 tables created in /app/data/gbot.db
+# Container starts → MemoryStore.__init__() → _SCHEMA + _TASK_TABLES_SQL executed
+# All 12 tables created in /app/data/gbot.db
 ```
 
-**Schema location:** `/root/gbot/gbot/memory/store.py` lines 932-1115
+**Auto-migration:** If upgrading from v1.14.x, `_migrate_to_unified_tasks()` automatically migrates old `cron_jobs`, `reminders`, `cron_execution_log`, `delegation_log` tables into the new unified schema in a single transaction.
 
 ---
 
@@ -914,25 +774,26 @@ SELECT
     (SELECT data FROM preferences WHERE user_id='owner') as preferences;
 ```
 
-### Scheduled Tasks
+### Tasks
 
 ```sql
--- All active reminders
-SELECT * FROM reminders
-WHERE status='pending'
+-- All active recurring tasks
+SELECT * FROM background_tasks
+WHERE execution_type IN ('recurring', 'monitor')
+AND enabled=1;
+
+-- Pending delayed tasks (reminders)
+SELECT * FROM background_tasks
+WHERE execution_type='delayed'
+AND status='pending'
 ORDER BY run_at;
 
--- Cron jobs due for execution
-SELECT * FROM cron_jobs
-WHERE enabled=1
-AND datetime(run_at) <= datetime('now');
-```
-
-### Background Tasks
-
-```sql
--- Running tasks
+-- Running immediate tasks
 SELECT * FROM background_tasks WHERE status='running';
+
+-- Recent execution log
+SELECT * FROM task_executions
+ORDER BY executed_at DESC LIMIT 20;
 
 -- Undelivered events
 SELECT * FROM system_events
@@ -979,7 +840,7 @@ docker exec gbot sqlite3 /app/data/gbot.db "
 SELECT 'users' as tbl, COUNT(*) FROM users UNION ALL
 SELECT 'sessions', COUNT(*) FROM sessions UNION ALL
 SELECT 'messages', COUNT(*) FROM messages UNION ALL
-SELECT 'reminders', COUNT(*) FROM reminders;
+SELECT 'background_tasks', COUNT(*) FROM background_tasks;
 "
 ```
 
@@ -1030,11 +891,9 @@ docker compose restart
 | `user_notes` | Agent tool `save_user_note()` | When LLM learns facts |
 | `favorites` | Agent tool `add_favorite()` | User favorites management |
 | `preferences` | Agent learning, planned API | User settings storage |
-| `cron_jobs` | Agent tool `add_cron_job()` | Scheduled task creation |
-| `cron_execution_log` | Auto-created by CronScheduler | After each cron run |
-| `reminders` | Agent tool `create_reminder()` | Reminder requests |
-| `system_events` | Background tasks, cron jobs | Task completion events |
-| `background_tasks` | Agent tool `delegate()` | Background work delegation |
+| `background_tasks` | Agent tool `delegate()` | All task types (immediate/delayed/recurring/monitor) |
+| `task_executions` | Auto-created by CronScheduler | After each task execution |
+| `system_events` | Background tasks, scheduler | Event delivery queue |
 
 ---
 
@@ -1044,18 +903,16 @@ docker compose restart
 |-----------|----------------|---------------|
 | `save_user_note` | `user_notes` | "Remember I prefer dark theme" |
 | `add_favorite` | `favorites` | "Add this to favorites" |
-| `create_reminder` | `reminders` | "Remind me in 2 hours" |
-| `create_recurring_reminder` | `reminders` | "Every morning at 9am..." |
-| `add_cron_job` | `cron_jobs` | "Daily check GitHub stars" |
-| `create_alert` | `cron_jobs` | "Alert if price > $2000" |
-| `delegate` | `background_tasks`, `messages` | "Research in background" |
+| `delegate` | `background_tasks`, `task_executions`, `messages` | All scheduling: reminders, recurring jobs, monitors, background research |
+| `list_scheduled_tasks` | `background_tasks` (read) | "What tasks are active?" |
+| `cancel_scheduled_task` | `background_tasks` | "Cancel that reminder" |
 
 ---
 
 ## Conclusion
 
 GBot's database is the **single source of truth** for all state:
-- ✅ **14 tables** covering identity, conversations, memory, scheduling, and background work
+- ✅ **12 tables** covering identity, conversations, memory, scheduling, and background work
 - ✅ **Request-scoped operations** — no long-running state in LangGraph
 - ✅ **Tool-driven data** — LLM decides when to save notes, schedule tasks, etc.
 - ✅ **Automated backups** — daily snapshots with 7-day retention
@@ -1067,6 +924,6 @@ For API usage, see [`README.md`](README.md).
 
 ---
 
-**Last Updated:** 2026-02-16
-**GBot Version:** v1.14.0
+**Last Updated:** 2026-03-19
+**GBot Version:** v1.15.0
 **Author:** GBot Team

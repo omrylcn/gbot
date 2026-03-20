@@ -143,11 +143,24 @@ class ContextBuilder:
             else:
                 _add_empty("agent_memory")
 
-        # 5. User context
+        # 5. User context (explicit notes + learned facts)
         if _allowed("user_context"):
+            # Explicit: notes, preferences, favorites
             user_ctx = self.db.get_user_context(user_id)
-            if user_ctx:
-                _add("user_context", f"# User Context\n\n{user_ctx}", priorities.user_context)
+
+            # Learned: memory_facts (auto-extracted from conversations)
+            learned = ""
+            try:
+                facts = self.db.get_facts(user_id, valid_only=True, limit=15)
+                if facts:
+                    lines = "\n".join(f"- {f['content']}" for f in facts)
+                    learned = f"LEARNED FACTS:\n{lines}"
+            except Exception:
+                pass  # memory_facts table may not exist in tests
+
+            combined = "\n\n".join(p for p in [user_ctx, learned] if p)
+            if combined:
+                _add("user_context", f"# User Context\n\n{combined}", priorities.user_context)
             else:
                 _add_empty("user_context")
 

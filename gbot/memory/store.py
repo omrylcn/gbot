@@ -1,8 +1,8 @@
 """SQLite-based memory store for GraphBot.
 
 12 tables: users, user_channels, sessions, messages, agent_memory,
-user_notes, favorites, preferences, background_tasks, task_executions,
-system_events, api_keys.
+user_notes (unified: notes+prefs+favs), memory_facts, memory_processing_log,
+background_tasks, task_executions, system_events, api_keys.
 """
 
 from __future__ import annotations
@@ -53,25 +53,26 @@ class MemoryStore:
             conn.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")
         conn.execute("UPDATE users SET role = 'member' WHERE role = 'user'")
 
-        # Faz 21: Unified task table migration
         old_tables = {
             row[0]
             for row in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()
         }
+
+        # Faz 21: Unified task table migration
         if "cron_jobs" in old_tables:
-            # Existing DB with old schema → migrate
             self._migrate_to_unified_tasks(conn, old_tables)
         elif "background_tasks" not in old_tables:
-            # Fresh DB → create new tables
             self._create_task_tables(conn)
         else:
-            # Already migrated — check if execution_type column exists
             bt_cols = {r[1] for r in conn.execute("PRAGMA table_info(background_tasks)").fetchall()}
             if "execution_type" not in bt_cols:
-                # Old background_tasks schema without unified columns
                 self._migrate_to_unified_tasks(conn, old_tables)
+
+        # Faz 22A: Memory tables (always ensure they exist)
+        if "memory_facts" not in old_tables:
+            self._create_memory_tables(conn)
 
     _TASK_TABLES_SQL = """
         CREATE TABLE IF NOT EXISTS background_tasks (
@@ -129,9 +130,54 @@ class MemoryStore:
             ON task_executions(user_id, executed_at DESC);
     """
 
+    _MEMORY_TABLES_SQL = """
+        CREATE TABLE IF NOT EXISTS memory_facts (
+            fact_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            content TEXT NOT NULL,
+            fact_type TEXT NOT NULL DEFAULT 'semantic',
+            source TEXT DEFAULT 'extraction',
+            source_session TEXT,
+            source_channel TEXT,
+            confidence REAL DEFAULT 1.0,
+            importance REAL DEFAULT 0.5,
+            access_count INTEGER DEFAULT 0,
+            valid_from TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            valid_until TIMESTAMP,
+            superseded_by TEXT,
+            keywords TEXT,
+            category TEXT,
+            embedding BLOB,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_facts_user
+            ON memory_facts(user_id, fact_type);
+        CREATE INDEX IF NOT EXISTS idx_facts_valid
+            ON memory_facts(user_id, valid_until);
+
+        CREATE TABLE IF NOT EXISTS memory_processing_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            session_id TEXT,
+            trigger TEXT,
+            facts_extracted INTEGER DEFAULT 0,
+            facts_added INTEGER DEFAULT 0,
+            facts_updated INTEGER DEFAULT 0,
+            facts_invalidated INTEGER DEFAULT 0,
+            duration_ms INTEGER DEFAULT 0,
+            processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """
+
     def _create_task_tables(self, conn) -> None:
         """Create unified task tables for fresh databases."""
         conn.executescript(self._TASK_TABLES_SQL)
+
+    def _create_memory_tables(self, conn) -> None:
+        """Create memory tables for fresh or migrated databases."""
+        conn.executescript(self._MEMORY_TABLES_SQL)
 
     def _migrate_to_unified_tasks(self, conn, old_tables: set[str]) -> None:
         """Migrate cron_jobs + reminders + old background_tasks + delegation_log → unified tables."""
@@ -699,7 +745,8 @@ class MemoryStore:
         self.get_or_create_user(user_id)
         with self._get_conn() as conn:
             cursor = conn.execute(
-                "INSERT INTO user_notes (user_id, note, source) VALUES (?, ?, ?)",
+                """INSERT INTO user_notes (user_id, note_type, content, source)
+                   VALUES (?, 'note', ?, ?)""",
                 (user_id, note, source),
             )
             conn.commit()
@@ -708,11 +755,12 @@ class MemoryStore:
     def get_notes(self, user_id: str, limit: int = 50) -> list[str]:
         with self._get_conn() as conn:
             rows = conn.execute(
-                """SELECT note FROM user_notes
-                   WHERE user_id = ? ORDER BY created_at DESC LIMIT ?""",
+                """SELECT content FROM user_notes
+                   WHERE user_id = ? AND note_type = 'note'
+                   ORDER BY created_at DESC LIMIT ?""",
                 (user_id, limit),
             ).fetchall()
-        return [r["note"] for r in rows]
+        return [r["content"] for r in rows]
 
     # ════════════════════════════════════════════════════════════
     # FAVORITES
@@ -720,18 +768,29 @@ class MemoryStore:
 
     def add_favorite(self, user_id: str, item_id: str, item_title: str) -> None:
         self.get_or_create_user(user_id)
+        meta = json.dumps({"item_id": item_id})
         with self._get_conn() as conn:
+            # Remove existing favorite with same item_id, then insert
             conn.execute(
-                """INSERT OR REPLACE INTO favorites
-                   (user_id, item_id, item_title) VALUES (?, ?, ?)""",
-                (user_id, item_id, item_title),
+                """DELETE FROM user_notes
+                   WHERE user_id = ? AND note_type = 'favorite'
+                   AND json_extract(metadata, '$.item_id') = ?""",
+                (user_id, item_id),
+            )
+            conn.execute(
+                """INSERT INTO user_notes
+                   (user_id, note_type, content, metadata, source)
+                   VALUES (?, 'favorite', ?, ?, 'conversation')""",
+                (user_id, item_title, meta),
             )
             conn.commit()
 
     def remove_favorite(self, user_id: str, item_id: str) -> None:
         with self._get_conn() as conn:
             conn.execute(
-                "DELETE FROM favorites WHERE user_id = ? AND item_id = ?",
+                """DELETE FROM user_notes
+                   WHERE user_id = ? AND note_type = 'favorite'
+                   AND json_extract(metadata, '$.item_id') = ?""",
                 (user_id, item_id),
             )
             conn.commit()
@@ -739,17 +798,28 @@ class MemoryStore:
     def get_favorites(self, user_id: str) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
             rows = conn.execute(
-                """SELECT item_id, item_title, added_at FROM favorites
-                   WHERE user_id = ? ORDER BY added_at DESC""",
+                """SELECT content, metadata, created_at FROM user_notes
+                   WHERE user_id = ? AND note_type = 'favorite'
+                   ORDER BY created_at DESC""",
                 (user_id,),
             ).fetchall()
-        return [dict(r) for r in rows]
+        result = []
+        for r in rows:
+            meta = json.loads(r["metadata"]) if r["metadata"] else {}
+            result.append({
+                "item_id": meta.get("item_id", ""),
+                "item_title": r["content"],
+                "added_at": r["created_at"],
+            })
+        return result
 
     def is_favorite(self, user_id: str, item_id: str) -> bool:
         with self._get_conn() as conn:
             return (
                 conn.execute(
-                    "SELECT 1 FROM favorites WHERE user_id = ? AND item_id = ?",
+                    """SELECT 1 FROM user_notes
+                       WHERE user_id = ? AND note_type = 'favorite'
+                       AND json_extract(metadata, '$.item_id') = ?""",
                     (user_id, item_id),
                 ).fetchone()
                 is not None
@@ -761,44 +831,40 @@ class MemoryStore:
 
     def get_preferences(self, user_id: str) -> dict[str, Any]:
         with self._get_conn() as conn:
-            row = conn.execute(
-                "SELECT data FROM preferences WHERE user_id = ?", (user_id,)
-            ).fetchone()
-        return json.loads(row["data"]) if row else {}
+            rows = conn.execute(
+                """SELECT key, content FROM user_notes
+                   WHERE user_id = ? AND note_type = 'preference' AND key IS NOT NULL""",
+                (user_id,),
+            ).fetchall()
+        return {r["key"]: r["content"] for r in rows}
 
     def update_preferences(self, user_id: str, data: dict[str, Any]) -> None:
-        """Merge new data into existing preferences."""
+        """Merge new data into existing preferences (one row per key)."""
         self.get_or_create_user(user_id)
-        current = self.get_preferences(user_id)
-        current.update(data)
         with self._get_conn() as conn:
-            conn.execute(
-                """INSERT INTO preferences (user_id, data)
-                   VALUES (?, ?)
-                   ON CONFLICT(user_id) DO UPDATE SET
-                       data = excluded.data,
-                       updated_at = CURRENT_TIMESTAMP""",
-                (user_id, json.dumps(current, ensure_ascii=False)),
-            )
+            for k, v in data.items():
+                # Partial unique index (user_id, key) WHERE note_type='preference'
+                # allows INSERT OR REPLACE to work correctly
+                conn.execute(
+                    """INSERT INTO user_notes (user_id, note_type, content, key, source)
+                       VALUES (?, 'preference', ?, ?, 'extraction')
+                       ON CONFLICT(user_id, key) WHERE note_type = 'preference'
+                       DO UPDATE SET content = excluded.content,
+                                     created_at = CURRENT_TIMESTAMP""",
+                    (user_id, str(v), k),
+                )
             conn.commit()
 
     def remove_preference(self, user_id: str, key: str) -> bool:
-        """Remove a single key from user preferences. Returns True if removed."""
-        current = self.get_preferences(user_id)
-        if key not in current:
-            return False
-        del current[key]
+        """Remove a single preference key. Returns True if removed."""
         with self._get_conn() as conn:
-            conn.execute(
-                """INSERT INTO preferences (user_id, data)
-                   VALUES (?, ?)
-                   ON CONFLICT(user_id) DO UPDATE SET
-                       data = excluded.data,
-                       updated_at = CURRENT_TIMESTAMP""",
-                (user_id, json.dumps(current, ensure_ascii=False)),
+            cursor = conn.execute(
+                """DELETE FROM user_notes
+                   WHERE user_id = ? AND note_type = 'preference' AND key = ?""",
+                (user_id, key),
             )
             conn.commit()
-        return True
+            return cursor.rowcount > 0
 
     # ════════════════════════════════════════════════════════════
     # BACKGROUND TASKS (unified: immediate/delayed/recurring/monitor)
@@ -1158,6 +1224,181 @@ class MemoryStore:
         return [e for e in execs if e.get("status") == "planned"]
 
     # ════════════════════════════════════════════════════════════
+    # MEMORY FACTS (extracted knowledge)
+    # ════════════════════════════════════════════════════════════
+
+    def add_fact(
+        self,
+        fact_id: str,
+        user_id: str,
+        content: str,
+        fact_type: str = "semantic",
+        source: str = "extraction",
+        source_session: str | None = None,
+        source_channel: str | None = None,
+        confidence: float = 1.0,
+        importance: float = 0.5,
+        keywords: list[str] | None = None,
+        category: str | None = None,
+    ) -> None:
+        with self._get_conn() as conn:
+            conn.execute(
+                """INSERT INTO memory_facts
+                   (fact_id, user_id, content, fact_type, source,
+                    source_session, source_channel, confidence, importance,
+                    keywords, category)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    fact_id, user_id, content, fact_type, source,
+                    source_session, source_channel, confidence, importance,
+                    json.dumps(keywords) if keywords else None,
+                    category,
+                ),
+            )
+            conn.commit()
+
+    def get_facts(
+        self,
+        user_id: str,
+        fact_type: str | None = None,
+        valid_only: bool = True,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        conditions = ["user_id = ?"]
+        params: list[Any] = [user_id]
+        if fact_type:
+            conditions.append("fact_type = ?")
+            params.append(fact_type)
+        if valid_only:
+            conditions.append("valid_until IS NULL")
+        params.append(limit)
+        where = " AND ".join(conditions)
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                f"""SELECT * FROM memory_facts
+                    WHERE {where}
+                    ORDER BY importance DESC, created_at DESC
+                    LIMIT ?""",
+                params,
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_fact(self, fact_id: str) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM memory_facts WHERE fact_id = ?", (fact_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def update_fact(self, fact_id: str, **fields: Any) -> None:
+        if not fields:
+            return
+        fields["updated_at"] = "CURRENT_TIMESTAMP"
+        sets = []
+        params = []
+        for k, v in fields.items():
+            if v == "CURRENT_TIMESTAMP":
+                sets.append(f"{k} = CURRENT_TIMESTAMP")
+            else:
+                sets.append(f"{k} = ?")
+                params.append(v)
+        params.append(fact_id)
+        with self._get_conn() as conn:
+            conn.execute(
+                f"UPDATE memory_facts SET {', '.join(sets)} WHERE fact_id = ?",
+                params,
+            )
+            conn.commit()
+
+    def invalidate_fact(
+        self, fact_id: str, superseded_by: str | None = None
+    ) -> None:
+        with self._get_conn() as conn:
+            conn.execute(
+                """UPDATE memory_facts
+                   SET valid_until = CURRENT_TIMESTAMP,
+                       superseded_by = ?,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE fact_id = ?""",
+                (superseded_by, fact_id),
+            )
+            conn.commit()
+
+    def increment_fact_access(self, fact_id: str) -> None:
+        with self._get_conn() as conn:
+            conn.execute(
+                """UPDATE memory_facts
+                   SET access_count = access_count + 1
+                   WHERE fact_id = ?""",
+                (fact_id,),
+            )
+            conn.commit()
+
+    def get_fact_stats(self, user_id: str) -> dict[str, Any]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                """SELECT fact_type, COUNT(*) as cnt,
+                          AVG(importance) as avg_importance
+                   FROM memory_facts
+                   WHERE user_id = ? AND valid_until IS NULL
+                   GROUP BY fact_type""",
+                (user_id,),
+            ).fetchall()
+            total = conn.execute(
+                """SELECT COUNT(*) as total FROM memory_facts
+                   WHERE user_id = ? AND valid_until IS NULL""",
+                (user_id,),
+            ).fetchone()
+        by_type = {r["fact_type"]: {"count": r["cnt"], "avg_importance": r["avg_importance"]} for r in rows}
+        return {"total": total["total"] if total else 0, "by_type": by_type}
+
+    # ════════════════════════════════════════════════════════════
+    # MEMORY PROCESSING LOG
+    # ════════════════════════════════════════════════════════════
+
+    def log_memory_processing(
+        self,
+        user_id: str,
+        session_id: str | None = None,
+        trigger: str = "session_close",
+        facts_extracted: int = 0,
+        facts_added: int = 0,
+        facts_updated: int = 0,
+        facts_invalidated: int = 0,
+        duration_ms: int = 0,
+    ) -> int:
+        with self._get_conn() as conn:
+            cursor = conn.execute(
+                """INSERT INTO memory_processing_log
+                   (user_id, session_id, trigger, facts_extracted,
+                    facts_added, facts_updated, facts_invalidated, duration_ms)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (user_id, session_id, trigger, facts_extracted,
+                 facts_added, facts_updated, facts_invalidated, duration_ms),
+            )
+            conn.commit()
+            return cursor.lastrowid or 0
+
+    def get_processing_log(
+        self, user_id: str | None = None, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            if user_id:
+                rows = conn.execute(
+                    """SELECT * FROM memory_processing_log
+                       WHERE user_id = ?
+                       ORDER BY processed_at DESC LIMIT ?""",
+                    (user_id, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT * FROM memory_processing_log
+                       ORDER BY processed_at DESC LIMIT ?""",
+                    (limit,),
+                ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ════════════════════════════════════════════════════════════
     # COMBINED USER CONTEXT (for ContextBuilder)
     # ════════════════════════════════════════════════════════════
 
@@ -1247,34 +1488,21 @@ CREATE TABLE IF NOT EXISTS agent_memory (
     UNIQUE(user_id, key)
 );
 
--- 6. User notes (learned facts)
+-- 6. User notes (unified: notes + preferences + favorites)
 CREATE TABLE IF NOT EXISTS user_notes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
-    note TEXT NOT NULL,
+    note_type TEXT DEFAULT 'note',
+    content TEXT NOT NULL,
+    key TEXT,
+    metadata TEXT,
     source TEXT DEFAULT 'conversation',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
-CREATE INDEX IF NOT EXISTS idx_notes_user ON user_notes(user_id);
-
--- 7. Favorites
-CREATE TABLE IF NOT EXISTS favorites (
-    user_id TEXT NOT NULL,
-    item_id TEXT NOT NULL,
-    item_title TEXT NOT NULL,
-    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (user_id, item_id),
-    FOREIGN KEY (user_id) REFERENCES users(user_id)
-);
-
--- 9. Preferences (flexible JSON)
-CREATE TABLE IF NOT EXISTS preferences (
-    user_id TEXT PRIMARY KEY,
-    data TEXT NOT NULL DEFAULT '{}',
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(user_id)
-);
+CREATE INDEX IF NOT EXISTS idx_notes_user ON user_notes(user_id, note_type);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notes_pref_key ON user_notes(user_id, key)
+    WHERE note_type = 'preference';
 
 -- 10. System events (delivery queue for API/WS channels)
 CREATE TABLE IF NOT EXISTS system_events (

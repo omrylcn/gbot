@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -11,7 +12,7 @@ from gbot.agent.graph import create_graph
 from gbot.agent.permissions import get_allowed_tools, get_context_layers, get_max_sessions
 from gbot.agent.tools import ToolRegistry, make_tools
 from gbot.core.config.schema import Config
-from gbot.core.providers.litellm import aextract_facts, asummarize, setup_provider
+from gbot.core.providers.litellm import setup_provider
 from gbot.memory.store import MemoryStore
 
 
@@ -140,6 +141,9 @@ class GraphRunner:
 
         if token_count >= self.config.assistant.session_token_limit:
             await self._rotate_session(user_id, session_id)
+        else:
+            # Hot-path: extract memory facts every N user messages
+            self._maybe_extract_facts(user_id, session_id)
 
         return response, session_id
 
@@ -185,6 +189,36 @@ class GraphRunner:
                     session_id, "tool", msg.content, tool_call_id=msg.tool_call_id,
                 )
 
+    def _maybe_extract_facts(self, user_id: str, session_id: str) -> None:
+        """Fire-and-forget fact extraction every N user messages."""
+        mem_cfg = self.config.background.memory
+        if not mem_cfg.enabled:
+            return
+        every_n = mem_cfg.extraction_every_n
+        msgs = self.db.get_session_messages(session_id)
+        user_count = sum(1 for m in msgs if m["role"] == "user")
+        if user_count > 0 and user_count % every_n == 0:
+            llm_messages = self._prepare_summary_messages(msgs[-every_n * 2:])
+            if llm_messages:
+                asyncio.create_task(self._extract_facts_bg(user_id, llm_messages, session_id))
+
+    async def _extract_facts_bg(
+        self, user_id: str, messages: list[dict], session_id: str
+    ) -> None:
+        """Background fact extraction (fire-and-forget)."""
+        try:
+            from gbot.memory.extraction import MemoryService
+
+            mem_model = self.config.background.memory.model or self.config.assistant.model
+            mem = MemoryService(self.db, model=mem_model)
+            stats = await mem.extract_and_save(
+                user_id, messages, session_id=session_id, trigger="hot_path",
+            )
+            if stats.get("facts_added", 0) > 0:
+                logger.info(f"Hot-path memory: {stats}")
+        except Exception as e:
+            logger.warning(f"Hot-path extraction failed: {e}")
+
     @staticmethod
     def _prepare_summary_messages(
         db_messages: list[dict],
@@ -200,54 +234,38 @@ class GraphRunner:
         return result
 
     async def _rotate_session(self, user_id: str, session_id: str) -> None:
-        """Close session with LLM summary and extract facts to DB."""
+        """Close session — MemoryService handles summary + extraction."""
         logger.info(f"Token limit reached for session {session_id}, rotating")
 
-        # 1. Prepare messages for summarization
-        db_messages = self.db.get_recent_messages(session_id, limit=50)
-        llm_messages = self._prepare_summary_messages(db_messages)
+        # Fire-and-forget: MemoryService summarizes, extracts, closes session
+        asyncio.create_task(
+            self._memory_process_session(user_id, session_id)
+        )
 
-        # 2. Hybrid summary (narrative + structured bullets)
-        summary = ""
+    async def _memory_process_session(
+        self, user_id: str, session_id: str
+    ) -> None:
+        """Background task: MemoryService processes and closes session."""
         try:
-            if llm_messages:
-                summary = await asummarize(llm_messages)
+            from gbot.memory.extraction import MemoryService
+
+            db_messages = self.db.get_recent_messages(session_id, limit=50)
+            llm_messages = self._prepare_summary_messages(db_messages)
+
+            mem_model = self.config.background.memory.model or self.config.assistant.model
+            mem = MemoryService(self.db, model=mem_model)
+            result = await mem.process_session(
+                user_id, llm_messages, session_id=session_id,
+            )
+            summary = result.get("summary", "")
         except Exception as e:
-            logger.error(f"Summarization error for session {session_id}: {e}")
+            logger.error(f"Memory processing failed for session {session_id}: {e}")
+            summary = ""
 
         if not summary:
             summary = "Session closed due to token limit (summary unavailable)."
 
-        # 3. Fact extraction → DB tables (best-effort, failure is OK)
-        try:
-            if llm_messages:
-                facts = await aextract_facts(llm_messages)
-                self._save_extracted_facts(user_id, facts)
-        except Exception as e:
-            logger.warning(f"Fact extraction failed for session {session_id}: {e}")
-
-        # 4. Always close the session
         self.db.end_session(
             session_id, summary=summary, close_reason="token_limit"
         )
 
-    def _save_extracted_facts(self, user_id: str, facts: dict) -> None:
-        """Save extracted facts to appropriate DB tables."""
-        # Preferences → preferences table (JSON merge)
-        prefs = facts.get("preferences", [])
-        if prefs:
-            pref_dict = {
-                p["key"]: p["value"]
-                for p in prefs
-                if isinstance(p, dict) and "key" in p and "value" in p
-            }
-            if pref_dict:
-                self.db.update_preferences(user_id, pref_dict)
-                logger.debug(f"Saved {len(pref_dict)} preferences for {user_id}")
-
-        # Notes → user_notes table (source="extraction")
-        notes = facts.get("notes", [])
-        for note in notes:
-            if note and isinstance(note, str):
-                self.db.add_note(user_id, note, source="extraction")
-                logger.debug(f"Saved extracted note for {user_id}: {note[:50]}")

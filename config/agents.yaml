@@ -27,3 +27,9 @@ agents:
     skills: []
     # No context_layers — LightAgent has its own context model
     # (AGENT.md base + task_prompt injected at runtime)
+
+  memory:
+    agent_md: workspace/agents/memory/AGENT.md
+    skills: []
+    context_layers:
+      - identity

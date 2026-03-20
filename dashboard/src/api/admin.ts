@@ -107,6 +107,36 @@ export interface DelegationLog {
   created_at?: string;
 }
 
+export interface MemoryFact {
+  fact_id: string;
+  user_id: string;
+  content: string;
+  fact_type: string;
+  source: string;
+  source_session: string | null;
+  source_channel: string | null;
+  confidence: number;
+  importance: number;
+  access_count: number;
+  valid_from: string;
+  valid_until: string | null;
+  superseded_by: string | null;
+  keywords: string | null;
+  category: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoryResponse {
+  user_id: string;
+  notes: string[];
+  preferences: Record<string, string>;
+  favorites: { item_id: string; item_title: string; added_at: string }[];
+  facts: MemoryFact[];
+  fact_stats: { total: number; by_type: Record<string, { count: number; avg_importance: number }> };
+  processing_log: { id: number; trigger: string; facts_extracted: number; facts_added: number; duration_ms: number; processed_at: string }[];
+}
+
 export interface ServerConfig {
   model: string;
   temperature: number;
@@ -165,6 +195,7 @@ export const adminApi = {
   getOverrides: () => api.get<Record<string, Record<string, { content: string | null; enabled: boolean }>>>("/admin/context/overrides"),
   getProfiles: () => api.get<AgentProfile[]>("/admin/profiles"),
   getProfileDetail: (name: string) => api.get<ProfileDetail>(`/admin/profiles/${name}`),
+  getMemory: (userId: string) => api.get<MemoryResponse>(`/admin/memory/${userId}`),
   getSessions: (userId: string, limit = 50) =>
     api.get<Session[]>(`/sessions/${userId}?limit=${limit}`),
   getSessionHistory: (sessionId: string) =>
