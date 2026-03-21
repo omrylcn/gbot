@@ -82,7 +82,7 @@ GBot deliberately separates the "thinking" from the "remembering." LangGraph han
 | Principle | Description |
 |-----------|-------------|
 | **LangGraph = stateless** | No checkpoint — used purely as an execution engine |
-| **SQLite = source of truth** | 12 tables for sessions, memory, users, tasks, events |
+| **SQLite = source of truth** | 15 tables for sessions, memory, users, tasks, events, relations |
 | **GraphRunner = orchestrator** | Request-scoped bridge between SQLite and LangGraph |
 | **LiteLLM = multi-provider** | OpenAI, Anthropic, DeepSeek, Groq, Gemini, OpenRouter |
 
@@ -98,10 +98,10 @@ GBot isn't just a chatbot wrapper — it's a full operational platform. Here's w
 |---------|-------------|
 | Multi-provider LLM | 6+ providers via LiteLLM + direct OpenRouter SDK |
 | Multi-channel | Telegram (active), WhatsApp via WAHA (active), Discord/Feishu (stub) |
-| Long-term memory | Notes, preferences, favorites in SQLite |
+| Long-term memory | Typed memory facts (semantic/episodic/preference/procedural) with AUDN update, semantic search (sqlite-vec), entity relations, temporal notes |
 | Session management | Token-limit based with automatic LLM summary on transition |
 | RBAC | 3 roles (owner/member/guest), roles.yaml, 2-layer guard |
-| 8 tool groups (23 tools) | Memory, search, filesystem, shell, web, messaging, delegation, skills |
+| 8 tool groups (26 tools) | Memory (incl. search_memory, forget_fact, what_do_you_know), search, filesystem, shell, web, messaging, delegation, skills |
 | Skill system | Markdown-based, progressive disclosure via `load_skill` tool |
 | Agent profiles | `agents.yaml` — per-profile AGENT.md, skills, context layers |
 | Context service | 7-layer system prompt with description/source metadata |
@@ -109,7 +109,7 @@ GBot isn't just a chatbot wrapper — it's a full operational platform. Here's w
 | Delegation | LLM-based planner — immediate, delayed, recurring, monitor |
 | Interactive CLI | `gbot` — Rich REPL with slash commands and autocomplete |
 | Admin API | Server status, config, skills, tools, users, stats, tasks, context, logs |
-| Admin Dashboard | React web UI — context inspector, conversations, users, tools, tasks |
+| Admin Dashboard | React web UI — context inspector, conversations, users, tools, tasks, memory inspector |
 | RAG | Optional FAISS + sentence-transformers semantic search |
 | WebSocket | Real-time chat + event delivery |
 | Docker | Single-command deployment with docker-compose |
@@ -210,6 +210,7 @@ Type `/` inside the REPL for autocomplete:
 | DELETE | `/admin/tasks/{task_id}` | Cancel/remove task |
 | GET | `/admin/stats` | System stats (context, tools, sessions, data) |
 | GET | `/admin/logs` | Execution logs |
+| GET | `/admin/memory/{user_id}` | Memory facts, stats, relations, processing log |
 | GET | `/admin/context/{profile}/layers` | Context layers for profile (main/planner/light) |
 | GET | `/admin/context/{profile}/preview` | Full context preview for profile |
 | GET | `/admin/context/budget` | Token budget breakdown |
@@ -229,6 +230,9 @@ You don't call tools by name — just describe what you want. The LLM figures ou
 "Check the weather every morning at 9"                → delegate (recurring/agent)
 "Alert me if gold goes above $2000"                   → delegate (monitor/agent)
 "Do this in the background: research topic X"         → delegate (immediate/agent)
+"What do you know about me?"                          → what_do_you_know
+"Search your memory for coffee preferences"           → search_memory
+"Forget that I live in Istanbul"                      → forget_fact
 ```
 
 ---
@@ -399,11 +403,11 @@ auth:
 
 ### Tool System
 
-Tools are organized into 8 groups (23 tools total). By default all groups are enabled (`tools: ["*"]`), but RBAC can restrict which groups each role can access. The `ToolRegistry` resolves group names to actual tool functions automatically via `roles.yaml`:
+Tools are organized into 8 groups (26 tools total). By default all groups are enabled (`tools: ["*"]`), but RBAC can restrict which groups each role can access. The `ToolRegistry` resolves group names to actual tool functions automatically via `roles.yaml`:
 
 | Group | Tools | Description |
 |-------|-------|-------------|
-| Memory | save_user_note, get_user_context, add_favorite, get_favorites, remove_favorite, set_user_preference, get_user_preferences, remove_user_preference | User memory (8 tools) |
+| Memory | save_user_note, get_user_context, add_favorite, get_favorites, remove_favorite, set_user_preference, get_user_preferences, remove_user_preference, search_memory, forget_fact, what_do_you_know | User memory + semantic search (11 tools) |
 | Search | search_items, get_item_detail, get_current_time | RAG semantic search + time (3 tools) |
 | Filesystem | read_file, write_file, edit_file, list_dir | Workspace files (4 tools) |
 | Shell | exec_command | Safe shell — destructive commands blocked (1 tool) |
@@ -455,6 +459,10 @@ agents:
     agent_md: workspace/agents/light/AGENT.md
     skills: []
     # No context_layers — LightAgent has its own context model
+  memory:
+    agent_md: workspace/agents/memory/AGENT.md
+    skills: []
+    context_layers: [identity]
 ```
 
 ### Context Service
@@ -467,7 +475,7 @@ The context service builds a layered system prompt for each agent profile. Each 
 | runtime | Current time, model, session info | Runtime state |
 | role | RBAC role description and permissions | roles.yaml |
 | agent_memory | Long-term learned facts about users | agent_memory table |
-| user_context | User notes, preferences, favorites | user_notes/preferences/favorites tables |
+| user_context | Explicit notes + learned memory facts (2-stage semantic retrieval with re-ranking) | user_notes + memory_facts (sqlite-vec) |
 | session_summary | Summary from previous sessions | sessions table |
 | skills | Available skill descriptions | workspace/skills/ + builtins |
 
@@ -500,6 +508,53 @@ User: "Do this in the background: research topic X"
   → delegate tool → DelegationPlanner (LLM) → plan: {execution: immediate, processor: agent}
   → SubagentWorker.spawn() → LightAgent runs with web tools
   → Result → background_tasks table + session note + channel delivery
+```
+
+### Memory Layer
+
+GBot's memory goes beyond simple note storage — it automatically learns from conversations, detects contradictions, and serves the most relevant facts when needed.
+
+**How it works:**
+
+```
+User sends message
+  → Every 5 messages: hot-path extraction (async, fire-and-forget)
+    → LLM extracts typed facts + entity relations
+    → Each fact: embed (OpenRouter) → search similar (sqlite-vec) → AUDN decision
+    → ADD / UPDATE / DELETE / NOOP — LLM decides conflicts
+  → ContextBuilder: embed last message → search top 20 → re-rank → top 10 to context
+```
+
+**Three tables work together:**
+
+| Table | Purpose |
+|-------|---------|
+| `memory_facts` | Typed facts with embedding, confidence, importance, category |
+| `memory_relations` | Entity relationships (works_at, married_to, owns...) |
+| `memory_processing_log` | Extraction audit trail |
+
+**AUDN (Add/Update/Delete/Noop):** When a new fact is extracted, similar existing facts are found via semantic search. An LLM then decides: is this new info (ADD), an update to existing info (UPDATE), a negation (DELETE), or already known (NOOP)?
+
+```
+"İstanbul'da yaşıyorum"  → ADD (new fact)
+"Ankara'ya taşındım"     → UPDATE (İstanbul invalidated, Ankara added)
+"Artık borsa takip etmiyorum" → DELETE (borsa fact invalidated, no new fact)
+"Hala İstanbul'dayım"    → NOOP (already known)
+```
+
+**2-stage retrieval:** Context doesn't get a flat list of all facts. Instead: (1) sqlite-vec finds 20 semantically similar candidates, (2) re-ranker scores them by `similarity × recency × access_count × confidence`, (3) top 10 enter context. Frequently accessed facts score higher; old unused facts fade out.
+
+**Configuration:**
+
+```yaml
+memory:
+  enabled: true
+  extraction_every_n: 5        # extract every N user messages
+  embedding:
+    model: "google/gemini-embedding-001"
+    dimension: 3072
+  update:
+    strategy: "llm"            # embedding finds, LLM decides
 ```
 
 ### RAG (Optional)
