@@ -84,15 +84,15 @@ background:
 
 memory:
   enabled: true
-  model: ""  # empty = uses assistant.model
-  extraction_every_n: 5  # extract facts every N user messages
+  model: ""                          # extraction LLM — empty = assistant.model
+  extraction_every_n: 5              # extract facts every N user messages
   max_facts_per_user: 500
   embedding:
-    provider: "openrouter"  # openrouter | local
+    provider: "openrouter"           # openrouter | local
     model: "google/gemini-embedding-001"
     dimension: 3072
   update:
-    strategy: "llm"              # llm (default) | cascading | threshold_only
-    model: "openai/gpt-4o-mini"  # AUDN decision model (cheap)
-    noop_threshold: 0.90         # threshold_only/cascading: duplicate skip
-    add_threshold: 0.65          # threshold_only/cascading: auto add
+    strategy: "llm"                  # llm (default) | cascading | threshold_only
+    model: ""                        # AUDN decision model — empty = assistant.model
+    noop_threshold: 0.90             # threshold_only/cascading: duplicate skip
+    add_threshold: 0.65              # threshold_only/cascading: auto add
