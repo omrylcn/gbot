@@ -191,7 +191,7 @@ class GraphRunner:
 
     def _maybe_extract_facts(self, user_id: str, session_id: str) -> None:
         """Fire-and-forget fact extraction every N user messages."""
-        mem_cfg = self.config.background.memory
+        mem_cfg = self.config.memory
         if not mem_cfg.enabled:
             return
         every_n = mem_cfg.extraction_every_n
@@ -209,7 +209,7 @@ class GraphRunner:
         try:
             from gbot.memory.extraction import MemoryService
 
-            mem_model = self.config.background.memory.model or self.config.assistant.model
+            mem_model = self.config.memory.model or self.config.assistant.model
             mem = MemoryService(self.db, model=mem_model)
             stats = await mem.extract_and_save(
                 user_id, messages, session_id=session_id, trigger="hot_path",
@@ -252,7 +252,7 @@ class GraphRunner:
             db_messages = self.db.get_recent_messages(session_id, limit=50)
             llm_messages = self._prepare_summary_messages(db_messages)
 
-            mem_model = self.config.background.memory.model or self.config.assistant.model
+            mem_model = self.config.memory.model or self.config.assistant.model
             mem = MemoryService(self.db, model=mem_model)
             result = await mem.process_session(
                 user_id, llm_messages, session_id=session_id,

@@ -15,10 +15,12 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`MemoryService`:** Unified memory processing — session summarization + fact extraction via `agents.yaml` memory profile.
 - **Memory agent profile:** `config/agents.yaml` memory entry + `workspace/agents/memory/AGENT.md` prompt.
 - **Hot-path extraction:** Every N user messages (configurable `background.memory.extraction_every_n`, default 5), fire-and-forget async extraction.
-- **`MemoryConfig`:** `background.memory` config section — enabled, model, extraction_every_n, max_facts_per_user.
+- **`MemoryConfig`:** Root-level `memory` config section — enabled, model, extraction_every_n, max_facts_per_user, embedding (provider/model/dimension), update (strategy/model/thresholds).
 - **ContextBuilder:** `user_context` layer now includes "LEARNED FACTS" from `memory_facts` alongside explicit notes/prefs/favs.
 - **Admin API:** `GET /admin/memory/{user_id}` — facts, stats, processing log. Stats include `memory_facts` count.
 - **Dashboard Memory page:** Facts table with type filter tabs, notes/preferences/favorites panel, processing log.
+- **Embedding config:** `memory.embedding` — provider (openrouter/local), model (`google/gemini-embedding-001`), dimension (3072). Benchmarked 21 models for Turkish semantic similarity.
+- **Update strategy config:** `memory.update` — cascading (default), llm_only, threshold_only. Thresholds tuned per embedding benchmark (noop >0.90, add <0.65).
 
 ### Changed
 

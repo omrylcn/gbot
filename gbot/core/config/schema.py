@@ -155,13 +155,32 @@ class CronConfig(BaseModel):
     enabled: bool = True
 
 
+class MemoryEmbeddingConfig(BaseModel):
+    """Embedding model for memory semantic search."""
+
+    provider: str = "openrouter"  # openrouter | local
+    model: str = "google/gemini-embedding-001"
+    dimension: int = 3072
+
+
+class MemoryUpdateConfig(BaseModel):
+    """Conflict resolution strategy for memory updates."""
+
+    strategy: str = "cascading"  # cascading | llm_only | threshold_only
+    model: str = "openai/gpt-4o-mini"
+    noop_threshold: float = 0.90
+    add_threshold: float = 0.65
+
+
 class MemoryConfig(BaseModel):
     """Memory extraction configuration."""
 
     enabled: bool = True
     model: str = ""  # empty → falls back to assistant.model
-    extraction_every_n: int = 5  # extract facts every N user messages
+    extraction_every_n: int = 5
     max_facts_per_user: int = 500
+    embedding: MemoryEmbeddingConfig = Field(default_factory=MemoryEmbeddingConfig)
+    update: MemoryUpdateConfig = Field(default_factory=MemoryUpdateConfig)
 
 
 class HeartbeatConfig(BaseModel):
@@ -181,7 +200,6 @@ class BackgroundConfig(BaseModel):
     cron: CronConfig = Field(default_factory=CronConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
     delegation: DelegationConfig = Field(default_factory=DelegationConfig)
-    memory: MemoryConfig = Field(default_factory=MemoryConfig)
 
 
 # Auth
@@ -233,6 +251,7 @@ class Config(BaseSettings):
     assistant: AssistantConfig = Field(default_factory=AssistantConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
     rag: RagConfig | None = None
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     background: BackgroundConfig = Field(default_factory=BackgroundConfig)
