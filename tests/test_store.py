@@ -68,9 +68,11 @@ def test_favorites(store):
 
 
 def test_preferences(store):
-    store.update_preferences("u1", {"a": 1})
-    store.update_preferences("u1", {"b": 2})
-    assert store.get_preferences("u1") == {"a": 1, "b": 2}
+    store.update_preferences("u1", {"a": "dark"})
+    store.update_preferences("u1", {"b": "light"})
+    assert store.get_preferences("u1") == {"a": "dark", "b": "light"}
+    store.remove_preference("u1", "b")
+    assert store.get_preferences("u1") == {"a": "dark"}
 
 
 def test_cron_jobs(store):

@@ -6,6 +6,29 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.17.0] - 2026-03-21 — Faz 22B: Semantic Retrieval + AUDN
+
+### Added
+
+- **sqlite-vec integration:** Vector search in SQLite — `vec_memory_facts` virtual table with cosine distance.
+- **`MemoryEmbedder`:** Sync OpenRouter embedding client (`google/gemini-embedding-001`, 3072d). Config: `memory.embedding`.
+- **AUDN update logic:** Embedding finds similar facts → LLM decides ADD/UPDATE/DELETE/NOOP. Config: `memory.update` (strategy, model).
+- **DELETE action:** "Artık X yapmıyorum" → old fact invalidated, no negative fact added.
+- **Query-aware context:** ContextBuilder embeds last user message → semantic search → most relevant facts in context.
+- **Temporal user_notes:** Notes processed → transferred to memory_facts via AUDN → always deleted after processing.
+- **`MemoryEmbeddingConfig` + `MemoryUpdateConfig`:** Full config for embedding provider/model and update strategy/thresholds.
+- **Embedding benchmark notebook:** `notebooks/embedding_benchmark.ipynb` — 21 models tested for Turkish semantic similarity.
+
+### Changed
+
+- **`memory.update.strategy` default:** `llm` (was `cascading`). Embedding finds, LLM decides — most accurate.
+- **`MemoryService`:** Now accepts `config` and `embedder` parameters. AUDN replaces exact string dedup.
+- **`ContextBuilder`:** Accepts `embedder` parameter, `build_layers()` takes `last_message` for semantic retrieval.
+- **`store.add_fact()`:** New `embedding` parameter — stores vector in same transaction.
+- **`store.invalidate_fact()`:** Also removes vector from `vec_memory_facts`.
+- **`store.search_similar_facts()`:** CTE + `k=` syntax for sqlite-vec KNN with user/validity filtering.
+
+
 ## [1.16.0] - 2026-03-20 — Faz 22A: Memory Layer
 
 ### Added

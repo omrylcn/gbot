@@ -47,9 +47,17 @@ class GraphRunner:
             self.registry = make_tools(config, db)
         self.tools = self.registry.get_all_tools()
         setup_provider(config)
-        
-        # TODO: asign graph type langchain type
-        self._graph = create_graph(config, db, self.tools)
+
+        # Memory embedder (for semantic retrieval in context + extraction)
+        self._embedder = None
+        if config.memory.enabled:
+            try:
+                from gbot.memory.embedder import MemoryEmbedder
+                self._embedder = MemoryEmbedder(config.memory.embedding)
+            except Exception as e:
+                logger.warning(f"Memory embedder init failed: {e}")
+
+        self._graph = create_graph(config, db, self.tools, embedder=self._embedder)
 
     async def process(
         self,
@@ -202,19 +210,28 @@ class GraphRunner:
             if llm_messages:
                 asyncio.create_task(self._extract_facts_bg(user_id, llm_messages, session_id))
 
+    def _create_memory_service(self):
+        """Create MemoryService with config and embedder."""
+        from gbot.memory.extraction import MemoryService
+
+        mem_model = self.config.memory.model or self.config.assistant.model
+        return MemoryService(
+            self.db, model=mem_model,
+            config=self.config.memory, embedder=self._embedder,
+        )
+
     async def _extract_facts_bg(
         self, user_id: str, messages: list[dict], session_id: str
     ) -> None:
         """Background fact extraction (fire-and-forget)."""
         try:
-            from gbot.memory.extraction import MemoryService
-
-            mem_model = self.config.memory.model or self.config.assistant.model
-            mem = MemoryService(self.db, model=mem_model)
+            mem = self._create_memory_service()
             stats = await mem.extract_and_save(
                 user_id, messages, session_id=session_id, trigger="hot_path",
             )
-            if stats.get("facts_added", 0) > 0:
+            # Also process temporal notes
+            await mem.process_temporal_notes(user_id)
+            if stats.get("facts_added", 0) or stats.get("facts_updated", 0):
                 logger.info(f"Hot-path memory: {stats}")
         except Exception as e:
             logger.warning(f"Hot-path extraction failed: {e}")
@@ -247,16 +264,14 @@ class GraphRunner:
     ) -> None:
         """Background task: MemoryService processes and closes session."""
         try:
-            from gbot.memory.extraction import MemoryService
-
             db_messages = self.db.get_recent_messages(session_id, limit=50)
             llm_messages = self._prepare_summary_messages(db_messages)
 
-            mem_model = self.config.memory.model or self.config.assistant.model
-            mem = MemoryService(self.db, model=mem_model)
+            mem = self._create_memory_service()
             result = await mem.process_session(
                 user_id, llm_messages, session_id=session_id,
             )
+            await mem.process_temporal_notes(user_id)
             summary = result.get("summary", "")
         except Exception as e:
             logger.error(f"Memory processing failed for session {session_id}: {e}")

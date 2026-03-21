@@ -166,8 +166,8 @@ class MemoryEmbeddingConfig(BaseModel):
 class MemoryUpdateConfig(BaseModel):
     """Conflict resolution strategy for memory updates."""
 
-    strategy: str = "cascading"  # cascading | llm_only | threshold_only
-    model: str = "openai/gpt-4o-mini"
+    strategy: str = "llm"  # llm (default) | cascading | threshold_only
+    model: str = "openrouter/openai/gpt-4o-mini"
     noop_threshold: float = 0.90
     add_threshold: float = 0.65
 

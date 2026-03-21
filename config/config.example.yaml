@@ -92,8 +92,7 @@ memory:
     model: "google/gemini-embedding-001"
     dimension: 3072
   update:
-    strategy: "cascading"  # cascading | llm_only | threshold_only
+    strategy: "llm"              # llm (default) | cascading | threshold_only
     model: "openai/gpt-4o-mini"  # AUDN decision model (cheap)
-    noop_threshold: 0.90         # > this = duplicate, auto skip
-    add_threshold: 0.65          # < this = new info, auto add
-    # grey zone: 0.65-0.90 → LLM decides
+    noop_threshold: 0.90         # threshold_only/cascading: duplicate skip
+    add_threshold: 0.65          # threshold_only/cascading: auto add

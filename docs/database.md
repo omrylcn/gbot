@@ -6,7 +6,7 @@ GBot uses **SQLite with WAL mode** as its single source of truth for all persist
 
 **Key Principles:**
 - **SQLite is the source of truth** — LangGraph checkpointing is NOT used
-- **12 tables** organized into 5 functional groups
+- **14 tables** organized into 5 functional groups
 - **Request-scoped operations** — data flows through FastAPI → GraphRunner → MemoryStore → SQLite
 - **Foreign keys enforced** — maintains referential integrity
 - **Indexes on frequent queries** — optimized for user/session lookups
@@ -538,7 +538,66 @@ db.add_system_event(
 
 ---
 
-### 12. `api_keys` — API Access Tokens
+### 12. `memory_facts` — Learned Knowledge (Auto-extracted)
+
+**Purpose:** Long-term memory — typed facts extracted from conversations via LLM. Semantic search via `vec_memory_facts` (sqlite-vec).
+
+**Schema:**
+```sql
+CREATE TABLE memory_facts (
+    fact_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    fact_type TEXT NOT NULL DEFAULT 'semantic',  -- semantic | episodic | preference | procedural
+    source TEXT DEFAULT 'extraction',            -- extraction | note_transfer
+    source_session TEXT,
+    source_channel TEXT,
+    confidence REAL DEFAULT 1.0,
+    importance REAL DEFAULT 0.5,
+    access_count INTEGER DEFAULT 0,
+    valid_from TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    valid_until TIMESTAMP,                       -- NULL = active, set = invalidated
+    superseded_by TEXT,                          -- fact_id that replaced this one
+    keywords TEXT,                               -- JSON array
+    category TEXT,
+    embedding BLOB,
+    created_at TIMESTAMP, updated_at TIMESTAMP
+);
+
+CREATE VIRTUAL TABLE vec_memory_facts USING vec0(
+    embedding float[3072] distance_metric=cosine
+);
+```
+
+**AUDN Update Logic:** New facts are embedded → similar facts found via sqlite-vec KNN → LLM decides:
+- **ADD**: genuinely new information
+- **UPDATE**: replaces existing fact (old invalidated, new added)
+- **DELETE**: negates existing fact (old invalidated, no new fact)
+- **NOOP**: duplicate, skip
+
+---
+
+### 13. `memory_processing_log` — Extraction Audit Trail
+
+**Purpose:** Tracks when memory processing ran, what was extracted/updated.
+
+**Schema:**
+```sql
+CREATE TABLE memory_processing_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    session_id TEXT,
+    trigger TEXT,           -- hot_path | session_close | manual
+    facts_extracted INTEGER, facts_added INTEGER,
+    facts_updated INTEGER, facts_invalidated INTEGER,
+    duration_ms INTEGER,
+    processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+---
+
+### 14. `api_keys` — API Access Tokens
 
 **Purpose:** Alternative authentication method (API keys instead of JWT).
 
@@ -671,7 +730,7 @@ curl -H "Authorization: Bearer gbot_sk_abc123xyz" https://gbot-assistant.cloud/c
 class MemoryStore:
     def __init__(self, db_path: str):
         self._db_path = db_path
-        self._init_db()  # Executes CREATE TABLE IF NOT EXISTS for all 12 tables
+        self._init_db()  # Executes CREATE TABLE IF NOT EXISTS for all 14 tables
 ```
 
 **First run:**
@@ -679,7 +738,7 @@ class MemoryStore:
 docker compose up -d
 
 # Container starts → MemoryStore.__init__() → _SCHEMA + _TASK_TABLES_SQL executed
-# All 12 tables created in /app/data/gbot.db
+# All 14 tables created in /app/data/gbot.db
 ```
 
 **Auto-migration:** If upgrading from v1.14.x, `_migrate_to_unified_tasks()` automatically migrates old `cron_jobs`, `reminders`, `cron_execution_log`, `delegation_log` tables into the new unified schema in a single transaction.
@@ -888,9 +947,9 @@ docker compose restart
 | `sessions` | Auto-created on first message | Every new conversation |
 | `messages` | Every chat request (API, Telegram) | Every message exchange |
 | `agent_memory` | Manual insert, planned admin API | System knowledge seeding |
-| `user_notes` | Agent tool `save_user_note()` | When LLM learns facts |
-| `favorites` | Agent tool `add_favorite()` | User favorites management |
-| `preferences` | Agent learning, planned API | User settings storage |
+| `user_notes` | Agent tools (save_note, set_preference, add_favorite) | Temporal buffer — processed by MemoryService |
+| `memory_facts` | MemoryService (auto-extraction + AUDN) | Every N messages (hot-path) + session close |
+| `memory_processing_log` | MemoryService | After each extraction run |
 | `background_tasks` | Agent tool `delegate()` | All task types (immediate/delayed/recurring/monitor) |
 | `task_executions` | Auto-created by CronScheduler | After each task execution |
 | `system_events` | Background tasks, scheduler | Event delivery queue |
@@ -912,7 +971,7 @@ docker compose restart
 ## Conclusion
 
 GBot's database is the **single source of truth** for all state:
-- ✅ **12 tables** covering identity, conversations, memory, scheduling, and background work
+- ✅ **14 tables** covering identity, conversations, memory, scheduling, and background work
 - ✅ **Request-scoped operations** — no long-running state in LangGraph
 - ✅ **Tool-driven data** — LLM decides when to save notes, schedule tasks, etc.
 - ✅ **Automated backups** — daily snapshots with 7-day retention

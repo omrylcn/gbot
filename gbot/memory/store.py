@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+
+import sqlite_vec
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -32,6 +34,9 @@ class MemoryStore:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
+        conn.enable_load_extension(True)
+        sqlite_vec.load(conn)
+        conn.enable_load_extension(False)
         try:
             yield conn
         finally:
@@ -70,8 +75,8 @@ class MemoryStore:
             if "execution_type" not in bt_cols:
                 self._migrate_to_unified_tasks(conn, old_tables)
 
-        # Faz 22A: Memory tables (always ensure they exist)
-        if "memory_facts" not in old_tables:
+        # Faz 22: Memory tables (always ensure they exist)
+        if "memory_facts" not in old_tables or "vec_memory_facts" not in old_tables:
             self._create_memory_tables(conn)
 
     _TASK_TABLES_SQL = """
@@ -156,6 +161,9 @@ class MemoryStore:
             ON memory_facts(user_id, fact_type);
         CREATE INDEX IF NOT EXISTS idx_facts_valid
             ON memory_facts(user_id, valid_until);
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS vec_memory_facts
+            USING vec0(embedding float[3072] distance_metric=cosine);
 
         CREATE TABLE IF NOT EXISTS memory_processing_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -762,6 +770,21 @@ class MemoryStore:
             ).fetchall()
         return [r["content"] for r in rows]
 
+    def get_notes_with_ids(self, user_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                """SELECT id, content, source, created_at FROM user_notes
+                   WHERE user_id = ? AND note_type = 'note'
+                   ORDER BY created_at DESC LIMIT ?""",
+                (user_id, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_note(self, note_id: int) -> None:
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM user_notes WHERE id = ?", (note_id,))
+            conn.commit()
+
     # ════════════════════════════════════════════════════════════
     # FAVORITES
     # ════════════════════════════════════════════════════════════
@@ -1240,9 +1263,10 @@ class MemoryStore:
         importance: float = 0.5,
         keywords: list[str] | None = None,
         category: str | None = None,
+        embedding: list[float] | None = None,
     ) -> None:
         with self._get_conn() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """INSERT INTO memory_facts
                    (fact_id, user_id, content, fact_type, source,
                     source_session, source_channel, confidence, importance,
@@ -1255,6 +1279,13 @@ class MemoryStore:
                     category,
                 ),
             )
+            # Store embedding in vec table (same transaction)
+            if embedding:
+                rowid = cursor.lastrowid
+                conn.execute(
+                    "INSERT INTO vec_memory_facts(rowid, embedding) VALUES (?, ?)",
+                    (rowid, json.dumps(embedding)),
+                )
             conn.commit()
 
     def get_facts(
@@ -1314,6 +1345,9 @@ class MemoryStore:
         self, fact_id: str, superseded_by: str | None = None
     ) -> None:
         with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT rowid FROM memory_facts WHERE fact_id = ?", (fact_id,)
+            ).fetchone()
             conn.execute(
                 """UPDATE memory_facts
                    SET valid_until = CURRENT_TIMESTAMP,
@@ -1322,6 +1356,10 @@ class MemoryStore:
                    WHERE fact_id = ?""",
                 (superseded_by, fact_id),
             )
+            if row:
+                conn.execute(
+                    "DELETE FROM vec_memory_facts WHERE rowid = ?", (row[0],)
+                )
             conn.commit()
 
     def increment_fact_access(self, fact_id: str) -> None:
@@ -1333,6 +1371,38 @@ class MemoryStore:
                 (fact_id,),
             )
             conn.commit()
+
+    def search_similar_facts(
+        self,
+        user_id: str,
+        query_embedding: list[float],
+        top_k: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Semantic similarity search — user-scoped, valid facts only.
+
+        Uses CTE + k= syntax for sqlite-vec compatibility.
+        distance_metric=cosine: 0.0 = identical, 2.0 = opposite.
+        """
+        with self._get_conn() as conn:
+            count = conn.execute(
+                "SELECT COUNT(*) FROM vec_memory_facts"
+            ).fetchone()[0]
+            if count == 0:
+                return []
+            rows = conn.execute(
+                """WITH knn AS (
+                       SELECT rowid, distance
+                       FROM vec_memory_facts
+                       WHERE embedding MATCH ? AND k = ?
+                   )
+                   SELECT f.*, knn.distance
+                   FROM knn
+                   JOIN memory_facts f ON f.rowid = knn.rowid
+                   WHERE f.user_id = ? AND f.valid_until IS NULL
+                   ORDER BY knn.distance""",
+                (json.dumps(query_embedding), top_k * 3, user_id),
+            ).fetchall()
+        return [dict(r) for r in rows[:top_k]]
 
     def get_fact_stats(self, user_id: str) -> dict[str, Any]:
         with self._get_conn() as conn:

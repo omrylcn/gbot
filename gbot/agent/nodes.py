@@ -14,13 +14,13 @@ from gbot.agent.context import ContextBuilder
 from gbot.memory.store import MemoryStore
 
 
-def make_nodes(config: Config, db: MemoryStore, tools: list | None = None):
+def make_nodes(config: Config, db: MemoryStore, tools: list | None = None, embedder=None):
     """
     Create node functions closed over config, db, and tools.
 
     Returns dict of {node_name: callable} for graph registration.
     """
-    ctx_builder = ContextBuilder(config, db)
+    ctx_builder = ContextBuilder(config, db, embedder=embedder)
     tool_defs = _build_tool_definitions(tools) if tools else None
     tool_map = {t.name: t for t in tools} if tools else {}
 
@@ -36,7 +36,16 @@ def make_nodes(config: Config, db: MemoryStore, tools: list | None = None):
             logger.debug(f"Lightweight context (identity only) for user {state['user_id']}")
         else:
             layers = state.get("context_layers")
-            prompt = ctx_builder.build(state["user_id"], context_layers=layers)
+            # Get last user message for semantic retrieval
+            last_msg = None
+            from langchain_core.messages import HumanMessage
+            for msg in reversed(state.get("messages", [])):
+                if isinstance(msg, HumanMessage) and msg.content:
+                    last_msg = msg.content
+                    break
+            prompt = ctx_builder.build(
+                state["user_id"], context_layers=layers, last_message=last_msg
+            )
             logger.debug(
                 f"Context built for user {state['user_id']} "
                 f"(role={state.get('role', '?')}, layers={len(layers) if layers else 'all'})"

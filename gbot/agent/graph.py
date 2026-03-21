@@ -14,6 +14,7 @@ def create_graph(
     config: Config,
     db: MemoryStore,
     tools: list | None = None,
+    embedder=None,
 ) -> StateGraph:
     """
     Build and compile the agent graph.
@@ -21,7 +22,7 @@ def create_graph(
     Graph flow:
         START → load_context → reason ⇄ execute_tools → respond → END
     """
-    nodes = make_nodes(config, db, tools)
+    nodes = make_nodes(config, db, tools, embedder=embedder)
 
     graph = StateGraph(AgentState)
 

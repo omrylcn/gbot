@@ -25,10 +25,14 @@ class ContextBuilder:
       7. Skills (always-on + index)
     """
 
-    def __init__(self, config: Config, db: MemoryStore, profile: str = "main"):
+    def __init__(
+        self, config: Config, db: MemoryStore, profile: str = "main",
+        embedder=None,
+    ):
         self.config = config
         self.db = db
         self.profile = profile
+        self.embedder = embedder  # MemoryEmbedder (optional, for semantic retrieval)
         self.skills = SkillLoader(
             workspace=config.workspace_path,
             builtin_dir=Path(__file__).parent.parent / "skills" / "builtin",
@@ -41,6 +45,7 @@ class ContextBuilder:
         context_layers: set[str] | None = None,
         mark_delivered: bool = False,
         template_vars: dict[str, str] | None = None,
+        last_message: str | None = None,
     ) -> dict[str, LayerResult]:
         """Build each context layer individually.
 
@@ -148,15 +153,19 @@ class ContextBuilder:
             # Explicit: notes, preferences, favorites
             user_ctx = self.db.get_user_context(user_id)
 
-            # Learned: memory_facts (auto-extracted from conversations)
+            # Learned: memory_facts (semantic search if embedder available)
             learned = ""
             try:
-                facts = self.db.get_facts(user_id, valid_only=True, limit=15)
+                if self.embedder and last_message:
+                    query_emb = self.embedder.embed(last_message)
+                    facts = self.db.search_similar_facts(user_id, query_emb, top_k=10)
+                else:
+                    facts = self.db.get_facts(user_id, valid_only=True, limit=15)
                 if facts:
                     lines = "\n".join(f"- {f['content']}" for f in facts)
                     learned = f"LEARNED FACTS:\n{lines}"
             except Exception:
-                pass  # memory_facts table may not exist in tests
+                pass  # memory_facts/vec table may not exist in tests
 
             combined = "\n\n".join(p for p in [user_ctx, learned] if p)
             if combined:
@@ -205,6 +214,7 @@ class ContextBuilder:
         user_id: str,
         role: str | None = None,
         context_layers: set[str] | None = None,
+        last_message: str | None = None,
     ) -> str:
         """Build full system prompt for a user (backward compatible).
 
@@ -216,8 +226,13 @@ class ContextBuilder:
             Override role name. Falls back to config default.
         context_layers : set[str], optional
             Allowed context layers from RBAC. None = all layers.
+        last_message : str, optional
+            Last user message for semantic memory retrieval.
         """
-        layers = self.build_layers(user_id, role, context_layers, mark_delivered=True)
+        layers = self.build_layers(
+            user_id, role, context_layers, mark_delivered=True,
+            last_message=last_message,
+        )
         parts = [lr.content for lr in layers.values() if lr.content]
         return "\n\n---\n\n".join(parts)
 

@@ -46,3 +46,23 @@ When asked to extract facts, return a JSON object:
 - Preserve the user's language for proper nouns and preferences
 - Skip greetings, filler, and technical tool call details
 - Return `{"facts": []}` if nothing worth extracting
+
+---
+
+## Task 3: Fact Update Decision (AUDN)
+
+When asked to compare a NEW fact with EXISTING facts, decide one action:
+
+- **ADD**: New fact is genuinely new information, not covered by existing facts
+- **UPDATE**: New fact replaces or updates an existing one (e.g. location changed, job changed)
+- **DELETE**: New fact negates an existing one without adding new info (e.g. "artık Go kullanmıyorum" → delete "Go kullanıyor", don't add negative fact)
+- **NOOP**: New fact is already known — duplicate or subset of existing facts
+
+Return JSON:
+```json
+{"action": "add|update|delete|noop", "target_fact_id": "...", "reason": "brief explanation"}
+```
+
+- `target_fact_id`: required for UPDATE and DELETE — which existing fact is affected
+- For ADD and NOOP, set `target_fact_id` to null
+- Use DELETE when user says they stopped/quit/no longer do something — remove the old fact, don't create a negative one
