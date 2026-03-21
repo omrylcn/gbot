@@ -77,6 +77,10 @@ That's it. The REPL connects to the API server automatically.
 
 ## Architecture
 
+<p align="center">
+  <img src="images/architecture.png" alt="GBot Architecture" width="800">
+</p>
+
 GBot deliberately separates the "thinking" from the "remembering." LangGraph handles the agent loop as a pure execution engine — no checkpoints, no internal state. All durable state lives in SQLite: sessions, memory, users, scheduled tasks, events. This means you can restart the server, swap models, or scale horizontally without losing anything.
 
 | Principle | Description |
