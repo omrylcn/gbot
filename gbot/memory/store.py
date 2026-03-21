@@ -76,7 +76,8 @@ class MemoryStore:
                 self._migrate_to_unified_tasks(conn, old_tables)
 
         # Faz 22: Memory tables (always ensure they exist)
-        if "memory_facts" not in old_tables or "vec_memory_facts" not in old_tables:
+        memory_tables = {"memory_facts", "vec_memory_facts", "memory_relations", "memory_processing_log"}
+        if not memory_tables.issubset(old_tables):
             self._create_memory_tables(conn)
 
     _TASK_TABLES_SQL = """
@@ -164,6 +165,24 @@ class MemoryStore:
 
         CREATE VIRTUAL TABLE IF NOT EXISTS vec_memory_facts
             USING vec0(embedding float[3072] distance_metric=cosine);
+
+        CREATE TABLE IF NOT EXISTS memory_relations (
+            relation_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            source_entity TEXT NOT NULL,
+            relation TEXT NOT NULL,
+            target_entity TEXT NOT NULL,
+            confidence REAL DEFAULT 1.0,
+            valid_from TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            valid_until TIMESTAMP,
+            source_fact TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_relations_user
+            ON memory_relations(user_id);
+        CREATE INDEX IF NOT EXISTS idx_relations_source
+            ON memory_relations(source_entity);
 
         CREATE TABLE IF NOT EXISTS memory_processing_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1372,6 +1391,63 @@ class MemoryStore:
             )
             conn.commit()
 
+    def batch_increment_access(self, fact_ids: list[str]) -> None:
+        """Increment access_count for multiple facts in one query."""
+        if not fact_ids:
+            return
+        placeholders = ",".join("?" for _ in fact_ids)
+        with self._get_conn() as conn:
+            conn.execute(
+                f"""UPDATE memory_facts
+                    SET access_count = access_count + 1
+                    WHERE fact_id IN ({placeholders})""",
+                fact_ids,
+            )
+            conn.commit()
+
+    def apply_decay(self, user_id: str) -> dict[str, int]:
+        """Decrease importance of old, rarely-accessed facts.
+
+        Returns counts of faded and archived facts.
+        """
+        with self._get_conn() as conn:
+            # 30+ days, 0 access → importance *= 0.8
+            conn.execute(
+                """UPDATE memory_facts
+                   SET importance = importance * 0.8,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE user_id = ? AND valid_until IS NULL
+                   AND access_count = 0
+                   AND julianday('now') - julianday(created_at) > 30""",
+                (user_id,),
+            )
+            faded = conn.execute("SELECT changes()").fetchone()[0]
+
+            # 90+ days, 0 access → importance *= 0.5
+            conn.execute(
+                """UPDATE memory_facts
+                   SET importance = importance * 0.5,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE user_id = ? AND valid_until IS NULL
+                   AND access_count = 0
+                   AND julianday('now') - julianday(created_at) > 90""",
+                (user_id,),
+            )
+
+            # importance < 0.1 → archive
+            conn.execute(
+                """UPDATE memory_facts
+                   SET valid_until = CURRENT_TIMESTAMP,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE user_id = ? AND valid_until IS NULL
+                   AND importance < 0.1""",
+                (user_id,),
+            )
+            archived = conn.execute("SELECT changes()").fetchone()[0]
+            conn.commit()
+
+        return {"faded": faded, "archived": archived}
+
     def search_similar_facts(
         self,
         user_id: str,
@@ -1421,6 +1497,62 @@ class MemoryStore:
             ).fetchone()
         by_type = {r["fact_type"]: {"count": r["cnt"], "avg_importance": r["avg_importance"]} for r in rows}
         return {"total": total["total"] if total else 0, "by_type": by_type}
+
+    # ════════════════════════════════════════════════════════════
+    # MEMORY RELATIONS
+    # ════════════════════════════════════════════════════════════
+
+    def add_relation(
+        self,
+        relation_id: str,
+        user_id: str,
+        source_entity: str,
+        relation: str,
+        target_entity: str,
+        confidence: float = 1.0,
+        source_fact: str | None = None,
+    ) -> None:
+        with self._get_conn() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO memory_relations
+                   (relation_id, user_id, source_entity, relation,
+                    target_entity, confidence, source_fact)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (relation_id, user_id, source_entity, relation,
+                 target_entity, confidence, source_fact),
+            )
+            conn.commit()
+
+    def get_relations(
+        self, user_id: str, entity: str | None = None
+    ) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            if entity:
+                rows = conn.execute(
+                    """SELECT * FROM memory_relations
+                       WHERE user_id = ? AND valid_until IS NULL
+                       AND (source_entity = ? OR target_entity = ?)
+                       ORDER BY created_at DESC""",
+                    (user_id, entity, entity),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT * FROM memory_relations
+                       WHERE user_id = ? AND valid_until IS NULL
+                       ORDER BY created_at DESC""",
+                    (user_id,),
+                ).fetchall()
+        return [dict(r) for r in rows]
+
+    def invalidate_relation(self, relation_id: str) -> None:
+        with self._get_conn() as conn:
+            conn.execute(
+                """UPDATE memory_relations
+                   SET valid_until = CURRENT_TIMESTAMP
+                   WHERE relation_id = ?""",
+                (relation_id,),
+            )
+            conn.commit()
 
     # ════════════════════════════════════════════════════════════
     # MEMORY PROCESSING LOG

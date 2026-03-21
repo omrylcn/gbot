@@ -6,6 +6,27 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.18.0] - 2026-03-21 — Faz 22C: Decay, Relations, Memory Tools
+
+### Added
+
+- **2-stage retrieval:** ContextBuilder searches 20 candidates via sqlite-vec → re-ranks by `similarity × retrieval_strength` (recency × access_count × confidence) → top 10 enter context.
+- **Access tracking:** `batch_increment_access()` — facts entering context get access_count +1. Frequently accessed facts score higher in re-ranking.
+- **Decay logic:** `apply_decay()` in store.py — 30+ day old facts with 0 access lose importance, <0.1 importance → archived. Available but not auto-triggered (Faz D).
+- **`memory_relations` table:** Entity relationships extracted from conversations. `add_relation()`, `get_relations()`, `invalidate_relation()`.
+- **Relation extraction:** AGENT.MD updated — relations zorunlu, 8 relation types (works_at, works_with, lives_in, owns, married_to, knows, uses, studies).
+- **`MemoryConsolidator`:** Event-driven consolidation class (merge + decay). Fact merge disabled pending threshold tuning (Faz D).
+- **Memory tools:** `search_memory` (semantic search), `forget_fact` (invalidate by query), `what_do_you_know` (category-grouped list). 26 total tools.
+
+### Changed
+
+- **AGENT.MD fully Turkish:** 10 zorunlu category, relation examples, merge prompt, AUDN Türkçe.
+- **Extraction model:** Back to Gemini Flash (better category/relation quality than gpt-4o-mini).
+- **`_extract_typed_facts()` returns tuple:** `(facts, relations)` — relations parsed and saved alongside facts.
+- **`make_memory_tools()`:** Accepts `embedder` parameter for search_memory/forget_fact.
+- **`make_tools()`:** Accepts `embedder` parameter, passed through to memory tools.
+
+
 ## [1.17.0] - 2026-03-21 — Faz 22B: Semantic Retrieval + AUDN
 
 ### Added

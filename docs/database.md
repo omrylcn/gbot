@@ -6,7 +6,7 @@ GBot uses **SQLite with WAL mode** as its single source of truth for all persist
 
 **Key Principles:**
 - **SQLite is the source of truth** — LangGraph checkpointing is NOT used
-- **14 tables** organized into 5 functional groups
+- **15 tables** organized into 5 functional groups
 - **Request-scoped operations** — data flows through FastAPI → GraphRunner → MemoryStore → SQLite
 - **Foreign keys enforced** — maintains referential integrity
 - **Indexes on frequent queries** — optimized for user/session lookups
@@ -597,7 +597,33 @@ CREATE TABLE memory_processing_log (
 
 ---
 
-### 14. `api_keys` — API Access Tokens
+### 14. `memory_relations` — Entity Relationships
+
+**Purpose:** Tracks relationships between entities extracted from conversations.
+
+**Schema:**
+```sql
+CREATE TABLE memory_relations (
+    relation_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    source_entity TEXT NOT NULL,    -- "Ömer"
+    relation TEXT NOT NULL,         -- "works_at", "married_to", "owns"
+    target_entity TEXT NOT NULL,    -- "HangiKredi", "Ayşe", "Pamuk"
+    confidence REAL DEFAULT 1.0,
+    valid_from TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    valid_until TIMESTAMP,
+    source_fact TEXT,               -- fact_id that generated this relation
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+**Relation types:** works_at, works_with, lives_in, owns, married_to, knows, uses, studies
+
+**Data Source:** Auto-extracted by MemoryService during fact extraction. Not yet used in ContextBuilder (planned for future).
+
+---
+
+### 15. `api_keys` — API Access Tokens
 
 **Purpose:** Alternative authentication method (API keys instead of JWT).
 
@@ -730,7 +756,7 @@ curl -H "Authorization: Bearer gbot_sk_abc123xyz" https://gbot-assistant.cloud/c
 class MemoryStore:
     def __init__(self, db_path: str):
         self._db_path = db_path
-        self._init_db()  # Executes CREATE TABLE IF NOT EXISTS for all 14 tables
+        self._init_db()  # Executes CREATE TABLE IF NOT EXISTS for all 15 tables
 ```
 
 **First run:**
@@ -738,7 +764,7 @@ class MemoryStore:
 docker compose up -d
 
 # Container starts → MemoryStore.__init__() → _SCHEMA + _TASK_TABLES_SQL executed
-# All 14 tables created in /app/data/gbot.db
+# All 15 tables created in /app/data/gbot.db
 ```
 
 **Auto-migration:** If upgrading from v1.14.x, `_migrate_to_unified_tasks()` automatically migrates old `cron_jobs`, `reminders`, `cron_execution_log`, `delegation_log` tables into the new unified schema in a single transaction.
@@ -950,6 +976,7 @@ docker compose restart
 | `user_notes` | Agent tools (save_note, set_preference, add_favorite) | Temporal buffer — processed by MemoryService |
 | `memory_facts` | MemoryService (auto-extraction + AUDN) | Every N messages (hot-path) + session close |
 | `memory_processing_log` | MemoryService | After each extraction run |
+| `memory_relations` | MemoryService (auto-extraction) | Entity relationships from conversations |
 | `background_tasks` | Agent tool `delegate()` | All task types (immediate/delayed/recurring/monitor) |
 | `task_executions` | Auto-created by CronScheduler | After each task execution |
 | `system_events` | Background tasks, scheduler | Event delivery queue |
@@ -971,7 +998,7 @@ docker compose restart
 ## Conclusion
 
 GBot's database is the **single source of truth** for all state:
-- ✅ **14 tables** covering identity, conversations, memory, scheduling, and background work
+- ✅ **15 tables** covering identity, conversations, memory, scheduling, and background work
 - ✅ **Request-scoped operations** — no long-running state in LangGraph
 - ✅ **Tool-driven data** — LLM decides when to save notes, schedule tasks, etc.
 - ✅ **Automated backups** — daily snapshots with 7-day retention

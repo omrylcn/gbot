@@ -133,7 +133,7 @@ class ToolRegistry:
 _DELEGATION_TOOLS = ["delegate", "list_scheduled_tasks", "cancel_scheduled_task"]
 
 
-def make_tools(config: Config, db: MemoryStore) -> ToolRegistry:
+def make_tools(config: Config, db: MemoryStore, embedder=None) -> ToolRegistry:
     """Create all agent tools and return a ToolRegistry.
 
     Delegation tools are registered separately in lifespan (needs worker +
@@ -152,7 +152,7 @@ def make_tools(config: Config, db: MemoryStore) -> ToolRegistry:
             logger.warning("RAG deps not installed (faiss-cpu, sentence-transformers)")
 
     # Static tools (always available)
-    registry.register_group("memory", make_memory_tools(db))
+    registry.register_group("memory", make_memory_tools(db, embedder=embedder))
     registry.register_group("search", make_search_tools(retriever))
     registry.register_group("filesystem", make_filesystem_tools(config))
     registry.register_group("shell", make_shell_tools(config))

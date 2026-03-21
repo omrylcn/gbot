@@ -107,8 +107,17 @@ async def lifespan(app: FastAPI):
     heartbeat = HeartbeatService(config, runner)
     worker = SubagentWorker(config, db=db)
 
+    # Memory embedder (shared across tools + runner + context)
+    mem_embedder = None
+    if config.memory.enabled:
+        try:
+            from gbot.memory.embedder import MemoryEmbedder
+            mem_embedder = MemoryEmbedder(config.memory.embedding)
+        except Exception as e:
+            logger.warning(f"Memory embedder init failed: {e}")
+
     # Build registry without delegation (planner doesn't exist yet)
-    registry = make_tools(config, db)
+    registry = make_tools(config, db, embedder=mem_embedder)
 
     # Delegation planner uses background-safe subset of registry
     bg_registry = build_background_registry(registry)

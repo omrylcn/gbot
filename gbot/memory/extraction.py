@@ -45,7 +45,8 @@ class MemoryService:
         self.config = config
         self.embedder = embedder
         self._system_prompt = get_agent_md("memory") or ""
-        self._update_model = config.update.model if config else "openai/gpt-4o-mini"
+        update_model = config.update.model if config else ""
+        self._update_model = update_model or self.model
 
     async def process_session(
         self,
@@ -114,7 +115,21 @@ class MemoryService:
         """Extract typed facts, embed, AUDN update, save to DB."""
         start = time.monotonic()
 
-        raw_facts = await self._extract_typed_facts(messages)
+        raw_facts, raw_relations = await self._extract_typed_facts(messages)
+
+        # Save relations
+        for rel in raw_relations:
+            try:
+                self.db.add_relation(
+                    relation_id=str(uuid.uuid4())[:8],
+                    user_id=user_id,
+                    source_entity=rel["source"],
+                    relation=rel["relation"],
+                    target_entity=rel["target"],
+                )
+            except Exception:
+                pass
+
         if not raw_facts:
             return {"facts_extracted": 0, "facts_added": 0, "facts_updated": 0}
 
@@ -218,6 +233,11 @@ class MemoryService:
         }
         if added or updated:
             logger.info(f"Memory extraction for {user_id}: {stats}")
+
+        # TODO: Faz D — event-driven consolidation (merge + decay)
+        # if added or updated or deleted:
+        #     consolidator.run(user_id)
+
         return stats
 
     async def _audn_decide(
@@ -339,11 +359,14 @@ class MemoryService:
 
     async def _extract_typed_facts(
         self, messages: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
-        """Call LLM with memory agent prompt to extract typed facts."""
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Call LLM to extract typed facts + relations.
+
+        Returns (facts, relations) tuple.
+        """
         if not self._system_prompt:
             logger.warning("No memory agent prompt (agents.yaml memory profile)")
-            return []
+            return [], []
 
         extraction_messages = [
             {"role": "system", "content": self._system_prompt},
@@ -356,13 +379,21 @@ class MemoryService:
                 extraction_messages,
                 model=self.model,
                 temperature=0.1,
-                max_tokens=500,
+                max_tokens=1000,
                 response_format={"type": "json_object"},
             )
             raw = response.content or '{"facts": []}'
             data = json.loads(raw)
+            if isinstance(data, list):
+                data = data[0] if data else {}
+            if not isinstance(data, dict):
+                return [], []
             facts = data.get("facts", [])
-            return [f for f in facts if isinstance(f, dict) and f.get("content")]
+            relations = data.get("relations", [])
+            valid_facts = [f for f in facts if isinstance(f, dict) and f.get("content")]
+            valid_rels = [r for r in relations if isinstance(r, dict)
+                         and r.get("source") and r.get("relation") and r.get("target")]
+            return valid_facts, valid_rels
         except (json.JSONDecodeError, Exception) as e:
             logger.warning(f"Typed fact extraction failed: {e}")
-            return []
+            return [], []

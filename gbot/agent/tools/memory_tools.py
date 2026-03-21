@@ -1,13 +1,15 @@
-"""Memory tools — user notes, context, activities, favorites, preferences."""
+"""Memory tools — user notes, context, favorites, preferences, memory search."""
 
 from __future__ import annotations
+
+from collections import defaultdict
 
 from langchain_core.tools import tool
 
 from gbot.memory.store import MemoryStore
 
 
-def make_memory_tools(db: MemoryStore) -> list:
+def make_memory_tools(db: MemoryStore, embedder=None) -> list:
     """Create memory tools closed over db."""
 
     @tool
@@ -78,7 +80,52 @@ def make_memory_tools(db: MemoryStore) -> list:
             return f"Preference '{key}' not found."
         return f"Preference removed: {key}"
 
-    return [
+    @tool
+    def search_memory(user_id: str, query: str) -> str:
+        """Search user's memory facts by semantic similarity."""
+        if not embedder:
+            return "Memory search not available (no embedder configured)."
+        emb = embedder.embed(query)
+        results = db.search_similar_facts(user_id, emb, top_k=10)
+        if not results:
+            return "No matching memory facts found."
+        lines = "\n".join(
+            f"- [{r['fact_type']}] {r['content']} (confidence={r['confidence']})"
+            for r in results
+        )
+        return f"Found {len(results)} facts:\n{lines}"
+
+    @tool
+    def forget_fact(user_id: str, query: str) -> str:
+        """Find and forget (invalidate) the closest matching memory fact."""
+        if not embedder:
+            return "Memory search not available (no embedder configured)."
+        emb = embedder.embed(query)
+        results = db.search_similar_facts(user_id, emb, top_k=1)
+        if not results:
+            return "No matching fact found to forget."
+        fact = results[0]
+        db.invalidate_fact(fact["fact_id"])
+        return f"Forgot: {fact['content']}"
+
+    @tool
+    def what_do_you_know(user_id: str) -> str:
+        """List all active memory facts grouped by category."""
+        facts = db.get_facts(user_id, valid_only=True, limit=50)
+        if not facts:
+            return "No memory facts stored for this user."
+        by_cat: dict[str, list[str]] = defaultdict(list)
+        for f in facts:
+            cat = f.get("category") or "general"
+            by_cat[cat].append(f["content"])
+        lines = []
+        for cat, items in sorted(by_cat.items()):
+            lines.append(f"\n**{cat.upper()}**:")
+            for item in items:
+                lines.append(f"  - {item}")
+        return f"Memory facts ({len(facts)} total):" + "\n".join(lines)
+
+    tools = [
         save_user_note,
         get_user_context,
         add_favorite,
@@ -87,4 +134,8 @@ def make_memory_tools(db: MemoryStore) -> list:
         set_user_preference,
         get_user_preferences,
         remove_user_preference,
+        search_memory,
+        forget_fact,
+        what_do_you_know,
     ]
+    return tools

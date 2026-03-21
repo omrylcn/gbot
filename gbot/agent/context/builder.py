@@ -153,17 +153,23 @@ class ContextBuilder:
             # Explicit: notes, preferences, favorites
             user_ctx = self.db.get_user_context(user_id)
 
-            # Learned: memory_facts (semantic search if embedder available)
+            # Learned: memory_facts (2-stage retrieval: search → re-rank)
             learned = ""
             try:
                 if self.embedder and last_message:
                     query_emb = self.embedder.embed(last_message)
-                    facts = self.db.search_similar_facts(user_id, query_emb, top_k=10)
+                    # Stage 1: broad candidates (similarity only)
+                    candidates = self.db.search_similar_facts(user_id, query_emb, top_k=20)
+                    # Stage 2: re-rank by similarity × retrieval_strength
+                    facts = self._rerank_facts(candidates, top_k=10)
                 else:
                     facts = self.db.get_facts(user_id, valid_only=True, limit=15)
                 if facts:
                     lines = "\n".join(f"- {f['content']}" for f in facts)
                     learned = f"LEARNED FACTS:\n{lines}"
+                    # Access tracking — batch update
+                    fact_ids = [f["fact_id"] for f in facts]
+                    self.db.batch_increment_access(fact_ids)
             except Exception:
                 pass  # memory_facts/vec table may not exist in tests
 
@@ -358,6 +364,33 @@ class ContextBuilder:
         return None
 
     # ── Helpers ───────────────────────────────────────────────
+
+    @staticmethod
+    def _rerank_facts(
+        candidates: list[dict], top_k: int = 10
+    ) -> list[dict]:
+        """Re-rank facts by similarity × retrieval_strength.
+
+        retrieval_strength = recency × access_factor × confidence
+        """
+        from datetime import datetime
+
+        now = datetime.now()
+        for f in candidates:
+            try:
+                created = datetime.fromisoformat(f.get("created_at", ""))
+                days_old = (now - created).days
+            except (ValueError, TypeError):
+                days_old = 0
+            recency = max(0.1, 1.0 - (days_old / 365))
+            access = min(1.0, (f.get("access_count", 0) or 0) / 10)
+            confidence = f.get("confidence", 1.0) or 1.0
+            strength = recency * (0.3 + 0.7 * access) * confidence
+            similarity = max(0.0, 1.0 - (f.get("distance", 1.0) or 1.0))
+            f["final_score"] = similarity * strength
+
+        candidates.sort(key=lambda f: f["final_score"], reverse=True)
+        return candidates[:top_k]
 
     @staticmethod
     def _truncate(text: str, token_budget: int) -> str:
