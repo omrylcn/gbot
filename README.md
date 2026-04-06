@@ -67,6 +67,12 @@ GBOT_PROVIDERS__OPENAI__API_KEY=sk-...
 ### 3. Run
 
 ```bash
+# Option A: use uv run (no activation needed)
+uv run gbot run             # start API server on :8000
+uv run gbot                 # open interactive REPL
+
+# Option B: activate venv first, then run directly
+source .venv/bin/activate
 gbot run                    # start API server on :8000
 gbot                        # open interactive REPL
 ```
