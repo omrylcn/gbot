@@ -297,6 +297,16 @@ GBOT_AUTH__JWT_SECRET_KEY=your-secret-key-at-least-32-characters
 | Auth disabled | `""` (empty, default) | Open — `user_id` in request body |
 | Auth enabled | `"your-secret..."` | JWT token or API key required |
 
+> **Owner password:** When auth is enabled, the owner needs a password to login. Set it in `config.yaml` before first run:
+> ```yaml
+> assistant:
+>   owner:
+>     username: "owner"
+>     name: "Owner"
+>     password: "your-initial-password"  # set before enabling auth
+> ```
+> The password is hashed and stored in SQLite at startup. If the owner already has a password in the database, the config value is ignored — existing passwords are never overwritten. You can also set it via CLI: `gbot user set-password owner newpassword`.
+
 #### User Management
 
 Users are managed via the `gbot` CLI, which writes directly to the SQLite database. This is the **primary way** to create users — no running server or authentication needed:
