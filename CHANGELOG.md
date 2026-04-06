@@ -6,6 +6,28 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.18.1] - 2026-04-06 — Bugfixes & Polish
+
+### Fixed
+
+- **Delegation JSON truncation:** Gemini Flash hangs on `json_schema` + `strict: true` + `anyOf` with free objects (produces 67K whitespace). Replaced with simple `json_object` response format. Root cause confirmed as Gemini bug (tested via OpenRouter SDK directly).
+- **vec_memory_facts UNIQUE constraint:** SQLite rowid reuse after fact invalidation caused INSERT failures. Added DELETE-before-INSERT for idempotent vec writes.
+- **Owner password on fresh DB:** When auth enabled, owner had no password and couldn't login. Added `owner.password` config field — startup sets initial password if DB has none, never overwrites existing.
+
+### Changed
+
+- **AGENT.MD (memory):** Fully rewritten in Turkish. Mandatory categories (10 types), mandatory relations extraction, AUDN DELETE action documented.
+- **README.md:** Added owner password documentation in auth section.
+- **config.example.yaml:** Added `owner.password` field with default value.
+
+### Added
+
+- **notes/journal.md:** Bug journal with root causes and solutions — referenced from CLAUDE.md.
+- **notes/test.md:** 27 E2E manual test scenarios (17 direct + 10 conditional).
+- **notes/archive/:** Old/completed notes moved to archive with README.
+
+---
+
 ## [1.18.0] - 2026-03-21 — Faz 22C: Decay, Relations, Memory Tools
 
 ### Added

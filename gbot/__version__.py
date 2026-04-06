@@ -1,3 +1,3 @@
 """GraphBot version — single source of truth."""
 
-__version__ = "1.18.0"
+__version__ = "1.18.1"
