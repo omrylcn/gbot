@@ -1302,6 +1302,9 @@ class MemoryStore:
             if embedding:
                 rowid = cursor.lastrowid
                 conn.execute(
+                    "DELETE FROM vec_memory_facts WHERE rowid = ?", (rowid,)
+                )
+                conn.execute(
                     "INSERT INTO vec_memory_facts(rowid, embedding) VALUES (?, ?)",
                     (rowid, json.dumps(embedding)),
                 )

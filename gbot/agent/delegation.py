@@ -156,39 +156,7 @@ _FALLBACK_PLAN: dict = {
 _VALID_EXECUTIONS = frozenset(("immediate", "delayed", "recurring", "monitor"))
 _VALID_PROCESSORS = frozenset(("static", "function", "agent", "runner"))
 
-_RESPONSE_SCHEMA = {
-    "type": "json_schema",
-    "json_schema": {
-        "name": "delegation_plan",
-        "strict": True,
-        "schema": {
-            "type": "object",
-            "properties": {
-                "execution": {
-                    "type": "string",
-                    "enum": ["immediate", "delayed", "recurring", "monitor"],
-                },
-                "processor": {
-                    "type": "string",
-                    "enum": ["static", "function", "agent", "runner"],
-                },
-                "delay_seconds": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
-                "cron_expr": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-                "message": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-                "tool_name": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-                "tool_args": {"anyOf": [{"type": "object"}, {"type": "null"}]},
-                "tools": {"type": "array", "items": {"type": "string"}},
-                "prompt": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-                "model": {"anyOf": [{"type": "string"}, {"type": "null"}]},
-            },
-            "required": [
-                "execution", "processor", "delay_seconds", "cron_expr",
-                "message", "tool_name", "tool_args", "tools", "prompt", "model",
-            ],
-            "additionalProperties": False,
-        },
-    },
-}
+_RESPONSE_SCHEMA = {"type": "json_object"}
 
 
 class DelegationPlanner:
