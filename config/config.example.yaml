@@ -11,6 +11,7 @@ assistant:
   owner:
     username: "owner"
     name: "Owner"
+    password: "owner"  # initial owner password — change after first login
   workspace: ./workspace
   model: "openrouter/google/gemini-3-flash-preview"
   temperature: 0.7

@@ -37,6 +37,7 @@ class OwnerConfig(BaseModel):
 
     username: str
     name: str = ""
+    password: str = ""
 
 
 class PersonaConfig(BaseModel):

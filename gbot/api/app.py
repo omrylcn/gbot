@@ -78,12 +78,25 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
 
 def _ensure_owner(config, db) -> None:
-    """Create owner user in DB at startup and ensure role='owner'."""
+    """Create owner user in DB at startup and ensure role='owner'.
+
+    If owner.password is set in config and DB user has no password,
+    sets the initial password. Existing passwords are never overwritten.
+    """
     if config.assistant.owner is None:
         return
     owner = config.assistant.owner
     db.get_or_create_user(owner.username, name=owner.name)
     db.set_user_role(owner.username, "owner")
+
+    if owner.password:
+        user = db.get_user(owner.username)
+        if user and not user.get("password_hash"):
+            from gbot.api.auth import hash_password
+
+            db.set_password(owner.username, hash_password(owner.password))
+            logger.info("Owner initial password set from config")
+
     logger.info(f"Owner user ensured: {owner.username} (role=owner)")
 
 
