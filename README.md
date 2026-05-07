@@ -4,26 +4,46 @@
 
 # GBot
 
-Extensible AI assistant framework built on LangGraph.
+Extensible AI assistant framework built on LangGraph. Personal or team scale, multi-channel (API, CLI, Telegram, WhatsApp), with long-term memory, scheduled tasks, a tool system, and an admin dashboard. Everything is backed by a single SQLite file — no Postgres, no Redis, no external services.
 
-Multi-channel support, long-term memory, background tasks, tool system, admin dashboard, and an interactive CLI — all backed by SQLite as the single source of truth.
+```
+You ──► chat / Telegram / WhatsApp / REPL
+         │
+         ▼
+   FastAPI ── GraphRunner ── LangGraph (stateless agent loop)
+         │                     │
+         │                     └─► tools (file, shell, web, memory, delegate, …)
+         ▼
+      SQLite (sessions · messages · memory · tasks · users · embeddings)
+```
 
-## What is this project for?
+> **TL;DR for the impatient:** clone, set one API key, run `uv run gbot run`, talk to it. Five minutes from zero to working bot. See [Quick Start](#quick-start).
 
-GBot is designed to help you build a **production-ready personal/team assistant** that can move beyond plain chat:
+---
 
-- Persist conversation state and user memory in a simple local database (SQLite)
-- Run tool-augmented workflows (files, shell, web, reminders, cron jobs, delegation)
-- Serve users through API, CLI, WebSocket, and messaging channels from one core runtime
-- Keep the agent loop stateless while maintaining durable operational history and tasks
+## Table of Contents
 
-In short: this project aims to be a practical assistant platform you can run, extend, and operate without heavyweight infrastructure.
+- [Quick Start](#quick-start) — clone → run → first message (5 min)
+- [Configuration](#configuration) — `.env`, `config.yaml`, env-var overrides
+- [Authentication](#authentication) — disabled by default; how to turn it on
+- [Users & CLI](#users--cli) — adding users, login, REPL, slash commands
+- [Channels](#channels) — Telegram (recommended), WhatsApp (optional)
+- [Memory Layer](#memory-layer) — typed facts, AUDN updates, semantic retrieval
+- [Tools](#tools) — what the agent can do
+- [Background Tasks](#background-tasks) — delegation, cron, reminders
+- [REST API](#rest-api) — endpoints reference
+- [Admin Dashboard](#admin-dashboard) — React UI on :3001
+- [Docker Deployment](#docker-deployment)
+- [Project Structure](#project-structure)
+- [Development](#development)
+
+---
 
 ## Quick Start
 
-**Prerequisites:** Python 3.11+, [uv](https://docs.astral.sh/uv/)
+**Prerequisites:** Python 3.11+ and [uv](https://docs.astral.sh/uv/getting-started/installation/).
 
-### 1. Install
+### 1. Clone and install
 
 ```bash
 git clone https://github.com/omrylcn/gbot.git
@@ -31,621 +51,302 @@ cd gbot
 uv sync --extra dev
 ```
 
-### 2. Configure
+This creates `.venv/`, installs all dependencies, and registers the `gbot` CLI.
+
+### 2. Get an LLM API key
+
+You need at least one. **OpenRouter is recommended** — single key, access to Gemini / GPT / Claude / open-source models, and the default config already targets it.
+
+| Provider | Get a key | Set in `.env` as |
+|----------|-----------|------------------|
+| **OpenRouter** | https://openrouter.ai/keys | `OPENROUTER_API_KEY` |
+| OpenAI | https://platform.openai.com/api-keys | `OPENAI_API_KEY` |
+| Anthropic | https://console.anthropic.com/settings/keys | `ANTHROPIC_API_KEY` |
+
+### 3. Configure
 
 ```bash
-cp config/config.example.yaml config/config.yaml   # your local config (gitignored)
-cp .env.example .env                               # your API keys (gitignored)
+cp config/config.example.yaml config/config.yaml   # local config (gitignored)
+cp .env.example .env                               # secrets (gitignored)
 ```
 
-#### LLM Provider (required)
-
-You need at least one LLM provider. **OpenRouter is recommended** — single key gives you access to OpenAI, Anthropic, Google, and many open-source models.
-
-| Provider | Get a key | Suggested model |
-|----------|-----------|-----------------|
-| **OpenRouter** | https://openrouter.ai/keys | `openrouter/google/gemini-3-flash-preview` |
-| OpenAI | https://platform.openai.com/api-keys | `openai/gpt-4o-mini` |
-| Anthropic | https://console.anthropic.com/settings/keys | `claude-haiku-4-5-20251001` |
-
-Edit `.env`:
+Open `.env`, paste your key:
 ```bash
-OPENROUTER_API_KEY=sk-or-...
+OPENROUTER_API_KEY=sk-or-v1-...
 ```
 
-Edit `config/config.yaml` — set your owner info and preferred model:
-```yaml
-assistant:
-  name: "GBot"
-  owner:
-    username: "ali"
-    name: "Ali"
-    password: "change-me"      # initial password — used when auth is enabled
-  model: "openrouter/google/gemini-3-flash-preview"
-```
+That's it. The defaults in `config.yaml` (model `openrouter/google/gemini-3-flash-preview`, owner `owner` with password `owner`) are good for a first run.
 
-> **Memory layer note:** Fact extraction uses an embedding model (default: `google/gemini-embedding-001` via OpenRouter, $0.15/1M tokens, ~$0.15/month for personal use). If you only have OpenAI/Anthropic, edit `memory.embedding.provider` in config. The memory layer is enabled by default — disable with `memory.enabled: false` if you don't want it.
-
-#### Database
-
-The SQLite database (`data/gbot.db`) is **auto-created on first run** with all tables, indexes, and the `vec_memory_facts` extension. The `owner` user from config is also created automatically. No manual init needed.
-
-### 3. Run
+### 4. Run
 
 ```bash
-# Option A: use uv run (no activation needed)
-uv run gbot run             # start API server on :8000
-uv run gbot                 # open interactive REPL
-
-# Option B: activate venv first, then run directly
-source .venv/bin/activate
-gbot run                    # start API server on :8000
-gbot                        # open interactive REPL
+uv run gbot run
 ```
 
-You should see:
+You'll see:
 ```
 Starting gbot API on 0.0.0.0:8000
-INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000
 ```
 
-Verify it's working:
+Verify in another terminal:
 ```bash
 curl http://localhost:8000/health
-# → {"status":"ok","agent_ready":true,"version":"...","items_count":0}
+# → {"status":"ok","agent_ready":true,"version":"1.18.2","items_count":0}
 ```
 
-The REPL (`gbot` without arguments) connects to the API server automatically.
-
-### Troubleshooting
-
-| Error | Cause | Fix |
-|-------|-------|-----|
-| `litellm.AuthenticationError` | API key not set or wrong | Check `.env` — `OPENROUTER_API_KEY` must be valid |
-| `Model not found` | Model name typo | Use `openrouter/<model>` format |
-| `no such table: ...` | Old DB schema | Delete `data/gbot.db` and restart (loses data) |
-| `Login failed` (auth enabled) | Owner password not in DB | Set `assistant.owner.password` in config and restart on a fresh DB, or run `gbot user set-password owner <pw>` |
-| `Telegram send failed (404)` | Bot token wrong | Check `user_channels.channel_user_id` in DB — must be Telegram bot token, not chat_id |
-
----
-
-## Architecture
-
-<p align="center">
-  <img src="images/architecture.png" alt="GBot Architecture" width="800">
-</p>
-
-GBot deliberately separates the "thinking" from the "remembering." LangGraph handles the agent loop as a pure execution engine — no checkpoints, no internal state. All durable state lives in SQLite: sessions, memory, users, scheduled tasks, events. This means you can restart the server, swap models, or scale horizontally without losing anything.
-
-| Principle | Description |
-|-----------|-------------|
-| **LangGraph = stateless** | No checkpoint — used purely as an execution engine |
-| **SQLite = source of truth** | 15 tables for sessions, memory, users, tasks, events, relations |
-| **GraphRunner = orchestrator** | Request-scoped bridge between SQLite and LangGraph |
-| **LiteLLM = multi-provider** | OpenAI, Anthropic, DeepSeek, Groq, Gemini, OpenRouter |
-
-The agent graph has 4 nodes: `load_context` → `reason` ⇄ `execute_tools` → `respond`
-
----
-
-## Features
-
-GBot isn't just a chatbot wrapper — it's a full operational platform. Here's what's built in and working:
-
-| Feature | Description |
-|---------|-------------|
-| Multi-provider LLM | 6+ providers via LiteLLM + direct OpenRouter SDK |
-| Multi-channel | Telegram (active), WhatsApp via WAHA (active), Discord/Feishu (stub) |
-| Long-term memory | Typed memory facts (semantic/episodic/preference/procedural) with AUDN update, semantic search (sqlite-vec), entity relations, temporal notes |
-| Session management | Token-limit based with automatic LLM summary on transition |
-| RBAC | 3 roles (owner/member/guest), roles.yaml, 2-layer guard |
-| 8 tool groups (26 tools) | Memory (incl. search_memory, forget_fact, what_do_you_know), search, filesystem, shell, web, messaging, delegation, skills |
-| Skill system | Markdown-based, progressive disclosure via `load_skill` tool |
-| Agent profiles | `agents.yaml` — per-profile AGENT.md, skills, context layers |
-| Context service | 7-layer system prompt with description/source metadata |
-| Background tasks | Unified task scheduler (recurring/delayed/immediate/monitor), heartbeat, async subagents |
-| Delegation | LLM-based planner — immediate, delayed, recurring, monitor |
-| Interactive CLI | `gbot` — Rich REPL with slash commands and autocomplete |
-| Admin API | Server status, config, skills, tools, users, stats, tasks, context, logs |
-| Admin Dashboard | React web UI — context inspector, conversations, users, tools, tasks, memory inspector |
-| RAG | Optional FAISS + sentence-transformers semantic search |
-| WebSocket | Real-time chat + event delivery |
-| Docker | Single-command deployment with docker-compose |
-
-Most of these work together. For example, a user on Telegram can say "remind me every morning at 9 to check gold prices" — the delegation planner creates a recurring cron job, the LightAgent runs it with web tools, and the result gets delivered back through Telegram. No manual wiring needed.
-
----
-
-## Usage
-
-GBot gives you four ways to interact: a CLI for quick operations, a REPL for interactive sessions, a REST API for integration, and an admin dashboard for monitoring. They all talk to the same backend — pick whichever fits your workflow.
-
-### CLI Commands
+### 5. Send your first message
 
 ```bash
-gbot                                     # interactive REPL (default)
-gbot run [--port 8000] [--reload]        # API server
-gbot chat -m "hello"                     # single message via API
-gbot chat --local -m "hello"             # local mode (no server needed)
-gbot status                              # system info
-gbot --version                           # version
+curl -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"hello","user_id":"owner"}'
+# → {"response":"Hi! How can I help?","session_id":"..."}
 ```
 
-User management:
+Or open the interactive REPL:
 ```bash
-gbot user add ali --name "Ali" --password "pass123" --telegram "BOT_TOKEN"
-gbot user list
-gbot user remove ali
-gbot user set-password ali newpass
-gbot user link ali telegram 12345
+uv run gbot
 ```
 
-Credentials:
-```bash
-gbot login ali -s http://localhost:8000  # saves token to ~/.gbot/
-gbot logout
-```
+You're done. The bot is alive, conversation history is persisted, and you can scale up from here.
 
-Tasks:
-```bash
-gbot cron list               # list recurring/monitor tasks
-gbot cron remove <task_id>   # remove a task
-```
-
-### REPL Slash Commands
-
-Type `/` inside the REPL for autocomplete:
-
-| Command | Description |
-|---------|-------------|
-| `/help` | Command list |
-| `/status` | Server status |
-| `/session info\|new\|list\|end` | Session management |
-| `/history [n]` | Last n messages |
-| `/context` | User context |
-| `/model` | Active model |
-| `/config` | Server configuration |
-| `/skill` | Skill list |
-| `/cron list\|remove <id>` | Task management |
-| `/user` | User list |
-| `/events` | Pending events |
-| `/clear` | Clear screen |
-| `/exit` | Exit |
-
-### REST API
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/chat` | Send message, get response |
-| GET | `/health` | Health check |
-| GET | `/sessions/{user_id}` | User's sessions |
-| GET | `/session/{sid}/history` | Session message history |
-| GET | `/session/{sid}/stats` | Session stats (messages, tokens, context) |
-| POST | `/session/{sid}/end` | End session |
-| GET | `/user/{user_id}/context` | User context |
-| POST | `/auth/register` | Register (owner-only) |
-| POST | `/auth/login` | Login |
-| POST | `/auth/token` | OAuth2 token endpoint |
-| GET | `/auth/user/{user_id}` | User profile |
-| POST | `/auth/api-keys` | Create API key |
-| GET | `/auth/api-keys` | List API keys |
-| DELETE | `/auth/api-keys/{key_id}` | Deactivate API key |
-| WS | `/ws/chat` | WebSocket chat + event delivery |
-| POST | `/webhooks/telegram/{user_id}` | Telegram webhook |
-| POST | `/webhooks/whatsapp/{user_id}` | WhatsApp webhook (WAHA) |
-
-### Admin Endpoints (owner-only)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/admin/status` | Server status |
-| GET | `/admin/config` | Sanitized configuration |
-| GET | `/admin/skills` | Skill list |
-| GET | `/admin/tools` | Registered tools (ToolRegistry introspection) |
-| GET | `/admin/users` | User list with roles |
-| PUT | `/admin/users/{user_id}/role` | Set user role |
-| GET | `/admin/tasks` | Background tasks (filter by execution_type, status) |
-| DELETE | `/admin/tasks/{task_id}` | Cancel/remove task |
-| GET | `/admin/stats` | System stats (context, tools, sessions, data) |
-| GET | `/admin/logs` | Execution logs |
-| GET | `/admin/memory/{user_id}` | Memory facts, stats, relations, processing log |
-| GET | `/admin/context/{profile}/layers` | Context layers for profile (main/planner/light) |
-| GET | `/admin/context/{profile}/preview` | Full context preview for profile |
-| GET | `/admin/context/budget` | Token budget breakdown |
-| GET | `/admin/context/overrides` | Runtime layer overrides |
-| POST | `/admin/context/overrides` | Set runtime layer overrides |
-| DELETE | `/admin/context/overrides/{layer}` | Delete layer override |
-| GET | `/admin/context/profiles` | Agent profile list |
-| GET | `/admin/context/profiles/{name}` | Agent profile detail |
-
-### Tool Usage (via Chat)
-
-You don't call tools by name — just describe what you want. The LLM figures out which tool to use:
-
-```
-"Save this note: meeting tomorrow"                   → save_user_note
-"Set a reminder in 5 minutes: take medicine"          → delegate (delayed/static)
-"Check the weather every morning at 9"                → delegate (recurring/agent)
-"Alert me if gold goes above $2000"                   → delegate (monitor/agent)
-"Do this in the background: research topic X"         → delegate (immediate/agent)
-"What do you know about me?"                          → what_do_you_know
-"Search your memory for coffee preferences"           → search_memory
-"Forget that I live in Istanbul"                      → forget_fact
-```
+> **Activate the venv if you prefer:** `source .venv/bin/activate` then drop the `uv run` prefix.
 
 ---
 
 ## Configuration
 
-GBot uses a layered config system — you can set things in multiple places, and the most specific one wins:
+Two files. `.env` for secrets, `config.yaml` for everything else. Environment variables always win.
 
-Priority order: `.env` > environment variables > `config.yaml` > defaults
-
-```bash
-# .env uses GBOT_ prefix with __ separator
-GBOT_ASSISTANT__MODEL=openai/gpt-4o-mini
-GBOT_PROVIDERS__OPENAI__API_KEY=sk-...
-GBOT_BACKGROUND__CRON__ENABLED=true
+```
+priority:  env vars (GBOT_*)  >  .env file  >  config.yaml  >  defaults
 ```
 
-Full config reference: [`config/config.example.yaml`](./config/config.example.yaml)
+### `.env` — Secrets
 
-### Authentication
+LLM keys, JWT secret, channel tokens. Never commit this file.
 
-Authentication is optional — you can run GBot wide open for local development, or lock it down with JWT + API keys for production. A single config value controls the switch:
+```bash
+# At least one provider key
+OPENROUTER_API_KEY=sk-or-v1-...
 
-#### Auth Disabled (default)
+# Optional — enable JWT authentication when set (32+ chars)
+GBOT_AUTH__JWT_SECRET_KEY=
 
-The `auth.jwt_secret_key` field in `config.yaml` controls authentication. By default `config.example.yaml` contains `${JWT_SECRET_KEY}` — an env var placeholder. If you don't set `JWT_SECRET_KEY` in `.env`, it resolves to an empty string and **auth is disabled**. All endpoints are open and `user_id` is passed in the request body:
+# Optional — Telegram (only if using channels.telegram.enabled)
+TELEGRAM_BOT_TOKEN=
+
+# Optional — WAHA (only if using docker-compose with WhatsApp)
+WAHA_API_KEY=
+GBOT_CHANNELS__WHATSAPP__API_KEY=
+```
+
+### `config.yaml` — Behavior
 
 ```yaml
-# config/config.example.yaml (as shipped)
+assistant:
+  name: "GBot"
+  owner:
+    username: "owner"
+    name: "Owner"
+    password: "owner"          # initial password — used when auth is enabled
+  model: "openrouter/google/gemini-3-flash-preview"
+  temperature: 0.7
+
+channels:
+  telegram:
+    enabled: true              # webhook lives at /webhooks/telegram/{user_id}
+  whatsapp:
+    enabled: false             # opt-in (requires WAHA, see Channels section)
+
+memory:
+  enabled: true                # typed-fact extraction, AUDN updates, semantic retrieval
+  embedding:
+    provider: "openrouter"
+    model: "google/gemini-embedding-001"
+
 auth:
-  jwt_secret_key: "${JWT_SECRET_KEY}"   # env var — empty if unset → auth disabled
-```
-
-```bash
-# Auth disabled — direct call works
-curl -X POST http://localhost:8000/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "hello", "user_id": "ali"}'
-```
-
-#### Auth Enabled
-
-Set `jwt_secret_key` to a 32+ character secret to enable JWT authentication:
-
-```yaml
-# config.yaml
-auth:
-  jwt_secret_key: "your-secret-key-at-least-32-characters"
-  access_token_expire_minutes: 1440   # 24 hours (default)
-```
-
-Or via `.env`:
-```bash
-GBOT_AUTH__JWT_SECRET_KEY=your-secret-key-at-least-32-characters
-```
-
-| State | `auth.jwt_secret_key` | Access |
-|-------|----------------------|--------|
-| Auth disabled | `""` (empty, default) | Open — `user_id` in request body |
-| Auth enabled | `"your-secret..."` | JWT token or API key required |
-
-> **Owner password:** When auth is enabled, the owner needs a password to login. Set it in `config.yaml` before first run:
-> ```yaml
-> assistant:
->   owner:
->     username: "owner"
->     name: "Owner"
->     password: "your-initial-password"  # set before enabling auth
-> ```
-> The password is hashed and stored in SQLite at startup. If the owner already has a password in the database, the config value is ignored — existing passwords are never overwritten. You can also set it via CLI: `gbot user set-password owner newpassword`.
-
-#### User Management
-
-Users are managed via the `gbot` CLI, which writes directly to the SQLite database. This is the **primary way** to create users — no running server or authentication needed:
-
-```bash
-# Create user with password
-gbot user add ali --name "Ali" --password "pass123"
-
-# Create user + link Telegram bot in one command
-gbot user add ali --name "Ali" --password "pass123" --telegram "BOT_TOKEN"
-
-# Change password
-gbot user set-password ali newpass
-
-# Link a channel to an existing user
-gbot user link ali telegram 12345
-
-# List all users
-gbot user list
-
-# Remove user
-gbot user remove ali
-```
-
-> **Important:** When auth is enabled, users must exist in the database before they can login. The `owner` defined in `config.yaml` is auto-created at server startup, but all other users must be added via CLI first.
-
-#### Login & Token Flow
-
-Once a user exists, they can authenticate:
-
-**CLI login** — saves token to `~/.gbot/credentials.json`:
-
-```bash
-gbot login ali -s http://localhost:8000   # prompts for password
-gbot                                       # uses saved token automatically
-gbot logout                                # clears saved credentials
-```
-
-**API login:**
-
-```bash
-curl -X POST http://localhost:8000/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"user_id": "ali", "password": "pass123"}'
-# → {"success": true, "token": "eyJhbG...", "user_id": "ali"}
-```
-
-**Using the token:**
-
-```bash
-TOKEN="eyJhbG..."
-
-curl -X POST http://localhost:8000/chat \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"message": "hello"}'
-```
-
-#### API Keys (Alternative)
-
-For persistent access without token refresh, create an API key:
-
-```bash
-# Create (requires token auth)
-curl -X POST http://localhost:8000/auth/api-keys \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "my-key"}'
-# → {"key": "abc123...", "key_id": "..."}
-
-# Use via header
-curl -X POST http://localhost:8000/chat \
-  -H "X-API-Key: abc123..." \
-  -H "Content-Type: application/json" \
-  -d '{"message": "hello"}'
-```
-
-#### Adding Users: CLI vs API
-
-There are two ways to add users:
-
-| Method | When to use | Auth needed? |
-|--------|-------------|-------------|
-| `gbot user add` (CLI) | Initial setup, server admin tasks | No — direct DB access |
-| `POST /auth/register` (API) | Remote user creation by owner | Yes — owner token required |
-
-```bash
-# CLI — works anytime, no server needed
-gbot user add veli --name "Veli" --password "pass456"
-
-# API — only owner can register, requires running server + auth
-curl -X POST http://localhost:8000/auth/register \
-  -H "Authorization: Bearer $OWNER_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"user_id": "veli", "name": "Veli", "password": "pass456"}'
-```
-
-#### Rate Limiting
-
-Default: 60 requests/minute. Configure in `config.yaml`:
-
-```yaml
-auth:
+  jwt_secret_key: ""           # empty = auth disabled. Set via GBOT_AUTH__JWT_SECRET_KEY in .env
   rate_limit:
     enabled: true
-    requests_per_minute: 120
+    requests_per_minute: 60
 ```
 
-### Tool System
+See `config/config.example.yaml` for every field with comments.
 
-Tools are organized into 8 groups (26 tools total). By default all groups are enabled (`tools: ["*"]`), but RBAC can restrict which groups each role can access. The `ToolRegistry` resolves group names to actual tool functions automatically via `roles.yaml`:
+### Overriding any field via env var
 
-| Group | Tools | Description |
-|-------|-------|-------------|
-| Memory | save_user_note, get_user_context, add_favorite, get_favorites, remove_favorite, set_user_preference, get_user_preferences, remove_user_preference, search_memory, forget_fact, what_do_you_know | User memory + semantic search (11 tools) |
-| Search | search_items, get_item_detail, get_current_time | RAG semantic search + time (3 tools) |
-| Filesystem | read_file, write_file, edit_file, list_dir | Workspace files (4 tools) |
-| Shell | exec_command | Safe shell — destructive commands blocked (1 tool) |
-| Web | web_search, web_fetch | Brave Search + page fetch (2 tools) |
-| Messaging | send_message_to_user | Cross-channel message delivery (1 tool) |
-| Delegation | delegate, list_scheduled_tasks, cancel_scheduled_task | Background subagent spawn + task management (3 tools) |
-| Skills | load_skill | Progressive disclosure — load skill on demand (1 tool) |
-
-Cron jobs, reminders, and alerts are managed through the delegation system — the LLM-based planner decides the execution strategy (immediate, delayed, recurring, or monitor).
-
-### Skill System
-
-Skills are Markdown plugins injected into the system prompt. Unlike always-loaded prompts, skills use **progressive disclosure** — the agent sees skill descriptions but loads full content on demand via the `load_skill` tool. Drop a `.md` file into `workspace/skills/` and it overrides built-in skills of the same name:
-
-```markdown
----
-name: weather
-description: Query weather information
-always: false
-metadata:
-  requires:
-    bins: [curl]
----
-# Weather Skill
-...instructions...
-```
-
-- `always: true` → always included in system prompt (no `load_skill` needed)
-- `always: false` (default) → description shown, content loaded on demand
-- Requirements check: skill disabled if binary/env var is missing
-- Per-profile skill config via `agents.yaml`: `skills: ["*"]` (all) or `skills: []` (none)
-
-### Agent Profiles
-
-Agent profiles define per-agent-type configuration — which AGENT.md to use, which skills to enable, and which context layers to build. Profiles are defined in `config/agents.yaml`:
-
-```yaml
-agents:
-  main:
-    agent_md: workspace/AGENT.md
-    skills: ["*"]
-    context_layers: ["*"]      # all 7 layers
-  planner:
-    agent_md: workspace/agents/planner/AGENT.md
-    skills: []
-    context_layers: [identity]  # minimal context
-    template_vars: [tool_catalog, extra_examples]
-  light:
-    agent_md: workspace/agents/light/AGENT.md
-    skills: []
-    # No context_layers — LightAgent has its own context model
-  memory:
-    agent_md: workspace/agents/memory/AGENT.md
-    skills: []
-    context_layers: [identity]
-```
-
-### Context Service
-
-The context service builds a layered system prompt for each agent profile. Each layer has metadata (description, source) for full traceability in the admin dashboard:
-
-| Layer | Description | Source |
-|-------|-------------|--------|
-| identity | Agent personality and instructions | AGENT.md |
-| runtime | Current time, model, session info | Runtime state |
-| role | RBAC role description and permissions | roles.yaml |
-| agent_memory | Long-term learned facts about users | agent_memory table |
-| user_context | Explicit notes + learned memory facts (2-stage semantic retrieval with re-ranking) | user_notes + memory_facts (sqlite-vec) |
-| session_summary | Summary from previous sessions | sessions table |
-| skills | Available skill descriptions | workspace/skills/ + builtins |
-
-Runtime overrides can enable/disable layers or inject custom content via the admin API.
-
-### Background Services
-
-GBot can do things even when nobody is chatting. Five services run alongside the API server, each with a different responsibility:
-
-| Service | What it does |
-|---------|-------------|
-| **CronScheduler** | Loads jobs and reminders from SQLite into APScheduler. Manages both recurring cron jobs (CronTrigger) and one-shot reminders (DateTrigger). Handles execution, delivery, SKIP/NOTIFY logic, and auto-pauses jobs after 3 consecutive failures. |
-| **LightAgent** | Stripped-down LangGraph agent for background tasks — no session, no context loading, just a prompt + restricted tool set. Can override the model (e.g. cheaper model for monitoring). Used by both CronScheduler and SubagentWorker. |
-| **SubagentWorker** | Spawns async background tasks via `asyncio.create_task`. Persists status to `background_tasks` table and injects delivery notes into the user's active session so the main agent sees the outcome. |
-| **HeartbeatService** | Periodic wake-up loop. Reads `HEARTBEAT.md` from workspace — if it has actionable content, triggers the full GraphRunner. Otherwise stays silent. |
-
-The scheduler has 4 processor types that determine *how* a job executes:
-
-| Processor | Execution | LLM needed? |
-|-----------|-----------|-------------|
-| `static` | Delivers a plain text message directly | No |
-| `function` | Calls a specific tool with known arguments | No |
-| `agent` | Runs LightAgent with selected tools | Yes (can use cheaper model) |
-| `runner` | Invokes full GraphRunner with all context, memory, and tools | Yes (main model) |
-
-**Delivery chain:** When a job fires, the scheduler tries to deliver the result directly to the user's channel (Telegram, WhatsApp, WebSocket). If no active connection exists, it falls back to saving a `system_event` in the database — the ContextBuilder picks it up on the user's next message.
-
-```
-User: "Do this in the background: research topic X"
-  → delegate tool → DelegationPlanner (LLM) → plan: {execution: immediate, processor: agent}
-  → SubagentWorker.spawn() → LightAgent runs with web tools
-  → Result → background_tasks table + session note + channel delivery
-```
-
-### Memory Layer
-
-GBot's memory goes beyond simple note storage — it automatically learns from conversations, detects contradictions, and serves the most relevant facts when needed.
-
-**How it works:**
-
-```
-User sends message
-  → Every 5 messages: hot-path extraction (async, fire-and-forget)
-    → LLM extracts typed facts + entity relations
-    → Each fact: embed (OpenRouter) → search similar (sqlite-vec) → AUDN decision
-    → ADD / UPDATE / DELETE / NOOP — LLM decides conflicts
-  → ContextBuilder: embed last message → search top 20 → re-rank → top 10 to context
-```
-
-**Three tables work together:**
-
-| Table | Purpose |
-|-------|---------|
-| `memory_facts` | Typed facts with embedding, confidence, importance, category |
-| `memory_relations` | Entity relationships (works_at, married_to, owns...) |
-| `memory_processing_log` | Extraction audit trail |
-
-**AUDN (Add/Update/Delete/Noop):** When a new fact is extracted, similar existing facts are found via semantic search. An LLM then decides: is this new info (ADD), an update to existing info (UPDATE), a negation (DELETE), or already known (NOOP)?
-
-```
-"İstanbul'da yaşıyorum"  → ADD (new fact)
-"Ankara'ya taşındım"     → UPDATE (İstanbul invalidated, Ankara added)
-"Artık borsa takip etmiyorum" → DELETE (borsa fact invalidated, no new fact)
-"Hala İstanbul'dayım"    → NOOP (already known)
-```
-
-**2-stage retrieval:** Context doesn't get a flat list of all facts. Instead: (1) sqlite-vec finds 20 semantically similar candidates, (2) re-ranker scores them by `similarity × recency × access_count × confidence`, (3) top 10 enter context. Frequently accessed facts score higher; old unused facts fade out.
-
-**Configuration:**
-
-```yaml
-memory:
-  enabled: true
-  extraction_every_n: 5        # extract every N user messages
-  embedding:
-    model: "google/gemini-embedding-001"
-    dimension: 3072
-  update:
-    strategy: "llm"            # embedding finds, LLM decides
-```
-
-### RAG (Optional)
-
-If you have structured data (products, documents, articles) that you want the agent to search through, enable the RAG module. It builds a local FAISS index and adds semantic search tools automatically:
+The `GBOT_` prefix maps any nested config field. Use `__` (double underscore) for nesting:
 
 ```bash
-uv sync --extra rag   # FAISS + sentence-transformers
+GBOT_ASSISTANT__MODEL=openai/gpt-4o-mini
+GBOT_AUTH__JWT_SECRET_KEY=my-32-character-secret-key-here-yes
+GBOT_MEMORY__ENABLED=false
 ```
 
-```yaml
-rag:
-  embedding_model: "intfloat/multilingual-e5-small"
-  data_source: "./data/items.json"
-  index_path: "./data/faiss_index"
-```
+This is the recommended way to set production secrets — never hardcode them into `config.yaml`.
 
-When enabled, `search_items` and `get_item_detail` tools are automatically added.
+---
 
-### Telegram Bot
+## Authentication
 
-Telegram integration follows a "one bot per user" model — each user creates their own bot via @BotFather and links the token. This keeps things simple and avoids multi-tenant bot routing.
+GBot ships with auth **disabled** so the Quick Start works in five minutes. Turn it on for production.
 
-**Requirements:** A public HTTPS URL pointing to your server. For local development, install [ngrok](https://ngrok.com/download) (free tier works) and run `ngrok http 8000` in a separate terminal — you'll get a `https://xxxx.ngrok-free.app` URL to use as the webhook target. For production, point your domain at the server.
+### Auth disabled (default)
+
+`auth.jwt_secret_key` is empty → all endpoints accept requests with `user_id` in the body. No login flow.
 
 ```bash
-# 1. Create a bot via @BotFather (https://t.me/BotFather) and get the token
-# 2. Enable telegram in config.yaml (channels.telegram.enabled: true)
-# 3. Add user and link the bot token
-gbot user add ali --name "Ali" --telegram "123456:ABC_TOKEN"
+curl -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"hi","user_id":"owner"}'
+```
+
+### Auth enabled
+
+Set `GBOT_AUTH__JWT_SECRET_KEY` (32+ chars) in `.env` and **restart the server**:
+
+```bash
+echo "GBOT_AUTH__JWT_SECRET_KEY=$(openssl rand -hex 32)" >> .env
+uv run gbot run    # restart
+```
+
+Now every endpoint requires a JWT or API key. Login flow:
+
+```bash
+# 1. Login → get token
+TOKEN=$(curl -s -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"owner","password":"owner"}' \
+  | jq -r .token)
+
+# 2. Use token for subsequent requests
+curl -X POST http://localhost:8000/chat \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"hi"}'
+```
+
+The owner password comes from `config.assistant.owner.password` and is hashed into the database on first startup. After that, the config value is ignored — change passwords with `gbot user set-password` (see below).
+
+---
+
+## Users & CLI
+
+### Add a user
+
+Users are managed by the `gbot` CLI, which writes directly to SQLite. No server required.
+
+```bash
+# Create a user with password
+uv run gbot user add ali --name "Ali" --password "ali123"
+
+# Create a user and link a Telegram bot in one command
+uv run gbot user add veli --name "Veli" --password "v123" --telegram "<bot-token>"
+
+# Change password (positional args — no flag)
+uv run gbot user set-password ali newpassword
+
+# List all users
+uv run gbot user list
+
+# Remove user (and their channel links)
+uv run gbot user remove ali
+
+# Link a channel to an existing user
+uv run gbot user link ali telegram <bot-token>
+```
+
+### Log in from the CLI
+
+```bash
+uv run gbot login ali --password ali123
+# (or interactive: uv run gbot login ali — it will prompt)
+# → "Logged in as ali" — token saved to ~/.gbot/credentials.json
+```
+
+If you're using a non-default port:
+```bash
+uv run gbot login ali -s http://localhost:8765 -p ali123
+```
+
+### Chat from the CLI
+
+```bash
+# Single message via API (uses saved token)
+uv run gbot chat -m "hello"
+
+# Local mode (bypasses the server entirely)
+uv run gbot chat --local -m "hello"
+
+# Interactive REPL (rich UI, slash commands, autocomplete)
+uv run gbot
+```
+
+### REPL slash commands
+
+Inside the REPL:
+
+```
+/help              # all commands
+/status            # system stats (sessions, tools, tokens)
+/session info      # current session
+/session new       # start fresh session
+/history 20        # last 20 messages
+/context           # what the agent sees about you
+/cron list         # scheduled tasks
+/user              # list users (owner only)
+/exit
+```
+
+### Connect to a non-default server
+
+The CLI honors `GBOT_API_URL`:
+```bash
+export GBOT_API_URL=http://my-host:8765
+uv run gbot
+```
+
+---
+
+## Channels
+
+Talk to your bot from any chat client. Telegram is the simplest; WhatsApp is more involved (requires WAHA).
+
+### Telegram (recommended for first integration)
+
+One bot per user — each user creates their own bot via @BotFather. No multi-tenant routing.
+
+**You'll need:** a public HTTPS URL for the webhook. For local dev install [ngrok](https://ngrok.com/download) and run `ngrok http 8000` in a separate terminal. For production, point your domain at the server.
+
+```bash
+# 1. Create a bot via @BotFather on Telegram. Save the token.
+
+# 2. Enable Telegram in config.yaml
+#    channels:
+#      telegram:
+#        enabled: true
+
+# 3. Add a user and link the bot
+uv run gbot user add ali --name "Ali" --password "p" --telegram "<bot-token>"
+
 # 4. Start the server
-gbot run
+uv run gbot run
+
 # 5. In another terminal, expose port 8000 publicly
-ngrok http 8000
-# 6. Register the webhook with your public URL
-curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://xxxx.ngrok-free.app/webhooks/telegram/ali"
-# 7. Send a message to your bot — it should reply
+ngrok http 8000      # gives you https://xxxx.ngrok-free.app
+
+# 6. Register the webhook with Telegram (one-time per bot)
+curl "https://api.telegram.org/bot<bot-token>/setWebhook?url=https://xxxx.ngrok-free.app/webhooks/telegram/ali"
+
+# 7. Open Telegram, message your bot. It will reply.
 ```
 
-### WhatsApp (WAHA)
+### WhatsApp (optional, advanced)
 
-WhatsApp integration uses [WAHA](https://waha.devlike.pro/) (WhatsApp HTTP API) as a Docker sidecar. Unlike Telegram, this connects your actual WhatsApp account — the bot reads and responds through your phone number:
+WhatsApp uses [WAHA](https://waha.devlike.pro/) as a Docker sidecar. Unlike Telegram, this connects your real phone number — the bot reads and responds through your WhatsApp account.
 
 ```yaml
 # config.yaml
@@ -654,222 +355,273 @@ channels:
     enabled: true
     waha_url: "http://waha:3000"
     session: "default"
-    api_key: "your-waha-api-key"
     respond_to_dm: true
-    monitor_dm: false
+    monitor_dm: true
     allowed_groups:
-      - "120363xxx@g.us"
+      - "GROUP_ID@g.us"
     allowed_dms:
-      "905551234567": "Ali"
+      "905XXXXXXXXX": "Friend's Name"
 ```
 
 ```bash
-# 1. WAHA runs as a Docker service (see docker-compose.yml)
-# 2. Configure whatsapp section in config.yaml
-# 3. Pair your phone via WAHA dashboard (http://localhost:3000)
-# 4. Start the server — webhook is auto-registered
-gbot run
+# 1. WAHA runs as part of docker-compose.yml — `docker compose up`.
+# 2. Pair your phone at http://localhost:3000 (WAHA dashboard).
+# 3. The webhook is auto-registered on server start.
 ```
 
-Features:
-- Supports both phone numbers (`@c.us`) and Linked IDs (`@lid`)
-- Group and DM whitelist filtering
-- `respond_to_dm` — reply to direct messages
-- `monitor_dm` — log but don't reply
-
-### RBAC (Role-Based Access Control)
-
-Not every user should have access to everything. RBAC lets you define who can use which tools and see which context. There are 3 built-in roles, enforced at two points: once when the LLM is deciding which tools to consider (reason filter), and again before any tool actually executes (execute guard):
-
-| Role | Tool Groups | Context Layers | Sessions |
-|------|-------------|---------------|----------|
-| **owner** | all 8 groups | all 7 layers | unlimited |
-| **member** | memory, search, web, messaging, delegation | all 7 layers | unlimited |
-| **guest** | web only | identity, runtime, role | max 1 |
-
-Default role: `guest`. Set user role via `PUT /admin/users/{user_id}/role`.
-
-`roles.yaml` defines role → group mapping; tool names are resolved automatically from `ToolRegistry`.
-
-### Delegation System
-
-This is where GBot gets interesting. Instead of hardcoding "reminder = delayed message" and "cron = scheduled job," there's an LLM-based planner (`DelegationPlanner`) that figures out the best execution strategy for any background request. You just describe what you want, and it picks the right combination:
-
-| Execution | Description |
-|-----------|-------------|
-| `immediate` | Run now in the background |
-| `delayed` | Run after N seconds (one-shot reminder) |
-| `recurring` | Run on a cron schedule |
-| `monitor` | Periodic check with NOTIFY/SKIP logic |
-
-| Processor | Description |
-|-----------|-------------|
-| `static` | Direct text message (no LLM) |
-| `function` | Single tool call |
-| `agent` | LightAgent with selected tools |
-| `runner` | Full GraphRunner with all context |
-
-```
-User: "Remind me in 5 minutes: take medicine"
-  → DelegationPlanner → {execution: "delayed", processor: "static", delay: 300}
-  → CronScheduler creates one-shot job → delivers message after 5 min
-
-User: "Check gold price every morning at 9, alert if above $2000"
-  → DelegationPlanner → {execution: "recurring", processor: "agent", cron: "0 9 * * *"}
-  → CronScheduler creates recurring job → LightAgent evaluates → NOTIFY or SKIP
-```
+WhatsApp is **opt-in** and meant for advanced users. Skip it on first install.
 
 ---
 
-## Docker
+## Memory Layer
 
-The easiest way to deploy GBot in production. Everything — API server, dashboard, WAHA (WhatsApp), volumes — is defined in a single compose file:
+The agent remembers things about each user across sessions. Three layers:
 
-```bash
-docker compose up -d         # start all services
-docker compose logs -f       # follow logs
-docker compose down          # stop
+| Layer | What | Where |
+|-------|------|-------|
+| **Notes / preferences** | Explicit, written by tools (`save_user_note`, `set_user_preference`) | `user_notes` table |
+| **Facts** | Typed atomic facts auto-extracted from conversation | `memory_facts` + `vec_memory_facts` (sqlite-vec) |
+| **Relations** | Entity → relation → entity (e.g. `Ali → works_at → Acme`) | `memory_relations` |
+
+### How extraction works (AUDN)
+
+Every N messages (default 5) the agent extracts facts from recent conversation, embeds them, and runs an **AUDN** decision against existing facts:
+
+- **ADD** — new fact, no overlap with existing
+- **UPDATE** — supersedes an old fact (e.g. "moved to Ankara" replaces "lives in Istanbul")
+- **DELETE** — invalidates an old fact without replacement
+- **NOOP** — already known
+
+### How retrieval works
+
+When building context for a new message, GBot does a 2-stage search:
+
+1. **Semantic search** — embed the user's message, find top-20 candidates via cosine distance
+2. **Re-rank** — `final_score = similarity × recency × access_frequency × confidence`
+
+Top 10 facts are injected into the system prompt. `access_count` is incremented for retrieved facts (so frequently-relevant facts surface faster).
+
+### Memory tools the agent can call
+
+```
+search_memory(query)    — semantic search of facts
+forget_fact(query)      — invalidate the closest matching fact
+what_do_you_know()      — list everything I know about you, by category
 ```
 
-| Service | Port | Description |
-|---------|------|-------------|
-| `gbot` | 8000 | API server |
-| `dashboard` | 3001 | Admin dashboard (React + nginx) |
-| `waha` | 3000 | WhatsApp gateway (optional) |
+Disable everything with `memory.enabled: false` if you don't want it.
 
-The dashboard is optional — it proxies API requests through nginx (`/api/` → gbot:8000) and runs independently. Uses named volumes (`gbot_data`, `gbot_workspace`) and `config.yaml` as read-only bind mount.
+> **Cost:** ~$0.15/month for personal use (gemini-embedding-001 via OpenRouter). The embedding model is configurable.
+
+---
+
+## Tools
+
+The agent has 26 tools across 8 groups. RBAC roles (`owner`, `member`, `guest`) gate access.
+
+| Group | Tools |
+|-------|-------|
+| **memory** | save_user_note, get_user_context, add/get/remove_favorite, set/get/remove_user_preference, search_memory, forget_fact, what_do_you_know |
+| **filesystem** | read_file, write_file, list_directory |
+| **shell** | run_shell |
+| **web** | web_fetch, web_search |
+| **rag** | rag_search (when RAG enabled) |
+| **delegate** | delegate, list_scheduled_tasks, cancel_scheduled_task |
+| **messaging** | send_message_to_user, send_notification |
+| **skills** | load_skill |
+
+`config/roles.yaml` maps roles to tool groups. `config/agents.yaml` maps agent profiles to system prompts and skill sets.
+
+---
+
+## Background Tasks
+
+The `delegate` tool turns natural-language requests into scheduled work:
+
+```
+"remind me in 30 minutes to drink water"
+   → delayed task, runs once
+
+"every morning at 9 send me the weather"
+   → cron task, runs forever
+
+"check the gold price every 5 minutes and tell me if it goes above 3000"
+   → monitor task (recurring, only delivers when condition met)
+```
+
+A planner LLM converts the request into a structured plan with execution type (`immediate`/`delayed`/`recurring`/`monitor`) and processor (`static`/`function`/`agent`/`runner`). Tasks live in `background_tasks` and execution history in `task_executions`.
+
+Manage tasks via:
+- CLI: `gbot cron list`, `gbot cron remove <id>`
+- API: `GET/DELETE /admin/tasks`
+- Dashboard: Tasks page
+
+---
+
+## REST API
+
+Auth-disabled mode: pass `user_id` in the body. Auth-enabled: pass `Authorization: Bearer <token>`.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Health + version |
+| POST | `/chat` | Send a message, get a response |
+| GET | `/sessions/{user_id}` | List user's sessions |
+| GET | `/session/{sid}/history` | Messages in a session |
+| GET | `/session/{sid}/stats` | Token / tool / context stats |
+| POST | `/session/{sid}/end` | Manually close a session |
+| GET | `/user/{user_id}/context` | Notes, prefs, favorites |
+| POST | `/auth/login` | Get JWT token |
+| POST | `/auth/register` | Register user (owner only) |
+| POST | `/auth/api-keys` | Create API key |
+| WS   | `/ws/chat` | Streaming chat + event push |
+| POST | `/webhooks/telegram/{user_id}` | Telegram webhook |
+| POST | `/webhooks/whatsapp/{user_id}` | WhatsApp (WAHA) webhook |
+
+### Admin endpoints (owner-only, 18 total)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/admin/status` | Server overview |
+| GET | `/admin/users` | List users |
+| GET | `/admin/tasks` | Background tasks |
+| GET | `/admin/memory/{user_id}` | Memory inspector |
+| GET | `/admin/context/{profile}/preview` | Rendered context for a profile |
+| PUT | `/admin/context/{profile}/layers/{layer}` | Override a context layer at runtime |
+| GET | `/admin/tools` | Registered tools + RBAC |
+| GET | `/admin/stats` | Comprehensive stats |
+| GET | `/admin/logs` | Recent execution logs |
+| GET | `/admin/profiles` | Agent profiles + AGENT.md |
+
+Full list at [`gbot/api/admin.py`](gbot/api/admin.py).
+
+---
+
+## Admin Dashboard
+
+A React 19 dashboard ships with the project. Run it from `dashboard/`:
+
+```bash
+cd dashboard
+npm install
+npm run dev
+# → http://localhost:3001
+```
+
+Or in Docker (`docker-compose up dashboard`).
+
+Pages: Conversations, Context Inspector, Memory, Tools, Tasks, Users.
+
+---
+
+## Docker Deployment
+
+`docker-compose.yml` ships everything: API server, dashboard, WAHA, volumes.
+
+```bash
+# 1. Set required env vars
+echo "OPENROUTER_API_KEY=sk-or-..." >> .env
+echo "WAHA_API_KEY=$(openssl rand -hex 16)" >> .env
+echo "GBOT_CHANNELS__WHATSAPP__API_KEY=$WAHA_API_KEY" >> .env
+
+# 2. Start everything
+docker compose up -d
+
+# 3. View logs
+docker compose logs -f gbot
+```
+
+Services:
+- `gbot` — API on `:8000`
+- `dashboard` — React UI on `:3001`
+- `waha` — WhatsApp HTTP API on `:3000` (only if you enable WhatsApp)
 
 ---
 
 ## Project Structure
 
-The codebase is split into two packages: `gbot` (the core framework) and `gbot_cli` (the CLI client). They're independent — the CLI talks to the framework over HTTP, so you could swap it for your own client.
-
 ```
-gbot/                          # Core framework
-├── agent/
-│   ├── context/                   # Context service package
-│   │   ├── builder.py             # ContextBuilder (10-layer system prompt)
-│   │   ├── models.py              # LayerResult, ContextBudget models
-│   │   └── service.py             # ContextService facade (admin API)
-│   ├── graph.py                   # StateGraph compile
-│   ├── nodes.py                   # 4 nodes: load_context, reason, execute_tools, respond
-│   ├── runner.py                  # GraphRunner orchestrator
-│   ├── light.py                   # LightAgent (background tasks)
-│   ├── state.py                   # AgentState(MessagesState)
-│   ├── profiles.py                # Agent profiles (agents.yaml loader)
-│   ├── skills/                    # Skill loader + built-ins
-│   ├── delegation.py              # DelegationPlanner (LLM-based task routing)
-│   ├── permissions.py             # RBAC — roles.yaml loader, tool/context filtering
-│   └── tools/                     # 8 tool groups, 23 tools (ToolRegistry)
-├── api/
-│   ├── app.py                     # FastAPI app + lifespan
-│   ├── routes.py                  # Chat, health, sessions, user endpoints
-│   ├── admin.py                   # Admin endpoints (owner-only, 18 endpoints)
-│   ├── auth.py                    # JWT + API key auth
-│   ├── ws.py                      # WebSocket chat
-│   └── deps.py                    # Dependency injection
-├── core/
-│   ├── config/                    # YAML + BaseSettings + .env
-│   ├── providers/                 # LiteLLM + OpenRouter SDK
-│   ├── channels/                  # Telegram, WhatsApp (WAHA), base channel
-│   ├── cron/                      # APScheduler + types
-│   └── background/                # Heartbeat + subagent worker
-├── memory/
-│   ├── store.py                   # MemoryStore — SQLite 12 tables
-│   └── models.py                  # Pydantic models
-└── rag/                           # Optional FAISS retriever
+gbot/                            # Core framework package
+├── api/                         # FastAPI app, admin, auth, webhooks, WS
+├── agent/                       # LangGraph runner, nodes, tools, context, profiles
+├── core/                        # Config, channels (telegram/whatsapp), cron, providers
+├── memory/                      # MemoryStore (SQLite), MemoryService (extraction), embedder
+└── __version__.py
 
-gbot_cli/                          # CLI package (separate module)
-├── commands.py                    # Typer CLI entry points
-├── client.py                      # GraphBotClient (httpx)
-├── credentials.py                 # Token storage (~/.gbot/)
-├── repl.py                        # Interactive REPL
-├── slash_commands.py              # Slash command router
-└── output.py                      # Rich formatters
+gbot_cli/                        # CLI package (Typer + Rich)
+├── commands.py                  # gbot run / chat / login / status / user / cron
+├── repl.py                      # Interactive REPL with rich UI
+├── client.py                    # GraphBotClient — sync httpx wrapper
+└── slash_commands.py            # /help, /status, /session, /context, ...
 
-config/                            # Configuration files
-├── config.example.yaml            # Config template (committed)
-├── config.yaml                    # Local config (gitignored)
-├── agents.yaml                    # Agent profiles (main/planner/light)
-└── roles.yaml                     # RBAC role definitions
+config/                          # Configuration files
+├── config.example.yaml          # Template — committed
+├── config.yaml                  # Your local config — gitignored
+├── agents.yaml                  # Agent profiles
+└── roles.yaml                   # RBAC mapping
 
-dashboard/                         # Admin dashboard (React + Vite)
-├── src/
-│   ├── pages/                     # Dashboard, Context, Conversations, Users, Tools, Tasks
-│   ├── components/                # Layout + shared components
-│   ├── api/                       # API client + admin/auth endpoints
-│   └── stores/                    # Zustand (auth, theme)
-├── Dockerfile                     # nginx:alpine production build
-└── nginx.conf                     # API proxy configuration
+workspace/                       # Bot personality (no code, just markdown)
+├── AGENT.md                     # Main agent identity
+├── agents/                      # Per-profile AGENT.md files
+└── skills/                      # Optional skill packs
+
+dashboard/                       # React 19 admin UI
+
+tests/                           # 337 unit tests + integration + e2e
 ```
 
-## SQLite Tables (12)
-
-Everything lives in a single SQLite file. No Postgres, no Redis, no external dependencies. WAL mode is enabled for concurrent reads:
+### SQLite tables
 
 | Table | Purpose |
 |-------|---------|
-| `users` | User records |
-| `user_channels` | Channel links (telegram, whatsapp, ...) |
-| `sessions` | Chat sessions with token tracking |
-| `messages` | Chat messages |
-| `agent_memory` | Key-value long-term memory |
-| `user_notes` | Learned information about users |
-| `favorites` | User favorites |
-| `preferences` | User preferences (JSON) |
-| `background_tasks` | Unified task table (immediate/delayed/recurring/monitor) |
-| `task_executions` | Task execution audit log |
-| `system_events` | Delivery queue for API/WS channels |
-| `api_keys` | API key management |
+| `users` · `user_channels` · `api_keys` | Identity + auth |
+| `sessions` · `messages` | Conversations |
+| `agent_memory` · `user_notes` | Long-term + temporal memory |
+| `memory_facts` · `vec_memory_facts` · `memory_relations` · `memory_processing_log` | Faz 22 memory layer |
+| `background_tasks` · `task_executions` | Scheduling |
+| `system_events` | WS / API event delivery queue |
 
-## Workspace
-
-The `workspace/` directory is where you customize the bot's personality and capabilities without touching code:
-
-```
-workspace/
-├── AGENT.md              # Main agent identity (system prompt)
-├── agents/
-│   ├── planner/AGENT.md  # Delegation planner identity
-│   └── light/AGENT.md    # Background agent identity
-├── HEARTBEAT.md          # Heartbeat instructions (optional)
-└── skills/               # User skills (optional)
-```
-
-Each agent profile (`config/agents.yaml`) points to its own `AGENT.md`. The main agent's is the most important — it defines who the bot is, how it talks, and what it knows. Planner and light agents have minimal, task-focused identities.
+WAL mode is on. Single file, single backup.
 
 ---
 
 ## Development
 
 ```bash
-uv sync --extra dev                    # install dependencies
-uv run pytest tests/ -v                # run tests
-uv run ruff check gbot/ gbot_cli/  # lint
-uv run ruff format gbot/ gbot_cli/ # format
-gbot run --reload                      # dev server with auto-reload
+uv sync --extra dev                       # install
+uv run pytest tests/ -v                   # 337 tests
+uv run pytest tests/ -m integration       # requires server on :8000
+uv run ruff check gbot/ gbot_cli/         # lint
+uv run ruff format gbot/ gbot_cli/        # format
+uv run gbot run --reload                  # dev server with auto-reload
 ```
 
+### Releasing
 
-## Technologies
+```bash
+# bump version in gbot/__version__.py
+# update CHANGELOG.md
+git tag v1.x.y
+git push origin main --tags
+```
+
+### Stack
 
 | Component | Technology |
 |-----------|------------|
-| Agent | LangGraph StateGraph |
-| LLM | LiteLLM + OpenRouter SDK (multi-provider) |
+| Agent loop | LangGraph StateGraph (stateless) |
+| LLM | LiteLLM + OpenRouter SDK |
 | API | FastAPI + Uvicorn |
-| Dashboard | React 19 + TanStack Query + Zustand + Tailwind CSS 4 |
-| Memory | SQLite (WAL mode) |
-| Config | YAML + pydantic-settings + .env |
+| Memory | SQLite (WAL) + sqlite-vec |
+| Embeddings | OpenRouter embeddings API |
 | Background | APScheduler |
 | CLI | Typer + Rich + prompt_toolkit |
-| RAG | FAISS + sentence-transformers |
+| Dashboard | React 19 + TanStack Query + Tailwind 4 |
 | Container | Docker + docker-compose |
-| Lint | Ruff |
 | Package | uv |
+
+---
 
 ## License
 
-MIT — see [LICENSE](./LICENSE) for details.
-
+MIT — see [LICENSE](./LICENSE).
