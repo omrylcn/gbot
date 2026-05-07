@@ -23,12 +23,15 @@ assistant:
   # ^ If set, overrides AGENT.md (higher priority)
 
 providers:
+  # API keys are read from .env (OPENROUTER_API_KEY, OPENAI_API_KEY, etc.)
+  # Leave empty here — env vars take priority. Only override below if you
+  # want a key hardcoded (NOT recommended for committed config).
   anthropic:
-    api_key: "${ANTHROPIC_API_KEY}"        # Set via .env
+    api_key: ""
   openrouter:
-    api_key: "${OPENROUTER_API_KEY}"       # Set via .env
-  # openai:
-  #   api_key: "${OPENAI_API_KEY}"
+    api_key: ""
+  openai:
+    api_key: ""
 
 channels:
   telegram:
@@ -38,7 +41,7 @@ channels:
     enabled: false
     waha_url: "http://waha:3000"
     session: "default"
-    api_key: "${WAHA_API_KEY}"             # WAHA instance API key
+    api_key: ""                            # WAHA instance API key — set via WAHA_API_KEY in .env
     respond_to_dm: true
     monitor_dm: true
     allowed_groups:
@@ -68,7 +71,7 @@ tools:
       news: "https://news.google.com/rss?hl=tr&gl=TR&ceid=TR:tr"
 
 auth:
-  jwt_secret_key: "${JWT_SECRET_KEY}"      # 32+ chars, set via .env
+  jwt_secret_key: ""                       # empty = auth disabled. Set 32+ chars (or set GBOT_AUTH__JWT_SECRET_KEY env var) to enable JWT auth
   access_token_expire_minutes: 1440
   rate_limit:
     enabled: true

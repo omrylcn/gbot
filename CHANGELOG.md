@@ -6,6 +6,33 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.18.2] - 2026-05-07 — Config loader: env vars now override YAML
+
+### Fixed
+
+- **Critical: env vars were not overriding YAML.** `Config(**yaml_data)` passes
+  YAML as init kwargs, which take priority over pydantic-settings env loading.
+  Result: `${JWT_SECRET_KEY}` placeholder in `config.example.yaml` resolved
+  literally (17-char string), and `GBOT_AUTH__JWT_SECRET_KEY` env var was
+  silently ignored. README's "auth disabled by default" claim did not hold on
+  a fresh install.
+- **Security side-effect:** because the literal `"${JWT_SECRET_KEY}"` was
+  truthy, `auth_enabled` returned `True` but JWT operations had no real
+  secret — `/chat` accepted requests without tokens. Fix restores the
+  documented `auth disabled` ↔ `auth enabled` contract.
+
+### Changed
+
+- `gbot/core/config/loader.py`: build base Config from env first, then merge
+  YAML only for keys not already set via env (`GBOT_*`). Empty YAML strings
+  are stripped so env vars can fill in.
+- `config/config.example.yaml`: replaced `${VAR}` placeholders (which never
+  resolved) with empty strings; env vars are now the canonical source.
+- `.env.example`: documented `GBOT_AUTH__JWT_SECRET_KEY` and
+  `GBOT_CHANNELS__WHATSAPP__API_KEY` as the right way to override.
+
+---
+
 ## [1.18.1] - 2026-04-06 — Bugfixes & Polish
 
 ### Fixed
