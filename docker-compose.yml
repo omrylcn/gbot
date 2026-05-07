@@ -31,7 +31,7 @@ services:
       - "127.0.0.1:3000:3000"
     environment:
       - WHATSAPP_DEFAULT_ENGINE=NOWEB
-      - WAHA_API_KEY=2275f9a154174f18a912644829b8dad4
+      - WAHA_API_KEY=${WAHA_API_KEY:-changeme-set-in-env}
       - WAHA_API_KEY_EXCLUDE_PATH=health,ping
       - WHATSAPP_RESTART_ALL_SESSIONS=true
       - TZ=Europe/Istanbul

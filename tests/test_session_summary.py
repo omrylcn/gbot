@@ -1,8 +1,23 @@
-"""Tests for Faz 17 — Session Summarization, Fact Extraction, Preferences."""
+"""Tests for Faz 17 — Session Summarization, Fact Extraction, Preferences.
+
+NOTE: Faz 22 moved summarization and fact extraction from runner.py to
+MemoryService (gbot/memory/extraction.py). Tests that mock
+`gbot.agent.runner.asummarize` or `aextract_facts` no longer apply —
+those imports were removed. Memory layer is now tested via
+test_integration.py (memory_facts CRUD) and test_e2e.py
+(memory persistence, invalidation chain).
+"""
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+import pytest
+
+# Skip the entire file — Faz 17 architecture replaced by Faz 22
+pytestmark = pytest.mark.skip(
+    reason="Faz 17 session_summary tests superseded by Faz 22 MemoryService — see test_integration.py and test_e2e.py"
+)
+
+from unittest.mock import AsyncMock, patch  # noqa: E402
 
 import pytest
 from langchain_core.messages import AIMessage

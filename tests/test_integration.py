@@ -525,12 +525,18 @@ def test_cli_chat_message(cli_runner):
 
 
 def test_store_tables_exist(store):
-    """All 15 tables created in fresh MemoryStore."""
+    """All core tables created in fresh MemoryStore (Faz 22 schema)."""
     expected_tables = {
+        # Core
         "users", "user_channels", "sessions", "messages",
-        "agent_memory", "user_notes", "favorites",
-        "preferences", "cron_jobs", "cron_execution_log", "reminders",
-        "system_events", "background_tasks", "api_keys",
+        "agent_memory", "user_notes",
+        # Memory layer (Faz 22)
+        "memory_facts", "vec_memory_facts",
+        "memory_relations", "memory_processing_log",
+        # Background tasks (Faz 21 — unified)
+        "background_tasks", "task_executions",
+        # System
+        "system_events", "api_keys",
     }
     with store._get_conn() as conn:
         rows = conn.execute(
@@ -593,3 +599,134 @@ def test_store_background_tasks(store):
     task = store.get_background_task(tid)
     assert task["status"] == "completed"
     assert task["result"] == "Research done"
+
+
+# ════════════════════════════════════════════════════════════
+# MEMORY LAYER TESTS (Faz 22)
+# ════════════════════════════════════════════════════════════
+
+
+def test_store_memory_facts_crud(store):
+    """memory_facts: add → get → invalidate flow."""
+    store.get_or_create_user("u1", "Test")
+    store.add_fact(
+        fact_id="f1",
+        user_id="u1",
+        content="Lives in Istanbul",
+        fact_type="semantic",
+        category="location",
+        confidence=1.0,
+    )
+
+    facts = store.get_facts("u1", valid_only=True)
+    assert len(facts) == 1
+    assert facts[0]["content"] == "Lives in Istanbul"
+    assert facts[0]["fact_type"] == "semantic"
+    assert facts[0]["category"] == "location"
+
+    store.invalidate_fact("f1", superseded_by="f2")
+    assert len(store.get_facts("u1", valid_only=True)) == 0
+    all_facts = store.get_facts("u1", valid_only=False)
+    assert all_facts[0]["valid_until"] is not None
+    assert all_facts[0]["superseded_by"] == "f2"
+
+
+def test_store_memory_facts_with_embedding(store):
+    """memory_facts + vec_memory_facts: idempotent insert (DELETE before INSERT)."""
+    store.get_or_create_user("u1", "Test")
+    embedding = [0.1] * 3072  # gemini-embedding-001 dimension
+
+    store.add_fact(
+        fact_id="f1",
+        user_id="u1",
+        content="Test fact with embedding",
+        fact_type="semantic",
+        category="personal",
+        embedding=embedding,
+    )
+
+    # Verify vec table populated
+    with store._get_conn() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM vec_memory_facts"
+        ).fetchone()[0]
+    assert count == 1
+
+    # Re-add same fact_id should not raise UNIQUE constraint
+    # (regression test for v1.18.1 fix)
+    store.add_fact(
+        fact_id="f2",
+        user_id="u1",
+        content="Another fact",
+        fact_type="semantic",
+        category="personal",
+        embedding=embedding,
+    )
+
+
+def test_store_memory_relations(store):
+    """memory_relations: add → query by entity."""
+    store.get_or_create_user("u1", "Test")
+    store.add_relation(
+        relation_id="r1",
+        user_id="u1",
+        source_entity="Ali",
+        relation="works_at",
+        target_entity="Acme",
+    )
+    store.add_relation(
+        relation_id="r2",
+        user_id="u1",
+        source_entity="Ali",
+        relation="married_to",
+        target_entity="Ayse",
+    )
+
+    rels = store.get_relations("u1")
+    assert len(rels) == 2
+    relations_set = {(r["source_entity"], r["relation"], r["target_entity"]) for r in rels}
+    assert ("Ali", "works_at", "Acme") in relations_set
+    assert ("Ali", "married_to", "Ayse") in relations_set
+
+
+def test_store_memory_processing_log(store):
+    """memory_processing_log: extraction stats recorded."""
+    store.get_or_create_user("u1", "Test")
+    store.log_memory_processing(
+        user_id="u1",
+        session_id="s1",
+        trigger="hot_path",
+        facts_extracted=5,
+        facts_added=3,
+        facts_updated=1,
+        facts_invalidated=1,
+        duration_ms=2500,
+    )
+
+    log = store.get_processing_log("u1")
+    assert len(log) == 1
+    assert log[0]["trigger"] == "hot_path"
+    assert log[0]["facts_extracted"] == 5
+    assert log[0]["facts_added"] == 3
+    assert log[0]["duration_ms"] == 2500
+
+
+def test_store_user_notes_unified(store):
+    """user_notes: unified table with note_type (Faz 22A: notes + prefs + favs → 1)."""
+    store.get_or_create_user("u1", "Test")
+
+    # Plain note
+    store.add_note("u1", "Likes coffee")
+    notes = store.get_notes("u1")
+    assert "Likes coffee" in notes
+
+    # Preference (note_type='preference')
+    store.update_preferences("u1", {"theme": "dark", "language": "tr"})
+    prefs = store.get_preferences("u1")
+    assert prefs.get("theme") == "dark"
+    assert prefs.get("language") == "tr"
+
+    # Favorite (note_type='favorite')
+    store.add_favorite("u1", "btc", "Bitcoin Tracker")
+    favs = store.get_favorites("u1")
+    assert any(f["item_id"] == "btc" for f in favs)

@@ -38,11 +38,19 @@ cp config/config.example.yaml config/config.yaml   # your local config (gitignor
 cp .env.example .env                               # your API keys (gitignored)
 ```
 
-Edit `.env` — you need at least one LLM provider:
+#### LLM Provider (required)
+
+You need at least one LLM provider. **OpenRouter is recommended** — single key gives you access to OpenAI, Anthropic, Google, and many open-source models.
+
+| Provider | Get a key | Suggested model |
+|----------|-----------|-----------------|
+| **OpenRouter** | https://openrouter.ai/keys | `openrouter/google/gemini-3-flash-preview` |
+| OpenAI | https://platform.openai.com/api-keys | `openai/gpt-4o-mini` |
+| Anthropic | https://console.anthropic.com/settings/keys | `claude-haiku-4-5-20251001` |
+
+Edit `.env`:
 ```bash
-OPENROUTER_API_KEY=sk-or-...    # recommended (access to many models)
-# or: OPENAI_API_KEY=sk-...
-# or: ANTHROPIC_API_KEY=sk-...
+OPENROUTER_API_KEY=sk-or-...
 ```
 
 Edit `config/config.yaml` — set your owner info and preferred model:
@@ -52,17 +60,15 @@ assistant:
   owner:
     username: "ali"
     name: "Ali"
-  model: "openai/gpt-4o-mini"
-
-providers:
-  openai:
-    api_key: "sk-..."     # or set via .env
+    password: "change-me"      # initial password — used when auth is enabled
+  model: "openrouter/google/gemini-3-flash-preview"
 ```
 
-Or use environment variables (`.env`):
-```
-GBOT_PROVIDERS__OPENAI__API_KEY=sk-...
-```
+> **Memory layer note:** Fact extraction uses an embedding model (default: `google/gemini-embedding-001` via OpenRouter, $0.15/1M tokens, ~$0.15/month for personal use). If you only have OpenAI/Anthropic, edit `memory.embedding.provider` in config. The memory layer is enabled by default — disable with `memory.enabled: false` if you don't want it.
+
+#### Database
+
+The SQLite database (`data/gbot.db`) is **auto-created on first run** with all tables, indexes, and the `vec_memory_facts` extension. The `owner` user from config is also created automatically. No manual init needed.
 
 ### 3. Run
 
@@ -77,7 +83,29 @@ gbot run                    # start API server on :8000
 gbot                        # open interactive REPL
 ```
 
-That's it. The REPL connects to the API server automatically.
+You should see:
+```
+Starting gbot API on 0.0.0.0:8000
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+```
+
+Verify it's working:
+```bash
+curl http://localhost:8000/health
+# → {"status":"ok","agent_ready":true,"version":"...","items_count":0}
+```
+
+The REPL (`gbot` without arguments) connects to the API server automatically.
+
+### Troubleshooting
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `litellm.AuthenticationError` | API key not set or wrong | Check `.env` — `OPENROUTER_API_KEY` must be valid |
+| `Model not found` | Model name typo | Use `openrouter/<model>` format |
+| `no such table: ...` | Old DB schema | Delete `data/gbot.db` and restart (loses data) |
+| `Login failed` (auth enabled) | Owner password not in DB | Set `assistant.owner.password` in config and restart on a fresh DB, or run `gbot user set-password owner <pw>` |
+| `Telegram send failed (404)` | Bot token wrong | Check `user_channels.channel_user_id` in DB — must be Telegram bot token, not chat_id |
 
 ---
 
@@ -268,15 +296,16 @@ Authentication is optional — you can run GBot wide open for local development,
 
 #### Auth Disabled (default)
 
-The `auth.jwt_secret_key` field in `config.yaml` controls authentication. By default it is empty (`""`), which means auth is disabled — all endpoints are open and `user_id` is passed in the request body:
+The `auth.jwt_secret_key` field in `config.yaml` controls authentication. By default `config.example.yaml` contains `${JWT_SECRET_KEY}` — an env var placeholder. If you don't set `JWT_SECRET_KEY` in `.env`, it resolves to an empty string and **auth is disabled**. All endpoints are open and `user_id` is passed in the request body:
 
 ```yaml
-# config.yaml (default)
+# config/config.example.yaml (as shipped)
 auth:
-  jwt_secret_key: ""    # empty = auth disabled
+  jwt_secret_key: "${JWT_SECRET_KEY}"   # env var — empty if unset → auth disabled
 ```
 
 ```bash
+# Auth disabled — direct call works
 curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "hello", "user_id": "ali"}'
@@ -596,18 +625,22 @@ When enabled, `search_items` and `get_item_detail` tools are automatically added
 
 ### Telegram Bot
 
-Telegram integration follows a "one bot per user" model — each user creates their own bot via @BotFather and links the token. This keeps things simple and avoids multi-tenant bot routing:
+Telegram integration follows a "one bot per user" model — each user creates their own bot via @BotFather and links the token. This keeps things simple and avoids multi-tenant bot routing.
+
+**Requirements:** A public HTTPS URL pointing to your server. For local development, install [ngrok](https://ngrok.com/download) (free tier works) and run `ngrok http 8000` in a separate terminal — you'll get a `https://xxxx.ngrok-free.app` URL to use as the webhook target. For production, point your domain at the server.
 
 ```bash
-# 1. Create a bot via @BotFather and get the token
+# 1. Create a bot via @BotFather (https://t.me/BotFather) and get the token
 # 2. Enable telegram in config.yaml (channels.telegram.enabled: true)
 # 3. Add user and link the bot token
 gbot user add ali --name "Ali" --telegram "123456:ABC_TOKEN"
-# 4. Create a public URL (e.g. ngrok http 8000)
-# 5. Register webhook
-curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://xxxx.ngrok-free.app/webhooks/telegram/ali"
-# 6. Start the server
+# 4. Start the server
 gbot run
+# 5. In another terminal, expose port 8000 publicly
+ngrok http 8000
+# 6. Register the webhook with your public URL
+curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://xxxx.ngrok-free.app/webhooks/telegram/ali"
+# 7. Send a message to your bot — it should reply
 ```
 
 ### WhatsApp (WAHA)

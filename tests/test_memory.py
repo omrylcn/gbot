@@ -160,10 +160,13 @@ def test_processing_log(store):
 # ── MemoryEmbedder ───────────────────────────────────────
 
 
-def test_embedder_no_key():
+def test_embedder_no_key(monkeypatch):
     """Embedder without API key returns zero vectors."""
     from gbot.memory.embedder import MemoryEmbedder
     from gbot.core.config.schema import MemoryEmbeddingConfig
+
+    # Ensure no key is picked up from environment
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
 
     cfg = MemoryEmbeddingConfig(dimension=8)
     embedder = MemoryEmbedder(cfg, api_key="")

@@ -174,3 +174,73 @@ async def test_e2e_multi_user(client, app):
     msgs2 = db.get_session_messages(sid2)
     assert all(m["role"] in ("user", "assistant", "tool") for m in msgs1)
     assert all(m["role"] in ("user", "assistant", "tool") for m in msgs2)
+
+
+# ── E2E: Memory persistence (Faz 22) ────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_e2e_memory_facts_user_scoped(app):
+    """memory_facts are user-scoped — alice's facts don't leak to bob."""
+    db = app.state.db
+    db.get_or_create_user("alice", "Alice")
+    db.get_or_create_user("bob", "Bob")
+
+    db.add_fact(
+        fact_id="fa1",
+        user_id="alice",
+        content="Alice lives in Istanbul",
+        fact_type="semantic",
+        category="location",
+    )
+    db.add_fact(
+        fact_id="fb1",
+        user_id="bob",
+        content="Bob is vegetarian",
+        fact_type="preference",
+        category="preference",
+    )
+
+    alice_facts = db.get_facts("alice", valid_only=True)
+    bob_facts = db.get_facts("bob", valid_only=True)
+
+    assert len(alice_facts) == 1
+    assert len(bob_facts) == 1
+    assert "Istanbul" in alice_facts[0]["content"]
+    assert "vegetarian" in bob_facts[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_e2e_memory_invalidation_chain(app):
+    """Fact invalidated → context retrieval skips it (valid_only=True)."""
+    db = app.state.db
+    db.get_or_create_user("u1", "Test")
+
+    db.add_fact(
+        fact_id="old",
+        user_id="u1",
+        content="Lives in Istanbul",
+        fact_type="semantic",
+        category="location",
+    )
+    db.add_fact(
+        fact_id="new",
+        user_id="u1",
+        content="Lives in Ankara",
+        fact_type="semantic",
+        category="location",
+    )
+
+    # Invalidate old fact (AUDN UPDATE flow)
+    db.invalidate_fact("old", superseded_by="new")
+
+    valid = db.get_facts("u1", valid_only=True)
+    assert len(valid) == 1
+    assert valid[0]["fact_id"] == "new"
+
+    # All facts (including invalidated) — for audit
+    all_facts = db.get_facts("u1", valid_only=False)
+    assert len(all_facts) == 2
+    invalidated = [f for f in all_facts if f["valid_until"] is not None]
+    assert len(invalidated) == 1
+    assert invalidated[0]["superseded_by"] == "new"
