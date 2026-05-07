@@ -75,10 +75,27 @@ class MemoryStore:
             if "execution_type" not in bt_cols:
                 self._migrate_to_unified_tasks(conn, old_tables)
 
+        # Faz 22D: Backlinks + Entity Pages migration. Run BEFORE
+        # _create_memory_tables so canonical_* columns exist on legacy
+        # memory_relations before we try to add indexes that reference them.
+        # Idempotent — guarded by user_version pragma.
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if version < 22 and "memory_relations" in old_tables:
+            self._migrate_22d(conn)
+            conn.execute("PRAGMA user_version = 22")
+
         # Faz 22: Memory tables (always ensure they exist)
         memory_tables = {"memory_facts", "vec_memory_facts", "memory_relations", "memory_processing_log"}
         if not memory_tables.issubset(old_tables):
             self._create_memory_tables(conn)
+
+        # If memory_relations didn't exist before (fresh DB), the bump above
+        # was skipped. Set user_version now so we don't try to remigrate.
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if version < 22:
+            # Ensure aliases/pages tables on a fresh DB built from scratch.
+            self._migrate_22d(conn)
+            conn.execute("PRAGMA user_version = 22")
 
     _TASK_TABLES_SQL = """
         CREATE TABLE IF NOT EXISTS background_tasks (
@@ -172,6 +189,8 @@ class MemoryStore:
             source_entity TEXT NOT NULL,
             relation TEXT NOT NULL,
             target_entity TEXT NOT NULL,
+            canonical_source TEXT,
+            canonical_target TEXT,
             confidence REAL DEFAULT 1.0,
             valid_from TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             valid_until TIMESTAMP,
@@ -183,6 +202,15 @@ class MemoryStore:
             ON memory_relations(user_id);
         CREATE INDEX IF NOT EXISTS idx_relations_source
             ON memory_relations(source_entity);
+        CREATE INDEX IF NOT EXISTS idx_relations_target
+            ON memory_relations(user_id, target_entity);
+        CREATE INDEX IF NOT EXISTS idx_relations_canonical_source
+            ON memory_relations(user_id, canonical_source);
+        CREATE INDEX IF NOT EXISTS idx_relations_canonical_target
+            ON memory_relations(user_id, canonical_target);
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_relations_active
+            ON memory_relations(user_id, source_entity, relation, target_entity)
+            WHERE valid_until IS NULL;
 
         CREATE TABLE IF NOT EXISTS memory_processing_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -196,6 +224,40 @@ class MemoryStore:
             duration_ms INTEGER DEFAULT 0,
             processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS memory_entity_aliases (
+            user_id TEXT NOT NULL,
+            surface_form TEXT NOT NULL,
+            canonical_form TEXT NOT NULL,
+            source TEXT DEFAULT 'auto',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, surface_form),
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_aliases_canonical
+            ON memory_entity_aliases(user_id, canonical_form);
+
+        CREATE TABLE IF NOT EXISTS memory_entity_pages (
+            page_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            entity_canonical TEXT NOT NULL,
+            entity_surface_forms TEXT,
+            content_md TEXT NOT NULL,
+            source_fact_ids TEXT,
+            source_relation_ids TEXT,
+            fact_count INTEGER DEFAULT 0,
+            relation_count INTEGER DEFAULT 0,
+            version INTEGER DEFAULT 1,
+            stale INTEGER DEFAULT 0,
+            last_compiled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_accessed_at TIMESTAMP,
+            access_count INTEGER DEFAULT 0,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_entity_pages_user_entity
+            ON memory_entity_pages(user_id, entity_canonical);
+        CREATE INDEX IF NOT EXISTS idx_entity_pages_stale
+            ON memory_entity_pages(user_id, stale);
     """
 
     def _create_task_tables(self, conn) -> None:
@@ -205,6 +267,90 @@ class MemoryStore:
     def _create_memory_tables(self, conn) -> None:
         """Create memory tables for fresh or migrated databases."""
         conn.executescript(self._MEMORY_TABLES_SQL)
+
+    def _migrate_22d(self, conn) -> None:
+        """Faz 22D — backlinks revival + entity pages.
+
+        Adds canonical_source/canonical_target columns to memory_relations,
+        deduplicates existing rows, creates partial UNIQUE index, and creates
+        new tables (memory_entity_aliases, memory_entity_pages). Idempotent.
+        """
+        rel_cols = {r[1] for r in conn.execute("PRAGMA table_info(memory_relations)").fetchall()}
+        if "canonical_source" not in rel_cols:
+            conn.execute("ALTER TABLE memory_relations ADD COLUMN canonical_source TEXT")
+        if "canonical_target" not in rel_cols:
+            conn.execute("ALTER TABLE memory_relations ADD COLUMN canonical_target TEXT")
+
+        # Dedup live rows: keep the oldest rowid per (user, source, rel, target)
+        conn.execute(
+            """DELETE FROM memory_relations
+               WHERE valid_until IS NULL
+                 AND rowid NOT IN (
+                   SELECT MIN(rowid) FROM memory_relations
+                   WHERE valid_until IS NULL
+                   GROUP BY user_id, source_entity, relation, target_entity
+                 )"""
+        )
+
+        # Partial UNIQUE index — only over live rows so re-asserts after
+        # invalidate stay legal.
+        conn.execute(
+            """CREATE UNIQUE INDEX IF NOT EXISTS uq_relations_active
+                   ON memory_relations(user_id, source_entity, relation, target_entity)
+                   WHERE valid_until IS NULL"""
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_relations_target ON memory_relations(user_id, target_entity)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_relations_canonical_source ON memory_relations(user_id, canonical_source)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_relations_canonical_target ON memory_relations(user_id, canonical_target)"
+        )
+
+        # New tables — create if missing.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS memory_entity_aliases (
+                   user_id TEXT NOT NULL,
+                   surface_form TEXT NOT NULL,
+                   canonical_form TEXT NOT NULL,
+                   source TEXT DEFAULT 'auto',
+                   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                   PRIMARY KEY (user_id, surface_form),
+                   FOREIGN KEY (user_id) REFERENCES users(user_id)
+               )"""
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_aliases_canonical ON memory_entity_aliases(user_id, canonical_form)"
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS memory_entity_pages (
+                   page_id TEXT PRIMARY KEY,
+                   user_id TEXT NOT NULL,
+                   entity_canonical TEXT NOT NULL,
+                   entity_surface_forms TEXT,
+                   content_md TEXT NOT NULL,
+                   source_fact_ids TEXT,
+                   source_relation_ids TEXT,
+                   fact_count INTEGER DEFAULT 0,
+                   relation_count INTEGER DEFAULT 0,
+                   version INTEGER DEFAULT 1,
+                   stale INTEGER DEFAULT 0,
+                   last_compiled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                   last_accessed_at TIMESTAMP,
+                   access_count INTEGER DEFAULT 0,
+                   FOREIGN KEY (user_id) REFERENCES users(user_id)
+               )"""
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_entity_pages_user_entity ON memory_entity_pages(user_id, entity_canonical)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_entity_pages_stale ON memory_entity_pages(user_id, stale)"
+        )
+
+        logger.info("Faz 22D schema migration applied (relations dedup + canonical cols + entity pages/aliases)")
 
     def _migrate_to_unified_tasks(self, conn, old_tables: set[str]) -> None:
         """Migrate cron_jobs + reminders + old background_tasks + delegation_log → unified tables."""
@@ -1456,11 +1602,20 @@ class MemoryStore:
         user_id: str,
         query_embedding: list[float],
         top_k: int = 5,
+        max_distance: float | None = None,
     ) -> list[dict[str, Any]]:
         """Semantic similarity search — user-scoped, valid facts only.
 
         Uses CTE + k= syntax for sqlite-vec compatibility.
         distance_metric=cosine: 0.0 = identical, 2.0 = opposite.
+
+        Parameters
+        ----------
+        max_distance : float | None
+            Drop candidates with cosine distance above this threshold.
+            Applied inside the CTE so the rerank pool never sees noise.
+            Use ``None`` (default) for no gate; ``0.45`` is a sensible
+            relevance cutoff for gemini-embedding-001.
         """
         with self._get_conn() as conn:
             count = conn.execute(
@@ -1468,18 +1623,24 @@ class MemoryStore:
             ).fetchone()[0]
             if count == 0:
                 return []
+            params: list[Any] = [json.dumps(query_embedding), top_k * 3, user_id]
+            distance_filter = ""
+            if max_distance is not None:
+                distance_filter = "AND knn.distance <= ?"
+                params.append(max_distance)
             rows = conn.execute(
-                """WITH knn AS (
-                       SELECT rowid, distance
-                       FROM vec_memory_facts
-                       WHERE embedding MATCH ? AND k = ?
-                   )
-                   SELECT f.*, knn.distance
-                   FROM knn
-                   JOIN memory_facts f ON f.rowid = knn.rowid
-                   WHERE f.user_id = ? AND f.valid_until IS NULL
-                   ORDER BY knn.distance""",
-                (json.dumps(query_embedding), top_k * 3, user_id),
+                f"""WITH knn AS (
+                        SELECT rowid, distance
+                        FROM vec_memory_facts
+                        WHERE embedding MATCH ? AND k = ?
+                    )
+                    SELECT f.*, knn.distance
+                    FROM knn
+                    JOIN memory_facts f ON f.rowid = knn.rowid
+                    WHERE f.user_id = ? AND f.valid_until IS NULL
+                          {distance_filter}
+                    ORDER BY knn.distance""",
+                params,
             ).fetchall()
         return [dict(r) for r in rows[:top_k]]
 
@@ -1514,36 +1675,78 @@ class MemoryStore:
         target_entity: str,
         confidence: float = 1.0,
         source_fact: str | None = None,
+        canonical_source: str | None = None,
+        canonical_target: str | None = None,
     ) -> None:
+        """Insert a relation, deduplicating on ``(user, source, rel, target)``
+        across live rows.
+
+        On UNIQUE collision (same triple is already valid), update
+        confidence/source_fact/canonical fields rather than inserting a
+        duplicate. Invalidated rows do not block re-insert.
+        """
         with self._get_conn() as conn:
             conn.execute(
-                """INSERT OR REPLACE INTO memory_relations
-                   (relation_id, user_id, source_entity, relation,
-                    target_entity, confidence, source_fact)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (relation_id, user_id, source_entity, relation,
-                 target_entity, confidence, source_fact),
+                """INSERT INTO memory_relations
+                       (relation_id, user_id, source_entity, relation,
+                        target_entity, canonical_source, canonical_target,
+                        confidence, source_fact)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(user_id, source_entity, relation, target_entity)
+                       WHERE valid_until IS NULL
+                       DO UPDATE SET
+                           confidence = excluded.confidence,
+                           source_fact = excluded.source_fact,
+                           canonical_source = excluded.canonical_source,
+                           canonical_target = excluded.canonical_target""",
+                (relation_id, user_id, source_entity, relation, target_entity,
+                 canonical_source, canonical_target, confidence, source_fact),
             )
             conn.commit()
 
     def get_relations(
-        self, user_id: str, entity: str | None = None
+        self,
+        user_id: str,
+        entity: str | None = None,
+        canonical: str | None = None,
+        limit: int = 200,
     ) -> list[dict[str, Any]]:
+        """Get valid relations for a user.
+
+        Parameters
+        ----------
+        entity : str | None
+            Match against raw ``source_entity`` or ``target_entity``.
+        canonical : str | None
+            Match against ``canonical_source`` or ``canonical_target``.
+            Use this when you've already resolved the entity.
+        """
         with self._get_conn() as conn:
-            if entity:
+            if canonical:
                 rows = conn.execute(
                     """SELECT * FROM memory_relations
                        WHERE user_id = ? AND valid_until IS NULL
-                       AND (source_entity = ? OR target_entity = ?)
-                       ORDER BY created_at DESC""",
-                    (user_id, entity, entity),
+                         AND (canonical_source = ? OR canonical_target = ?)
+                       ORDER BY created_at DESC
+                       LIMIT ?""",
+                    (user_id, canonical, canonical, limit),
+                ).fetchall()
+            elif entity:
+                rows = conn.execute(
+                    """SELECT * FROM memory_relations
+                       WHERE user_id = ? AND valid_until IS NULL
+                         AND (source_entity = ? OR target_entity = ?)
+                       ORDER BY created_at DESC
+                       LIMIT ?""",
+                    (user_id, entity, entity, limit),
                 ).fetchall()
             else:
                 rows = conn.execute(
                     """SELECT * FROM memory_relations
                        WHERE user_id = ? AND valid_until IS NULL
-                       ORDER BY created_at DESC""",
-                    (user_id,),
+                       ORDER BY created_at DESC
+                       LIMIT ?""",
+                    (user_id, limit),
                 ).fetchall()
         return [dict(r) for r in rows]
 
@@ -1556,6 +1759,51 @@ class MemoryStore:
                 (relation_id,),
             )
             conn.commit()
+
+    # ════════════════════════════════════════════════════════════
+    # ENTITY ALIASES (Faz 22D)
+    # ════════════════════════════════════════════════════════════
+
+    def get_alias(self, user_id: str, surface_form: str) -> str | None:
+        """Return canonical_form for a surface form, or None if not aliased."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT canonical_form FROM memory_entity_aliases WHERE user_id = ? AND surface_form = ?",
+                (user_id, surface_form),
+            ).fetchone()
+        return row["canonical_form"] if row else None
+
+    def get_aliases_for_canonical(self, user_id: str, canonical: str) -> list[str]:
+        """All surface forms that resolve to ``canonical``."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT surface_form FROM memory_entity_aliases WHERE user_id = ? AND canonical_form = ?",
+                (user_id, canonical),
+            ).fetchall()
+        return [r["surface_form"] for r in rows]
+
+    def set_alias(
+        self, user_id: str, surface_form: str, canonical_form: str, source: str = "auto"
+    ) -> None:
+        with self._get_conn() as conn:
+            conn.execute(
+                """INSERT INTO memory_entity_aliases
+                       (user_id, surface_form, canonical_form, source)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(user_id, surface_form) DO UPDATE SET
+                       canonical_form = excluded.canonical_form,
+                       source = excluded.source""",
+                (user_id, surface_form, canonical_form, source),
+            )
+            conn.commit()
+
+    def list_aliases(self, user_id: str) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM memory_entity_aliases WHERE user_id = ? ORDER BY canonical_form, surface_form",
+                (user_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     # ════════════════════════════════════════════════════════════
     # MEMORY PROCESSING LOG

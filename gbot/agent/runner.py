@@ -211,13 +211,21 @@ class GraphRunner:
                 asyncio.create_task(self._extract_facts_bg(user_id, llm_messages, session_id))
 
     def _create_memory_service(self):
-        """Create MemoryService with config and embedder."""
+        """Create MemoryService with config, embedder, and entity resolver."""
+        from gbot.memory.entities import EntityResolver
         from gbot.memory.extraction import MemoryService
 
         mem_model = self.config.memory.model or self.config.assistant.model
+        owner = getattr(self.config.assistant, "owner", None)
+        resolver = EntityResolver(
+            self.db,
+            owner_username=getattr(owner, "username", None) if owner else None,
+            owner_display_name=getattr(owner, "name", None) if owner else None,
+        )
         return MemoryService(
             self.db, model=mem_model,
             config=self.config.memory, embedder=self._embedder,
+            resolver=resolver,
         )
 
     async def _extract_facts_bg(

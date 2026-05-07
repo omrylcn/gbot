@@ -39,11 +39,21 @@ class MemoryService:
         model: str | None = None,
         config: MemoryConfig | None = None,
         embedder: MemoryEmbedder | None = None,
+        resolver=None,
     ):
+        """
+        Parameters
+        ----------
+        resolver : EntityResolver | None
+            Optional resolver used to canonicalize relation entities at
+            insert time (Faz 22D). Falls back to raw surface forms when
+            ``None`` — relations still save, just without normalization.
+        """
         self.db = db
         self.model = model or "openai/gpt-4o-mini"
         self.config = config
         self.embedder = embedder
+        self.resolver = resolver
         self._system_prompt = get_agent_md("memory") or ""
         update_model = config.update.model if config else ""
         self._update_model = update_model or self.model
@@ -117,18 +127,27 @@ class MemoryService:
 
         raw_facts, raw_relations = await self._extract_typed_facts(messages)
 
-        # Save relations
+        # Save relations — with canonical entity resolution (Faz 22D).
+        # The partial UNIQUE index on (user, source, relation, target)
+        # collapses re-asserts; the ON CONFLICT path in add_relation
+        # updates confidence/source_fact instead of inserting duplicates.
         for rel in raw_relations:
+            src = rel.get("source", "")
+            tgt = rel.get("target", "")
+            cs = self.resolver.canonicalize(user_id, src) if self.resolver else None
+            ct = self.resolver.canonicalize(user_id, tgt) if self.resolver else None
             try:
                 self.db.add_relation(
                     relation_id=str(uuid.uuid4())[:8],
                     user_id=user_id,
-                    source_entity=rel["source"],
-                    relation=rel["relation"],
-                    target_entity=rel["target"],
+                    source_entity=src,
+                    relation=rel.get("relation", ""),
+                    target_entity=tgt,
+                    canonical_source=cs,
+                    canonical_target=ct,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"add_relation skipped: {e}")
 
         if not raw_facts:
             return {"facts_extracted": 0, "facts_added": 0, "facts_updated": 0}

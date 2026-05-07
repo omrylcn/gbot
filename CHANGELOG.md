@@ -6,6 +6,94 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.19.0] - 2026-05-07 — Faz 22D Part 1: Backlinks Revival + Distance Gate
+
+Memory layer evolves toward an Obsidian-style backlinks graph and a
+Karpathy LLM-Wiki-inspired entity-page layer (Part 2 in v1.20.x). This
+release focuses on **making existing memory data come alive**: deduping
+relations, normalizing entities, and finally consuming the relations
+graph from the agent context.
+
+### Added
+
+- **`memory_relations` partial UNIQUE index** on
+  `(user_id, source_entity, relation, target_entity) WHERE valid_until IS NULL`.
+  Re-asserts after invalidation are still legal; live duplicates are not.
+- **`canonical_source` / `canonical_target` columns** on `memory_relations`.
+  Raw surface forms are preserved in `source_entity` / `target_entity`
+  for audit; canonical names are written separately.
+- **`memory_entity_aliases` table** — per-user surface→canonical map. Auto
+  populated by `EntityResolver`; will accept manual entries from the
+  dashboard in Faz 22E.
+- **`memory_entity_pages` table** — schema only in this release; the
+  compiler arrives in v1.20.0.
+- **`gbot/memory/entities.py`** with `EntityResolver` — three-tier
+  resolution: (1) owner self-references (`Ömer/Kullanıcı/User/owner/ben`
+  → owner.username), (2) per-user alias table, (3) identity fallback.
+  Idempotent, case-insensitive, preserves raw forms.
+- **Distance gate in semantic retrieval** — `search_similar_facts(...)`
+  accepts `max_distance: float | None`. Applied inside the SQL CTE so
+  the rerank pool never sees distant noise. Default `0.45`, configurable
+  via `memory.retrieval.max_distance`.
+- **Backlinks injection in ContextBuilder** —
+  `_build_relationships_block()` detects canonical entities mentioned in
+  retrieved facts and inserts a `RELATIONSHIPS:` block per entity.
+  Configurable via `memory.relations.{enabled, max_entities_per_turn,
+  max_relations_per_entity}`. The previously-orphan `memory_relations`
+  table now reaches the agent context.
+- **Opportunistic backfill** at app startup —
+  `EntityResolver.backfill_relations()` populates `canonical_*` for any
+  legacy rows missing them. Cheap and idempotent.
+- **PRAGMA user_version = 22** as the migration guard. Re-running
+  `_init_db()` on an already-migrated DB is a no-op.
+- **17 new tests** — `test_entities.py` (10) + `test_relations_dedup_migration.py` (7).
+
+### Changed
+
+- **`add_relation` semantics** — switched from `INSERT OR REPLACE` (which
+  collided on `relation_id` only) to `INSERT ... ON CONFLICT DO UPDATE`
+  on the live-row UNIQUE index. Re-asserting an existing live triple
+  now updates `confidence`/`source_fact`/`canonical_*` instead of
+  duplicating.
+- **`get_relations`** accepts a new `canonical=` parameter. Use it once
+  the entity has been resolved (preferred over raw `entity=`).
+- **MemoryService** accepts an optional `EntityResolver`. When present,
+  every relation is canonicalized before insert. Wired in `GraphRunner._create_memory_service`.
+
+### Migration impact
+
+Tested on the live DB (155 raw relations):
+- **155 → 94** rows after dedup (39% were live duplicates).
+- **41/94** relations canonicalized to the owner identity (Ömer / Kullanıcı / User / owner — all collapse to `owner.username`).
+- Live verification: `"Murat ne yapıyor?"` and `"Zeynep ile ilişkim?"`
+  now produce a `RELATIONSHIPS` block in the agent context.
+
+### Configuration additions
+
+```yaml
+memory:
+  retrieval:
+    max_distance: 0.45         # null disables the gate
+    top_k_candidates: 20
+    top_k_final: 10
+  relations:
+    enabled: true
+    max_entities_per_turn: 3
+    max_relations_per_entity: 8
+```
+
+### Rollback
+
+Set `memory.relations.enabled: false` and `memory.retrieval.max_distance: 2.0`
+to revert to v1.18.x behavior. Schema migrations are non-destructive
+and stay; the only way to undo them is a DB reset.
+
+### Tests
+
+354 unit tests passing (was 337; +17 new).
+
+---
+
 ## [1.18.2] - 2026-05-07 — Config loader: env vars now override YAML
 
 ### Fixed

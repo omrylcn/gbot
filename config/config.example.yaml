@@ -100,3 +100,11 @@ memory:
     model: ""                        # AUDN decision model — empty = assistant.model
     noop_threshold: 0.90             # threshold_only/cascading: duplicate skip
     add_threshold: 0.65              # threshold_only/cascading: auto add
+  retrieval:                         # Faz 22D — semantic search gating
+    max_distance: 0.45               # cosine ceiling (0.0 = identical, 2.0 = opposite); null = no gate
+    top_k_candidates: 20             # broad pool fed into rerank
+    top_k_final: 10                  # how many enter context after rerank
+  relations:                         # Faz 22D — backlinks injection
+    enabled: true
+    max_entities_per_turn: 3
+    max_relations_per_entity: 8

@@ -112,6 +112,24 @@ async def lifespan(app: FastAPI):
     db = MemoryStore(str(config.db_path))
     _ensure_owner(config, db)
 
+    # Faz 22D: backfill canonical_source/canonical_target on legacy
+    # memory_relations rows. Cheap (only NULL rows touched) and idempotent —
+    # safe to run on every startup.
+    try:
+        from gbot.memory.entities import EntityResolver
+
+        owner = getattr(config.assistant, "owner", None)
+        resolver = EntityResolver(
+            db,
+            owner_username=getattr(owner, "username", None) if owner else None,
+            owner_display_name=getattr(owner, "name", None) if owner else None,
+        )
+        n = resolver.backfill_relations()
+        if n:
+            logger.info(f"Faz 22D: backfilled {n} relations with canonical entities")
+    except Exception as e:
+        logger.warning(f"Relation backfill skipped: {e}")
+
     # Create runner with empty tools first (chicken-and-egg: scheduler needs runner)
     runner = GraphRunner(config, db, tools=[])
 

@@ -173,6 +173,25 @@ class MemoryUpdateConfig(BaseModel):
     add_threshold: float = 0.65
 
 
+class MemoryRetrievalConfig(BaseModel):
+    """Faz 22D — semantic retrieval gating for memory_facts."""
+
+    # Cosine distance ceiling (0.0 = identical, 2.0 = opposite). Tuned for
+    # gemini-embedding-001 — ~0.45 keeps relevant matches, drops topical noise
+    # (e.g. "altın fiyatı" no longer pulls a silver bracelet fact).
+    max_distance: float | None = 0.45
+    top_k_candidates: int = 20  # broad pool fed to rerank
+    top_k_final: int = 10       # what enters context after rerank
+
+
+class MemoryRelationsConfig(BaseModel):
+    """Faz 22D — backlinks injection in ContextBuilder."""
+
+    enabled: bool = True
+    max_entities_per_turn: int = 3
+    max_relations_per_entity: int = 8
+
+
 class MemoryConfig(BaseModel):
     """Memory extraction configuration."""
 
@@ -182,6 +201,8 @@ class MemoryConfig(BaseModel):
     max_facts_per_user: int = 500
     embedding: MemoryEmbeddingConfig = Field(default_factory=MemoryEmbeddingConfig)
     update: MemoryUpdateConfig = Field(default_factory=MemoryUpdateConfig)
+    retrieval: MemoryRetrievalConfig = Field(default_factory=MemoryRetrievalConfig)
+    relations: MemoryRelationsConfig = Field(default_factory=MemoryRelationsConfig)
 
 
 class HeartbeatConfig(BaseModel):

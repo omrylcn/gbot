@@ -158,10 +158,18 @@ class ContextBuilder:
             try:
                 if self.embedder and last_message:
                     query_emb = self.embedder.embed(last_message)
-                    # Stage 1: broad candidates (similarity only)
-                    candidates = self.db.search_similar_facts(user_id, query_emb, top_k=20)
+                    retrieval_cfg = self.config.memory.retrieval
+                    # Stage 1: broad candidates (similarity + distance gate).
+                    # The gate is applied inside the SQL CTE so the rerank
+                    # pool never sees distant-but-resurrectable noise.
+                    candidates = self.db.search_similar_facts(
+                        user_id,
+                        query_emb,
+                        top_k=retrieval_cfg.top_k_candidates,
+                        max_distance=retrieval_cfg.max_distance,
+                    )
                     # Stage 2: re-rank by similarity × retrieval_strength
-                    facts = self._rerank_facts(candidates, top_k=10)
+                    facts = self._rerank_facts(candidates, top_k=retrieval_cfg.top_k_final)
                 else:
                     facts = self.db.get_facts(user_id, valid_only=True, limit=15)
                 if facts:
@@ -173,7 +181,16 @@ class ContextBuilder:
             except Exception:
                 pass  # memory_facts/vec table may not exist in tests
 
-            combined = "\n\n".join(p for p in [user_ctx, learned] if p)
+            # Faz 22D — Backlinks: detect canonical entities mentioned in
+            # retrieved facts, inject their relations as a RELATIONSHIPS block.
+            relationships = ""
+            try:
+                if self.config.memory.relations.enabled and facts:
+                    relationships = self._build_relationships_block(user_id, facts)
+            except Exception:  # pragma: no cover — defensive
+                pass
+
+            combined = "\n\n".join(p for p in [user_ctx, learned, relationships] if p)
             if combined:
                 _add("user_context", f"# User Context\n\n{combined}", priorities.user_context)
             else:
@@ -391,6 +408,91 @@ class ContextBuilder:
 
         candidates.sort(key=lambda f: f["final_score"], reverse=True)
         return candidates[:top_k]
+
+    def _build_relationships_block(
+        self, user_id: str, facts: list[dict]
+    ) -> str:
+        """Faz 22D — backlinks injection.
+
+        Detect canonical entities mentioned in retrieved facts, fetch their
+        direct relations, render as a ``RELATIONSHIPS`` section.
+
+        Detection is a cheap substring scan over the user's known canonical
+        entity set. No NER, no LLM. Sub-millisecond on realistic data.
+        """
+        if not facts:
+            return ""
+
+        rel_cfg = self.config.memory.relations
+        max_entities = max(1, rel_cfg.max_entities_per_turn)
+        max_per_entity = max(1, rel_cfg.max_relations_per_entity)
+
+        # Build the user's canonical entity set (cached per request via a
+        # single SQL hit — hit volume is low).
+        with self.db._get_conn() as conn:
+            rows = conn.execute(
+                """SELECT DISTINCT canonical_source AS ent FROM memory_relations
+                       WHERE user_id = ? AND canonical_source IS NOT NULL
+                          AND canonical_source != ''
+                   UNION
+                   SELECT DISTINCT canonical_target FROM memory_relations
+                       WHERE user_id = ? AND canonical_target IS NOT NULL
+                          AND canonical_target != ''""",
+                (user_id, user_id),
+            ).fetchall()
+        canonical_set = {r["ent"] for r in rows}
+        if not canonical_set:
+            return ""
+
+        # Sort entities by length descending so multi-word matches win over
+        # single-word substrings (e.g. "HangiKredi Backend" before "Backend").
+        sorted_canonicals = sorted(canonical_set, key=len, reverse=True)
+
+        # Score entities by how many retrieved facts mention them.
+        scores: dict[str, int] = {}
+        for f in facts:
+            content = (f.get("content") or "").lower()
+            if not content:
+                continue
+            for ent in sorted_canonicals:
+                if ent.lower() in content:
+                    scores[ent] = scores.get(ent, 0) + 1
+
+        if not scores:
+            return ""
+
+        # Top-N entities by mention count, ties broken by descending name length.
+        top_entities = sorted(
+            scores.items(),
+            key=lambda kv: (-kv[1], -len(kv[0])),
+        )[:max_entities]
+
+        # Build the rendered block.
+        lines: list[str] = []
+        for ent, _mentions in top_entities:
+            rels = self.db.get_relations(user_id, canonical=ent, limit=max_per_entity)
+            if not rels:
+                continue
+            ent_lines: list[str] = []
+            seen: set[tuple[str, str, str]] = set()
+            for r in rels:
+                src = r.get("canonical_source") or r.get("source_entity") or ""
+                rel = r.get("relation") or ""
+                tgt = r.get("canonical_target") or r.get("target_entity") or ""
+                key = (src, rel, tgt)
+                if key in seen:
+                    continue
+                seen.add(key)
+                ent_lines.append(f"  - {src} → {rel} → {tgt}")
+                if len(ent_lines) >= max_per_entity:
+                    break
+            if ent_lines:
+                lines.append(f"**{ent}**:")
+                lines.extend(ent_lines)
+
+        if not lines:
+            return ""
+        return "RELATIONSHIPS:\n" + "\n".join(lines)
 
     @staticmethod
     def _truncate(text: str, token_budget: int) -> str:
