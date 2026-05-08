@@ -108,6 +108,10 @@ memory:
     enabled: true
     max_entities_per_turn: 3
     max_relations_per_entity: 8
+  maintenance:                       # Faz 22E Step 2 — automatic decay + cleanup
+    enabled: true
+    daily_cron: "0 4 * * *"          # daily 04:00: decay + stale recompile + orphan cleanup
+    weekly_cron: "30 4 * * 0"        # Sunday 04:30: relations dedup catch-up
   entity_pages:                      # Faz 22D — Karpathy LLM-Wiki entity pages
     enabled: false                   # default-off; turn on after some facts accumulate
     model: "openrouter/openai/gpt-4o-mini"

@@ -229,6 +229,19 @@ class MemoryRelationsConfig(BaseModel):
     max_relations_per_entity: int = 8
 
 
+class MemoryMaintenanceConfig(BaseModel):
+    """Faz 22E Step 2 — automatic decay + stale-page recompile + orphan cleanup.
+
+    Manuel admin endpoint var (POST /admin/memory/{user}/maintenance/run);
+    bu config otomatik schedule'ı kontrol eder. Disabled bırakılırsa
+    decay hiç çalışmaz, fact'ler birikir.
+    """
+
+    enabled: bool = True
+    daily_cron: str = "0 4 * * *"      # her gün 04:00 — decay + stale recompile + orphan cleanup
+    weekly_cron: str = "30 4 * * 0"    # Pazar 04:30 — relations dedup catch-up
+
+
 class MemoryEntityPagesConfig(BaseModel):
     """Faz 22D — LLM-compiled entity pages (Karpathy LLM-Wiki pattern).
 
@@ -259,6 +272,7 @@ class MemoryConfig(BaseModel):
     update: MemoryUpdateConfig = Field(default_factory=MemoryUpdateConfig)
     retrieval: MemoryRetrievalConfig = Field(default_factory=MemoryRetrievalConfig)
     relations: MemoryRelationsConfig = Field(default_factory=MemoryRelationsConfig)
+    maintenance: MemoryMaintenanceConfig = Field(default_factory=MemoryMaintenanceConfig)
     entity_pages: MemoryEntityPagesConfig = Field(default_factory=MemoryEntityPagesConfig)
 
 

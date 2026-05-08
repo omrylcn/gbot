@@ -329,6 +329,39 @@ class CronScheduler:
             )
             return response, True
 
+        if processor == "memory_maintenance":
+            # Faz 22E Step 2 — periodic memory housekeeping. Runs daily
+            # (decay + stale-page recompile + orphan cleanup) or weekly
+            # (relations dedup catch-up). No user-facing output; logs
+            # internally and the result is included in the response_text
+            # only for /admin/tasks visibility.
+            from gbot.memory.entities import EntityResolver
+            from gbot.memory.entity_pages import EntityPageCompiler
+            from gbot.memory.maintenance import MemoryMaintenance
+
+            kind = plan.get("kind", "daily")  # 'daily' | 'weekly' | 'now'
+            owner = getattr(self.config.assistant, "owner", None) if self.config else None
+            resolver = EntityResolver(
+                self.db,
+                owner_username=getattr(owner, "username", None) if owner else None,
+                owner_display_name=getattr(owner, "name", None) if owner else None,
+            )
+            mem_cfg = self.config.memory if self.config else None
+            compiler = (
+                EntityPageCompiler(self.db, mem_cfg, resolver=resolver)
+                if mem_cfg else None
+            )
+            maintenance = MemoryMaintenance(self.db, mem_cfg, compiler=compiler)
+            if kind == "daily":
+                stats = await maintenance.run_daily(user_id)
+            elif kind == "weekly":
+                stats = await maintenance.run_weekly(user_id)
+            else:
+                stats = await maintenance.run_now(user_id)
+            text = f"memory_maintenance({kind}): {stats}"
+            logger.info(text)
+            return text, False  # internal: no user delivery
+
         # processor == "agent" (default)
         from gbot.agent.light import LightAgent
 

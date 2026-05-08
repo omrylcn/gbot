@@ -100,6 +100,72 @@ def _ensure_owner(config, db) -> None:
     logger.info(f"Owner user ensured: {owner.username} (role=owner)")
 
 
+def _ensure_maintenance_jobs(config, db) -> None:
+    """Faz 22E Step 2 — register daily/weekly memory maintenance for every user.
+
+    Two cron jobs per user, idempotent on restart:
+      - ``daily-maintenance-{user_id}``  → run_daily (decay + stale recompile + orphans)
+      - ``weekly-maintenance-{user_id}`` → run_weekly (relations dedup catch-up)
+
+    Cron expressions come from ``config.memory.maintenance.{daily_cron, weekly_cron}``.
+    Disabled flag short-circuits the whole bootstrap.
+    """
+    if not config.memory.enabled:
+        return
+    cfg = config.memory.maintenance
+    if not cfg.enabled:
+        logger.debug("memory.maintenance.enabled=false — skipping cron bootstrap")
+        return
+
+    daily_cron = cfg.daily_cron
+    weekly_cron = cfg.weekly_cron
+
+    registered = 0
+    skipped = 0
+    for user in db.list_users():
+        user_id = user["user_id"] if isinstance(user, dict) else user
+
+        # Daily
+        daily_id = f"daily-maintenance-{user_id}"
+        if not db.get_task(daily_id):
+            db.create_task(
+                daily_id,
+                user_id,
+                message="memory daily maintenance",
+                execution_type="recurring",
+                processor="memory_maintenance",
+                channel="api",
+                cron_expr=daily_cron,
+                plan_json='{"kind": "daily"}',
+            )
+            registered += 1
+        else:
+            skipped += 1
+
+        # Weekly
+        weekly_id = f"weekly-maintenance-{user_id}"
+        if not db.get_task(weekly_id):
+            db.create_task(
+                weekly_id,
+                user_id,
+                message="memory weekly maintenance",
+                execution_type="recurring",
+                processor="memory_maintenance",
+                channel="api",
+                cron_expr=weekly_cron,
+                plan_json='{"kind": "weekly"}',
+            )
+            registered += 1
+        else:
+            skipped += 1
+
+    if registered or skipped:
+        logger.info(
+            f"Memory maintenance jobs: registered={registered}, "
+            f"skipped(existing)={skipped}, daily='{daily_cron}', weekly='{weekly_cron}'"
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: init Config → MemoryStore → GraphRunner → Background Services. Shutdown: cleanup."""
@@ -187,6 +253,13 @@ async def lifespan(app: FastAPI):
         f"ToolRegistry: {len(registry)} tools in "
         f"{len(registry.get_groups_summary())} groups"
     )
+
+    # Faz 22E Step 2 — register memory-maintenance cron jobs before
+    # scheduler.start() so they're picked up in the initial load.
+    try:
+        _ensure_maintenance_jobs(config, db)
+    except Exception as e:
+        logger.warning(f"Memory maintenance bootstrap skipped: {e}")
 
     await cron_scheduler.start()
     heartbeat_task = asyncio.create_task(heartbeat.start())
