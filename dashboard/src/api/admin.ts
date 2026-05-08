@@ -137,6 +137,38 @@ export interface MemoryResponse {
   processing_log: { id: number; trigger: string; facts_extracted: number; facts_added: number; duration_ms: number; processed_at: string }[];
 }
 
+// Faz 22D types
+export interface MemoryRelation {
+  relation_id: string;
+  user_id: string;
+  source_entity: string;
+  relation: string;
+  target_entity: string;
+  canonical_source: string | null;
+  canonical_target: string | null;
+  confidence: number;
+  valid_until: string | null;
+  source_fact: string | null;
+  created_at: string;
+}
+
+export interface MemoryEntityPage {
+  page_id: string;
+  user_id: string;
+  entity_canonical: string;
+  entity_surface_forms: string;
+  content_md: string;
+  source_fact_ids: string;
+  source_relation_ids: string;
+  fact_count: number;
+  relation_count: number;
+  version: number;
+  stale: number;
+  last_compiled_at: string;
+  last_accessed_at: string | null;
+  access_count: number;
+}
+
 export interface ServerConfig {
   model: string;
   temperature: number;
@@ -196,6 +228,41 @@ export const adminApi = {
   getProfiles: () => api.get<AgentProfile[]>("/admin/profiles"),
   getProfileDetail: (name: string) => api.get<ProfileDetail>(`/admin/profiles/${name}`),
   getMemory: (userId: string) => api.get<MemoryResponse>(`/admin/memory/${userId}`),
+  // Faz 22D — relations / entities / pages
+  getMemoryRelations: (userId: string, entity?: string) =>
+    api.get<{ user_id: string; entity: string | null; count: number; relations: MemoryRelation[] }>(
+      `/admin/memory/${userId}/relations${entity ? `?entity=${encodeURIComponent(entity)}` : ""}`,
+    ),
+  getMemoryEntities: (userId: string) =>
+    api.get<{ user_id: string; count: number; entities: { canonical: string; relation_count: number }[] }>(
+      `/admin/memory/${userId}/entities`,
+    ),
+  getMemoryEntityPages: (userId: string, onlyFresh = false) =>
+    api.get<{ user_id: string; count: number; pages: MemoryEntityPage[] }>(
+      `/admin/memory/${userId}/entity-pages${onlyFresh ? "?only_fresh=true" : ""}`,
+    ),
+  recompileEntityPage: (userId: string, entity: string) =>
+    api.post<{ ok: boolean; reason?: string; user_id: string; entity: string; page: MemoryEntityPage | null }>(
+      `/admin/memory/${userId}/pages/recompile?entity=${encodeURIComponent(entity)}`,
+      {},
+    ),
+  forgetEntity: (userId: string, entity: string) =>
+    api.delete<{ user_id: string; entity: string; archived: { relations: number; facts: number; pages: number } }>(
+      `/admin/memory/${userId}/entity/${encodeURIComponent(entity)}`,
+    ),
+  runMemoryMaintenance: (userId: string) =>
+    api.post<{ daily: Record<string, unknown>; weekly: Record<string, unknown> }>(
+      `/admin/memory/${userId}/maintenance/run`,
+      {},
+    ),
+  retrievalDebug: (userId: string, query: string, topK = 10) =>
+    api.get<{
+      user_id: string;
+      query: string;
+      max_distance_gate: number | null;
+      count: number;
+      candidates: (MemoryFact & { distance: number; above_gate: boolean })[];
+    }>(`/admin/memory/${userId}/retrieval-debug?query=${encodeURIComponent(query)}&top_k=${topK}`),
   getSessions: (userId: string, limit = 50) =>
     api.get<Session[]>(`/sessions/${userId}?limit=${limit}`),
   getSessionHistory: (sessionId: string) =>

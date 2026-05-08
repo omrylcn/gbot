@@ -6,6 +6,53 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.20.1] - 2026-05-08 — Faz 22D Part 3: Admin API + Dashboard
+
+Operational layer for everything that landed in v1.19/v1.20: admin
+endpoints to inspect/manage relations, entity pages, and maintenance,
+plus a Memory dashboard with proper tabs for each.
+
+### Added — Admin endpoints
+
+All owner-only:
+
+- `GET /admin/memory/{user_id}/relations[?entity=]` — valid relations,
+  optionally filtered by canonical entity.
+- `GET /admin/memory/{user_id}/entities` — distinct canonicals with
+  relation counts. Useful for picking targets.
+- `GET /admin/memory/{user_id}/entity-pages[?only_fresh]` — compiled
+  pages with provenance.
+- `POST /admin/memory/{user_id}/pages/recompile?entity=` — manual
+  recompile, bypasses debounce. Returns `ok: false` when
+  `entity_pages.enabled` is off.
+- `DELETE /admin/memory/{user_id}/entity/{entity}` — cascade-archive
+  forget.
+- `POST /admin/memory/{user_id}/maintenance/run` — trigger daily +
+  weekly maintenance for a user immediately.
+- `GET /admin/memory/{user_id}/retrieval-debug?query=&top_k=` — embed
+  a query and return raw distance scores for every candidate fact, with
+  an `above_gate` flag. Tuning aid for the distance threshold.
+
+### Added — Dashboard
+
+- **Memory page rebuilt as tabs**: `Facts | Relations | Entity Pages | Retrieval Debug`.
+  - Facts tab is the previous flat view (unchanged behaviour).
+  - Relations tab: canonical entity chips for filtering, raw vs canonical
+    annotations on each row.
+  - Entity Pages tab: rendered markdown cards with version/stale badge,
+    `Recompile` and `Forget` buttons (forget asks for confirmation —
+    cascades into facts/relations, audit-safe).
+  - Retrieval Debug tab: query box → distance histogram with per-row
+    above-gate marker.
+- TS types: `MemoryRelation`, `MemoryEntityPage`. New API client methods
+  in `dashboard/src/api/admin.ts`.
+
+### Tests
+
+374 passing (was 368; +6 admin endpoint smoke tests).
+
+---
+
 ## [1.20.0] - 2026-05-08 — Faz 22D Part 2: LLM Entity Pages + Maintenance + Forgetting
 
 Memory layer evolves from "data pile + retrieval" to "organized knowledge".

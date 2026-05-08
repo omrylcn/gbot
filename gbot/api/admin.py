@@ -301,6 +301,188 @@ async def admin_memory(
     }
 
 
+@router.get("/memory/{user_id}/relations")
+async def admin_memory_relations(
+    user_id: str,
+    entity: str | None = Query(default=None, description="Filter by canonical entity"),
+    limit: int = Query(default=200, ge=1, le=1000),
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    db: MemoryStore = Depends(get_db),
+):
+    """Faz 22D — list valid memory_relations for a user, optionally filtered
+    by canonical entity name.
+    """
+    _require_owner(current_user, config)
+    rels = db.get_relations(user_id, canonical=entity, limit=limit)
+    return {"user_id": user_id, "entity": entity, "count": len(rels), "relations": rels}
+
+
+@router.get("/memory/{user_id}/entities")
+async def admin_memory_entities(
+    user_id: str,
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    db: MemoryStore = Depends(get_db),
+):
+    """Faz 22D — distinct canonical entities for a user with relation
+    counts. Useful for picking which entity to view a page for.
+    """
+    _require_owner(current_user, config)
+    with db._get_conn() as conn:
+        rows = conn.execute(
+            """SELECT ent, SUM(c) AS total FROM (
+                   SELECT canonical_source AS ent, COUNT(*) AS c
+                       FROM memory_relations
+                       WHERE user_id = ? AND canonical_source IS NOT NULL
+                         AND canonical_source != '' AND valid_until IS NULL
+                       GROUP BY canonical_source
+                   UNION ALL
+                   SELECT canonical_target AS ent, COUNT(*) AS c
+                       FROM memory_relations
+                       WHERE user_id = ? AND canonical_target IS NOT NULL
+                         AND canonical_target != '' AND valid_until IS NULL
+                       GROUP BY canonical_target
+               )
+               GROUP BY ent ORDER BY total DESC""",
+            (user_id, user_id),
+        ).fetchall()
+    return {
+        "user_id": user_id,
+        "count": len(rows),
+        "entities": [{"canonical": r["ent"], "relation_count": r["total"]} for r in rows],
+    }
+
+
+@router.get("/memory/{user_id}/entity-pages")
+async def admin_memory_entity_pages(
+    user_id: str,
+    only_fresh: bool = Query(default=False),
+    limit: int = Query(default=100, ge=1, le=500),
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    db: MemoryStore = Depends(get_db),
+):
+    """Faz 22D — list compiled entity pages for a user."""
+    _require_owner(current_user, config)
+    pages = db.list_entity_pages(user_id, only_fresh=only_fresh, limit=limit)
+    return {"user_id": user_id, "count": len(pages), "pages": pages}
+
+
+@router.post("/memory/{user_id}/pages/recompile")
+async def admin_recompile_entity_page(
+    user_id: str,
+    entity: str = Query(..., description="Canonical entity name to recompile"),
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    db: MemoryStore = Depends(get_db),
+):
+    """Faz 22D — manually trigger recompile of an entity page. Bypasses
+    the debounce window. Useful for testing the compiler or after a bulk
+    edit.
+    """
+    _require_owner(current_user, config)
+    from gbot.memory.entities import EntityResolver
+    from gbot.memory.entity_pages import EntityPageCompiler
+
+    owner = getattr(config.assistant, "owner", None)
+    resolver = EntityResolver(
+        db,
+        owner_username=getattr(owner, "username", None) if owner else None,
+        owner_display_name=getattr(owner, "name", None) if owner else None,
+    )
+    compiler = EntityPageCompiler(db, config.memory, resolver=resolver)
+    if not compiler.enabled:
+        return {
+            "ok": False,
+            "reason": "memory.entity_pages.enabled is false in config",
+        }
+    page = await compiler.compile_now(user_id, entity)
+    return {
+        "ok": page is not None,
+        "user_id": user_id,
+        "entity": entity,
+        "page": page,
+    }
+
+
+@router.delete("/memory/{user_id}/entity/{entity}")
+async def admin_forget_entity(
+    user_id: str,
+    entity: str,
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    db: MemoryStore = Depends(get_db),
+):
+    """Faz 22D Step 13 — cascade-archive an entity (all facts mentioning
+    it, all relations involving it, and its compiled page).
+
+    Audit-safe: facts/relations are invalidated (``valid_until`` set),
+    not deleted. The entity page is hard-deleted (it's a derived view).
+    """
+    _require_owner(current_user, config)
+    result = db.forget_entity(user_id, entity)
+    return {"user_id": user_id, "entity": entity, "archived": result}
+
+
+@router.post("/memory/{user_id}/maintenance/run")
+async def admin_run_maintenance(
+    user_id: str,
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    db: MemoryStore = Depends(get_db),
+):
+    """Faz 22D Step 12 — manually trigger memory maintenance for a user
+    (decay + stale-page recompile + orphan cleanup + relations dedup).
+    """
+    _require_owner(current_user, config)
+    from gbot.memory.entities import EntityResolver
+    from gbot.memory.entity_pages import EntityPageCompiler
+    from gbot.memory.maintenance import MemoryMaintenance
+
+    owner = getattr(config.assistant, "owner", None)
+    resolver = EntityResolver(
+        db,
+        owner_username=getattr(owner, "username", None) if owner else None,
+        owner_display_name=getattr(owner, "name", None) if owner else None,
+    )
+    compiler = EntityPageCompiler(db, config.memory, resolver=resolver)
+    maintenance = MemoryMaintenance(db, config.memory, compiler=compiler)
+    return await maintenance.run_now(user_id)
+
+
+@router.get("/memory/{user_id}/retrieval-debug")
+async def admin_retrieval_debug(
+    user_id: str,
+    query: str = Query(..., description="Query to embed and search against"),
+    top_k: int = Query(default=10, ge=1, le=50),
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    db: MemoryStore = Depends(get_db),
+):
+    """Faz 22D — debug helper: embed a query and return raw distance
+    scores for every candidate fact. Useful for tuning the distance gate.
+    """
+    _require_owner(current_user, config)
+    from gbot.memory.embedder import MemoryEmbedder
+
+    embedder = MemoryEmbedder(config.memory.embedding)
+    query_emb = embedder.embed(query)
+    candidates = db.search_similar_facts(
+        user_id, query_emb, top_k=top_k, max_distance=None
+    )
+    gate = config.memory.retrieval.max_distance
+    for f in candidates:
+        f["above_gate"] = gate is not None and (f.get("distance") or 0) > gate
+    return {
+        "user_id": user_id,
+        "query": query,
+        "max_distance_gate": gate,
+        "count": len(candidates),
+        "candidates": candidates,
+    }
+
+
 # ── Context Inspection ─────────────────────────────────
 
 
