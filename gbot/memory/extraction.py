@@ -40,6 +40,7 @@ class MemoryService:
         config: MemoryConfig | None = None,
         embedder: MemoryEmbedder | None = None,
         resolver=None,
+        entity_compiler=None,
     ):
         """
         Parameters
@@ -48,12 +49,17 @@ class MemoryService:
             Optional resolver used to canonicalize relation entities at
             insert time (Faz 22D). Falls back to raw surface forms when
             ``None`` — relations still save, just without normalization.
+        entity_compiler : EntityPageCompiler | None
+            Optional debounced compiler that schedules entity-page
+            recompilation after touched extractions. ``None`` skips the
+            entity-page lifecycle entirely.
         """
         self.db = db
         self.model = model or "openai/gpt-4o-mini"
         self.config = config
         self.embedder = embedder
         self.resolver = resolver
+        self.entity_compiler = entity_compiler
         self._system_prompt = get_agent_md("memory") or ""
         update_model = config.update.model if config else ""
         self._update_model = update_model or self.model
@@ -253,11 +259,37 @@ class MemoryService:
         if added or updated:
             logger.info(f"Memory extraction for {user_id}: {stats}")
 
-        # TODO: Faz D — event-driven consolidation (merge + decay)
-        # if added or updated or deleted:
-        #     consolidator.run(user_id)
+        # Faz 22D — entity page recompilation (debounced)
+        if (added or updated or deleted) and self.entity_compiler:
+            touched = self._collect_touched_entities(user_id, raw_relations)
+            for canonical in touched:
+                try:
+                    await self.entity_compiler.enqueue(user_id, canonical)
+                except Exception as e:
+                    logger.debug(f"entity_compiler enqueue failed: {e}")
 
         return stats
+
+    def _collect_touched_entities(
+        self, user_id: str, raw_relations: list[dict[str, Any]]
+    ) -> set[str]:
+        """Canonical entity names mentioned by the latest extraction.
+
+        Resolves surface forms through the resolver so the compiler keys
+        on the same canonical the page table uses. Excludes empty strings.
+        """
+        touched: set[str] = set()
+        for rel in raw_relations:
+            for surface in (rel.get("source"), rel.get("target")):
+                if not surface:
+                    continue
+                if self.resolver:
+                    canonical = self.resolver.canonicalize(user_id, surface)
+                else:
+                    canonical = surface
+                if canonical:
+                    touched.add(canonical)
+        return touched
 
     async def _audn_decide(
         self, new_fact: dict, similar_facts: list[dict]

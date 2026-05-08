@@ -125,6 +125,29 @@ def make_memory_tools(db: MemoryStore, embedder=None) -> list:
                 lines.append(f"  - {item}")
         return f"Memory facts ({len(facts)} total):" + "\n".join(lines)
 
+    @tool
+    def forget_entity(user_id: str, entity_name: str) -> str:
+        """Forget everything about an entity (person, place, organization).
+
+        Cascade-archives every fact mentioning the entity, every relation
+        involving it, and any compiled entity page. Audit-safe — facts
+        are invalidated (valid_until set), not deleted; admin can review
+        the supersede chain in /admin/memory.
+
+        Use when the user says things like "Murat'ı tamamen unut",
+        "İstanbul ile ilgili her şeyi sil". Confirm with the user first
+        — this is a wide-scope operation.
+        """
+        if not entity_name or not entity_name.strip():
+            return "Need an entity name to forget."
+        result = db.forget_entity(user_id, entity_name.strip())
+        return (
+            f"Forgot '{entity_name}': "
+            f"{result['relations']} relation(s), "
+            f"{result['facts']} fact(s), "
+            f"{result['pages']} entity page(s) archived."
+        )
+
     tools = [
         save_user_note,
         get_user_context,
@@ -137,5 +160,6 @@ def make_memory_tools(db: MemoryStore, embedder=None) -> list:
         search_memory,
         forget_fact,
         what_do_you_know,
+        forget_entity,
     ]
     return tools

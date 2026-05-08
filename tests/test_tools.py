@@ -28,7 +28,7 @@ def cfg(tmp_path):
 
 def test_memory_tools_created(store):
     tools = make_memory_tools(store)
-    assert len(tools) == 11  # Faz 22C: +search_memory, +forget_fact, +what_do_you_know
+    assert len(tools) == 12  # Faz 22D added forget_entity
     names = {t.name for t in tools}
     assert "save_user_note" in names
     assert "get_user_context" in names
@@ -40,6 +40,8 @@ def test_memory_tools_created(store):
     assert "search_memory" in names
     assert "forget_fact" in names
     assert "what_do_you_know" in names
+    # Faz 22D — entity-level forget
+    assert "forget_entity" in names
 
 
 def test_save_and_get_note(store):

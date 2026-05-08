@@ -108,3 +108,12 @@ memory:
     enabled: true
     max_entities_per_turn: 3
     max_relations_per_entity: 8
+  entity_pages:                      # Faz 22D — Karpathy LLM-Wiki entity pages
+    enabled: false                   # default-off; turn on after some facts accumulate
+    model: "openrouter/openai/gpt-4o-mini"
+    debounce_seconds: 60             # coalesce rapid mentions before compile
+    min_facts_for_page: 3
+    min_relations_for_page: 2
+    max_input_tokens: 1000
+    max_output_tokens: 200
+    max_pages_in_context: 3

@@ -6,6 +6,101 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.20.0] - 2026-05-08 — Faz 22D Part 2: LLM Entity Pages + Maintenance + Forgetting
+
+Memory layer evolves from "data pile + retrieval" to "organized knowledge".
+The earlier v1.19.0 made existing relations come alive; this release adds
+the **dynamic, LLM-compiled entity pages** (Karpathy LLM-Wiki pattern),
+periodic housekeeping, and an entity-level forget operation.
+
+### Added
+
+- **`workspace/memory_schema.md`** — extraction contract pulled out of the
+  agent prompt into a public, editable file. Categories, fact types, AUDN
+  rules, and the relation vocabulary are all documented here. The memory
+  agent's `AGENT.md` now references it instead of duplicating the rules.
+- **`memory_entity_pages` CRUD** — `upsert_entity_page`, `get_entity_page`
+  (auto-tracks access), `list_entity_pages`, `mark_entity_pages_stale`,
+  `mark_pages_stale_by_fact`, `delete_entity_page`. UNIQUE on
+  `(user_id, entity_canonical)`; provenance via JSON `source_fact_ids`
+  and `source_relation_ids`.
+- **`gbot/memory/entity_pages.py`** — `EntityPageCompiler`. Async,
+  debounced (60s) LLM compiler. Triggered from
+  `MemoryService.extract_and_save` whenever facts/relations touch an
+  entity. Per-entity coalescing prevents thrash on rapid mentions.
+  Eligibility threshold (≥ N facts/relations) skips weak entities.
+- **Entity-page injection in ContextBuilder** —
+  `_render_entity_pages_block()` injects compiled pages as
+  `## {Entity}\n{markdown}` after the relations block. Stale pages are
+  surfaced with a `*(stale — recompile pending)*` marker so the agent
+  knows the freshness state. Token sub-budget configurable.
+- **`invalidate_fact` lifecycle hook** — when a fact is invalidated,
+  every page citing it gets `stale=1` automatically. Compiler picks them
+  up on the next debounce or in the daily catch-up.
+- **`gbot/memory/maintenance.py`** — `MemoryMaintenance` replaces the
+  dead `consolidation.py`. Daily pass: type-aware decay + stale-page
+  recompile catch-up + orphan-page cleanup. Weekly pass: relations
+  dedup catch-up. Runs via the unified `background_tasks` scheduler;
+  `run_now()` exposed for admin trigger.
+- **Type-aware decay** — `apply_decay` now uses per-`fact_type` rates:
+  - `episodic`: 14-day fade, 60-day deeper fade
+  - `procedural`: 60 / 180 days
+  - `semantic`: 90 / 365 days
+  - `preference`: 120 / 365 days
+
+  Yesterday's events fade fast; "is vegetarian" stays for a year. Returns
+  per-type counts in the stats dict.
+- **`forget_entity`** — store-level cascade: invalidates every fact
+  mentioning the entity (canonical + aliases), invalidates every
+  relation involving it, hard-deletes the entity page. Audit-safe (facts
+  archived via `valid_until`, supersede chain intact).
+- **`forget_entity` agent tool** — natural-language entry point for
+  "Murat'ı tamamen unut" / "İstanbul ile ilgili her şeyi sil" kind of
+  requests. Memory tool count: **11 → 12**.
+- **20 new tests** — `test_entity_pages.py` (12 — store CRUD, stale
+  hook, compiler eligibility, debounce, provenance, forget cascade) +
+  `test_tools.py` updated (12 memory tools).
+
+### Changed
+
+- **`memory/AGENT.md`** rewritten — references `memory_schema.md` instead
+  of duplicating rules. Adds Task 4: "Entity page compilation" with the
+  exact output format.
+- **Deleted `gbot/memory/consolidation.py`** — dead code (never wired,
+  never tested). The merge-overlapping-facts path duplicated AUDN's job;
+  decay moved to `maintenance.py` where it actually runs.
+- **`MemoryService.__init__`** accepts `entity_compiler=`. Wired in
+  `GraphRunner._create_memory_service`. Disabled compilers self-noop.
+
+### Configuration additions
+
+```yaml
+memory:
+  entity_pages:
+    enabled: false                # default-off — flip when ready
+    model: "openrouter/openai/gpt-4o-mini"
+    debounce_seconds: 60
+    min_facts_for_page: 3
+    min_relations_for_page: 2
+    max_input_tokens: 1000
+    max_output_tokens: 200
+    max_pages_in_context: 3
+```
+
+### Rollback
+
+- `memory.entity_pages.enabled: false` — disables compile + injection.
+- Decay invocation is opt-in (only `MemoryMaintenance` calls it). Skip
+  the daily cron to revert to no-decay behavior.
+- The deleted `consolidation.py` was dead code; removal is a no-op for
+  any deployment.
+
+### Tests
+
+368 unit tests passing (was 354; +14 net).
+
+---
+
 ## [1.19.0] - 2026-05-07 — Faz 22D Part 1: Backlinks Revival + Distance Gate
 
 Memory layer evolves toward an Obsidian-style backlinks graph and a

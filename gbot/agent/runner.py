@@ -211,8 +211,10 @@ class GraphRunner:
                 asyncio.create_task(self._extract_facts_bg(user_id, llm_messages, session_id))
 
     def _create_memory_service(self):
-        """Create MemoryService with config, embedder, and entity resolver."""
+        """Create MemoryService with config, embedder, resolver, and (if
+        enabled) the entity-page compiler."""
         from gbot.memory.entities import EntityResolver
+        from gbot.memory.entity_pages import EntityPageCompiler
         from gbot.memory.extraction import MemoryService
 
         mem_model = self.config.memory.model or self.config.assistant.model
@@ -222,10 +224,16 @@ class GraphRunner:
             owner_username=getattr(owner, "username", None) if owner else None,
             owner_display_name=getattr(owner, "name", None) if owner else None,
         )
+        # Compiler is created unconditionally so toggling the flag at
+        # runtime works without restarting; it self-disables based on
+        # config.memory.entity_pages.enabled.
+        compiler = EntityPageCompiler(
+            self.db, self.config.memory, resolver=resolver,
+        )
         return MemoryService(
             self.db, model=mem_model,
             config=self.config.memory, embedder=self._embedder,
-            resolver=resolver,
+            resolver=resolver, entity_compiler=compiler,
         )
 
     async def _extract_facts_bg(

@@ -1514,7 +1514,8 @@ class MemoryStore:
     ) -> None:
         with self._get_conn() as conn:
             row = conn.execute(
-                "SELECT rowid FROM memory_facts WHERE fact_id = ?", (fact_id,)
+                "SELECT rowid, user_id FROM memory_facts WHERE fact_id = ?",
+                (fact_id,),
             ).fetchone()
             conn.execute(
                 """UPDATE memory_facts
@@ -1527,6 +1528,15 @@ class MemoryStore:
             if row:
                 conn.execute(
                     "DELETE FROM vec_memory_facts WHERE rowid = ?", (row[0],)
+                )
+                # Faz 22D Step 7 — mark dependent entity pages stale
+                # so the compiler refreshes them on the next cycle.
+                pattern = f'%"{fact_id}"%'
+                conn.execute(
+                    """UPDATE memory_entity_pages
+                           SET stale = 1
+                           WHERE user_id = ? AND source_fact_ids LIKE ?""",
+                    (row["user_id"], pattern),
                 )
             conn.commit()
 
@@ -1554,48 +1564,98 @@ class MemoryStore:
             )
             conn.commit()
 
-    def apply_decay(self, user_id: str) -> dict[str, int]:
+    # Default per-type half-lives (days). Episodic facts age fastest;
+    # preferences and semantic identity facts age slowest. Override via
+    # ``apply_decay(rates=...)``.
+    _DEFAULT_DECAY_RATES: dict[str, dict[str, float]] = {
+        # type        fade_days  fade_factor  archive_days  archive_factor
+        "episodic":   {"fade_days": 14,  "fade_factor": 0.7,  "archive_days": 60,  "archive_factor": 0.4},
+        "procedural": {"fade_days": 60,  "fade_factor": 0.85, "archive_days": 180, "archive_factor": 0.6},
+        "semantic":   {"fade_days": 90,  "fade_factor": 0.85, "archive_days": 365, "archive_factor": 0.6},
+        "preference": {"fade_days": 120, "fade_factor": 0.9,  "archive_days": 365, "archive_factor": 0.7},
+    }
+
+    def apply_decay(
+        self,
+        user_id: str,
+        rates: dict[str, dict[str, float]] | None = None,
+        archive_threshold: float = 0.1,
+    ) -> dict[str, int]:
         """Decrease importance of old, rarely-accessed facts.
 
-        Returns counts of faded and archived facts.
+        Type-aware: each ``fact_type`` gets its own fade/archive timeline
+        (Faz 22D Step 11). Episodic facts age fast (good — yesterday's
+        events lose value quickly); preferences age slowly (a vegetarian
+        usually stays vegetarian).
+
+        Parameters
+        ----------
+        rates : dict | None
+            Override the default per-type rates. Each entry needs:
+            ``fade_days``, ``fade_factor``, ``archive_days``, ``archive_factor``.
+            Missing types fall back to defaults.
+        archive_threshold : float
+            Facts whose importance drops below this get ``valid_until``
+            set, removing them from the active set.
+
+        Returns
+        -------
+        dict with keys ``faded``, ``archived``, ``by_type`` (per-type counts).
         """
+        rates = rates or self._DEFAULT_DECAY_RATES
+        per_type: dict[str, int] = {}
+        total_faded = 0
+
         with self._get_conn() as conn:
-            # 30+ days, 0 access → importance *= 0.8
-            conn.execute(
-                """UPDATE memory_facts
-                   SET importance = importance * 0.8,
-                       updated_at = CURRENT_TIMESTAMP
-                   WHERE user_id = ? AND valid_until IS NULL
-                   AND access_count = 0
-                   AND julianday('now') - julianday(created_at) > 30""",
-                (user_id,),
-            )
-            faded = conn.execute("SELECT changes()").fetchone()[0]
+            for fact_type, params in rates.items():
+                # Stage 1 fade
+                conn.execute(
+                    """UPDATE memory_facts
+                       SET importance = importance * ?,
+                           updated_at = CURRENT_TIMESTAMP
+                       WHERE user_id = ? AND valid_until IS NULL
+                         AND fact_type = ?
+                         AND access_count = 0
+                         AND julianday('now') - julianday(created_at) > ?""",
+                    (
+                        params["fade_factor"], user_id, fact_type,
+                        params["fade_days"],
+                    ),
+                )
+                f1 = conn.execute("SELECT changes()").fetchone()[0]
 
-            # 90+ days, 0 access → importance *= 0.5
-            conn.execute(
-                """UPDATE memory_facts
-                   SET importance = importance * 0.5,
-                       updated_at = CURRENT_TIMESTAMP
-                   WHERE user_id = ? AND valid_until IS NULL
-                   AND access_count = 0
-                   AND julianday('now') - julianday(created_at) > 90""",
-                (user_id,),
-            )
+                # Stage 2 deeper fade (older + still untouched)
+                conn.execute(
+                    """UPDATE memory_facts
+                       SET importance = importance * ?,
+                           updated_at = CURRENT_TIMESTAMP
+                       WHERE user_id = ? AND valid_until IS NULL
+                         AND fact_type = ?
+                         AND access_count = 0
+                         AND julianday('now') - julianday(created_at) > ?""",
+                    (
+                        params["archive_factor"], user_id, fact_type,
+                        params["archive_days"],
+                    ),
+                )
+                f2 = conn.execute("SELECT changes()").fetchone()[0]
 
-            # importance < 0.1 → archive
+                per_type[fact_type] = f1 + f2
+                total_faded += f1 + f2
+
+            # Archive — applies to all types uniformly via importance threshold.
             conn.execute(
                 """UPDATE memory_facts
                    SET valid_until = CURRENT_TIMESTAMP,
                        updated_at = CURRENT_TIMESTAMP
                    WHERE user_id = ? AND valid_until IS NULL
-                   AND importance < 0.1""",
-                (user_id,),
+                     AND importance < ?""",
+                (user_id, archive_threshold),
             )
             archived = conn.execute("SELECT changes()").fetchone()[0]
             conn.commit()
 
-        return {"faded": faded, "archived": archived}
+        return {"faded": total_faded, "archived": archived, "by_type": per_type}
 
     def search_similar_facts(
         self,
@@ -1804,6 +1864,235 @@ class MemoryStore:
                 (user_id,),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    # ════════════════════════════════════════════════════════════
+    # ENTITY PAGES (Faz 22D — LLM-compiled markdown summaries)
+    # ════════════════════════════════════════════════════════════
+
+    def upsert_entity_page(
+        self,
+        user_id: str,
+        entity_canonical: str,
+        content_md: str,
+        source_fact_ids: list[str] | None = None,
+        source_relation_ids: list[str] | None = None,
+        surface_forms: list[str] | None = None,
+    ) -> str:
+        """Insert or update an entity page. Bumps version on update,
+        clears stale flag, refreshes last_compiled_at.
+
+        Returns the page_id.
+        """
+        import uuid
+
+        existing = self.get_entity_page(user_id, entity_canonical)
+        with self._get_conn() as conn:
+            if existing:
+                conn.execute(
+                    """UPDATE memory_entity_pages
+                           SET content_md = ?,
+                               source_fact_ids = ?,
+                               source_relation_ids = ?,
+                               entity_surface_forms = ?,
+                               fact_count = ?,
+                               relation_count = ?,
+                               version = version + 1,
+                               stale = 0,
+                               last_compiled_at = CURRENT_TIMESTAMP
+                           WHERE page_id = ?""",
+                    (
+                        content_md,
+                        json.dumps(source_fact_ids or []),
+                        json.dumps(source_relation_ids or []),
+                        json.dumps(surface_forms or []),
+                        len(source_fact_ids or []),
+                        len(source_relation_ids or []),
+                        existing["page_id"],
+                    ),
+                )
+                conn.commit()
+                return existing["page_id"]
+            page_id = str(uuid.uuid4())[:12]
+            conn.execute(
+                """INSERT INTO memory_entity_pages
+                       (page_id, user_id, entity_canonical, entity_surface_forms,
+                        content_md, source_fact_ids, source_relation_ids,
+                        fact_count, relation_count, version, stale)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)""",
+                (
+                    page_id, user_id, entity_canonical,
+                    json.dumps(surface_forms or []),
+                    content_md,
+                    json.dumps(source_fact_ids or []),
+                    json.dumps(source_relation_ids or []),
+                    len(source_fact_ids or []),
+                    len(source_relation_ids or []),
+                ),
+            )
+            conn.commit()
+            return page_id
+
+    def get_entity_page(
+        self, user_id: str, entity_canonical: str
+    ) -> dict[str, Any] | None:
+        """Fetch a compiled page by canonical entity. Bumps access stats."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                """SELECT * FROM memory_entity_pages
+                       WHERE user_id = ? AND entity_canonical = ?""",
+                (user_id, entity_canonical),
+            ).fetchone()
+            if row:
+                conn.execute(
+                    """UPDATE memory_entity_pages
+                           SET access_count = access_count + 1,
+                               last_accessed_at = CURRENT_TIMESTAMP
+                           WHERE page_id = ?""",
+                    (row["page_id"],),
+                )
+                conn.commit()
+        return dict(row) if row else None
+
+    def list_entity_pages(
+        self,
+        user_id: str,
+        only_fresh: bool = False,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """List entity pages for a user, ordered by access_count desc."""
+        with self._get_conn() as conn:
+            sql = """SELECT * FROM memory_entity_pages
+                     WHERE user_id = ?"""
+            params: list[Any] = [user_id]
+            if only_fresh:
+                sql += " AND stale = 0"
+            sql += " ORDER BY access_count DESC, last_compiled_at DESC LIMIT ?"
+            params.append(limit)
+            rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_entity_pages_stale(
+        self, user_id: str, entity_canonical: str | None = None
+    ) -> int:
+        """Mark page(s) stale so the compiler picks them up next cycle.
+
+        If ``entity_canonical`` is given, only that page; otherwise all.
+        Returns the number of rows updated.
+        """
+        with self._get_conn() as conn:
+            if entity_canonical:
+                cursor = conn.execute(
+                    """UPDATE memory_entity_pages SET stale = 1
+                           WHERE user_id = ? AND entity_canonical = ?""",
+                    (user_id, entity_canonical),
+                )
+            else:
+                cursor = conn.execute(
+                    "UPDATE memory_entity_pages SET stale = 1 WHERE user_id = ?",
+                    (user_id,),
+                )
+            conn.commit()
+            return cursor.rowcount
+
+    def mark_pages_stale_by_fact(self, user_id: str, fact_id: str) -> int:
+        """When a fact is invalidated, mark all pages whose
+        ``source_fact_ids`` contain that id as stale. Used by the
+        invalidate hook (Faz 22D Step 7).
+        """
+        with self._get_conn() as conn:
+            # source_fact_ids is a JSON array — use LIKE on the serialized form.
+            pattern = f'%"{fact_id}"%'
+            cursor = conn.execute(
+                """UPDATE memory_entity_pages
+                       SET stale = 1
+                       WHERE user_id = ? AND source_fact_ids LIKE ?""",
+                (user_id, pattern),
+            )
+            conn.commit()
+            return cursor.rowcount
+
+    def forget_entity(
+        self, user_id: str, canonical: str
+    ) -> dict[str, int]:
+        """Cascade-archive everything tied to an entity (Faz 22D Step 13).
+
+        - Invalidate every relation where the entity appears as source or
+          target (canonical or raw).
+        - Invalidate every fact whose content mentions any known surface
+          form for the canonical (cheap substring scan).
+        - Hard-delete the entity page.
+
+        Returns counts of {relations, facts, pages} archived. Audit-safe:
+        nothing is hard-deleted from facts/relations — they live with
+        ``valid_until`` set, so the supersede chain remains queryable.
+        """
+        if not canonical:
+            return {"relations": 0, "facts": 0, "pages": 0}
+
+        rels_n = 0
+        facts_n = 0
+
+        # 1. Invalidate matching relations (canonical OR raw match).
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                """SELECT relation_id FROM memory_relations
+                       WHERE user_id = ? AND valid_until IS NULL
+                         AND (canonical_source = ? OR canonical_target = ?
+                              OR source_entity = ? OR target_entity = ?)""",
+                (user_id, canonical, canonical, canonical, canonical),
+            ).fetchall()
+            for r in rows:
+                conn.execute(
+                    """UPDATE memory_relations
+                           SET valid_until = CURRENT_TIMESTAMP
+                           WHERE relation_id = ?""",
+                    (r["relation_id"],),
+                )
+                rels_n += 1
+            conn.commit()
+
+        # 2. Collect surface forms (canonical + aliases) and invalidate
+        #    matching facts. Two-phase so invalidate_fact's hooks fire.
+        forms = {canonical}
+        forms.update(self.get_aliases_for_canonical(user_id, canonical))
+        forms_lower = {f.lower() for f in forms if f}
+
+        with self._get_conn() as conn:
+            facts = conn.execute(
+                """SELECT fact_id, content FROM memory_facts
+                       WHERE user_id = ? AND valid_until IS NULL""",
+                (user_id,),
+            ).fetchall()
+        target_ids: list[str] = []
+        for f in facts:
+            content = (f["content"] or "").lower()
+            if any(form in content for form in forms_lower):
+                target_ids.append(f["fact_id"])
+
+        for fid in target_ids:
+            self.invalidate_fact(fid)
+            facts_n += 1
+
+        # 3. Hard-delete the entity page (provenance lives in the
+        #    invalidated facts; the page is just a derived view).
+        page_deleted = 1 if self.delete_entity_page(user_id, canonical) else 0
+
+        logger.info(
+            f"forget_entity({user_id}, {canonical}): "
+            f"{rels_n} relations, {facts_n} facts, {page_deleted} page(s) archived"
+        )
+        return {"relations": rels_n, "facts": facts_n, "pages": page_deleted}
+
+    def delete_entity_page(self, user_id: str, entity_canonical: str) -> bool:
+        """Hard-delete an entity page. Used for entity-level forget."""
+        with self._get_conn() as conn:
+            cursor = conn.execute(
+                """DELETE FROM memory_entity_pages
+                       WHERE user_id = ? AND entity_canonical = ?""",
+                (user_id, entity_canonical),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
 
     # ════════════════════════════════════════════════════════════
     # MEMORY PROCESSING LOG

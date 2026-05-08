@@ -192,6 +192,25 @@ class MemoryRelationsConfig(BaseModel):
     max_relations_per_entity: int = 8
 
 
+class MemoryEntityPagesConfig(BaseModel):
+    """Faz 22D — LLM-compiled entity pages (Karpathy LLM-Wiki pattern).
+
+    Default-off — entity pages add an extra LLM call per touched entity
+    (debounced) and a separate context layer. Enable when the relations
+    graph is rich enough to justify it (typically after a few weeks of
+    accumulated facts).
+    """
+
+    enabled: bool = False
+    model: str = "openrouter/openai/gpt-4o-mini"
+    debounce_seconds: int = 60
+    min_facts_for_page: int = 3
+    min_relations_for_page: int = 2
+    max_input_tokens: int = 1000
+    max_output_tokens: int = 200
+    max_pages_in_context: int = 3
+
+
 class MemoryConfig(BaseModel):
     """Memory extraction configuration."""
 
@@ -203,6 +222,7 @@ class MemoryConfig(BaseModel):
     update: MemoryUpdateConfig = Field(default_factory=MemoryUpdateConfig)
     retrieval: MemoryRetrievalConfig = Field(default_factory=MemoryRetrievalConfig)
     relations: MemoryRelationsConfig = Field(default_factory=MemoryRelationsConfig)
+    entity_pages: MemoryEntityPagesConfig = Field(default_factory=MemoryEntityPagesConfig)
 
 
 class HeartbeatConfig(BaseModel):

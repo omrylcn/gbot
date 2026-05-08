@@ -184,13 +184,35 @@ class ContextBuilder:
             # Faz 22D — Backlinks: detect canonical entities mentioned in
             # retrieved facts, inject their relations as a RELATIONSHIPS block.
             relationships = ""
+            entity_pages_block = ""
+            entities_in_play: list[str] = []
             try:
                 if self.config.memory.relations.enabled and facts:
-                    relationships = self._build_relationships_block(user_id, facts)
+                    entities_in_play = self._detect_canonical_entities(user_id, facts)
+                    relationships = self._render_relationships_block(
+                        user_id, entities_in_play
+                    )
             except Exception:  # pragma: no cover — defensive
                 pass
 
-            combined = "\n\n".join(p for p in [user_ctx, learned, relationships] if p)
+            # Faz 22D — Entity pages: when a compiled page exists for one
+            # of the entities in play, inject the page instead of (or in
+            # addition to) the raw relations list. Pages compile on a
+            # debounced schedule by EntityPageCompiler; here we just read.
+            try:
+                if (
+                    self.config.memory.entity_pages.enabled
+                    and entities_in_play
+                ):
+                    entity_pages_block = self._render_entity_pages_block(
+                        user_id, entities_in_play
+                    )
+            except Exception:  # pragma: no cover — defensive
+                pass
+
+            combined = "\n\n".join(
+                p for p in [user_ctx, learned, relationships, entity_pages_block] if p
+            )
             if combined:
                 _add("user_context", f"# User Context\n\n{combined}", priorities.user_context)
             else:
@@ -409,26 +431,22 @@ class ContextBuilder:
         candidates.sort(key=lambda f: f["final_score"], reverse=True)
         return candidates[:top_k]
 
-    def _build_relationships_block(
+    def _detect_canonical_entities(
         self, user_id: str, facts: list[dict]
-    ) -> str:
-        """Faz 22D — backlinks injection.
+    ) -> list[str]:
+        """Top-N canonical entities mentioned in retrieved facts.
 
-        Detect canonical entities mentioned in retrieved facts, fetch their
-        direct relations, render as a ``RELATIONSHIPS`` section.
-
-        Detection is a cheap substring scan over the user's known canonical
-        entity set. No NER, no LLM. Sub-millisecond on realistic data.
+        Cheap substring scan over the user's known canonical set. No NER,
+        no LLM. Returned in descending mention-count order; ties broken
+        by descending name length so multi-word entities outrank
+        substring overlaps.
         """
         if not facts:
-            return ""
+            return []
 
         rel_cfg = self.config.memory.relations
         max_entities = max(1, rel_cfg.max_entities_per_turn)
-        max_per_entity = max(1, rel_cfg.max_relations_per_entity)
 
-        # Build the user's canonical entity set (cached per request via a
-        # single SQL hit — hit volume is low).
         with self.db._get_conn() as conn:
             rows = conn.execute(
                 """SELECT DISTINCT canonical_source AS ent FROM memory_relations
@@ -442,13 +460,9 @@ class ContextBuilder:
             ).fetchall()
         canonical_set = {r["ent"] for r in rows}
         if not canonical_set:
-            return ""
+            return []
 
-        # Sort entities by length descending so multi-word matches win over
-        # single-word substrings (e.g. "HangiKredi Backend" before "Backend").
         sorted_canonicals = sorted(canonical_set, key=len, reverse=True)
-
-        # Score entities by how many retrieved facts mention them.
         scores: dict[str, int] = {}
         for f in facts:
             content = (f.get("content") or "").lower()
@@ -459,17 +473,23 @@ class ContextBuilder:
                     scores[ent] = scores.get(ent, 0) + 1
 
         if not scores:
+            return []
+        ranked = sorted(scores.items(), key=lambda kv: (-kv[1], -len(kv[0])))
+        return [ent for ent, _ in ranked[:max_entities]]
+
+    def _render_relationships_block(
+        self, user_id: str, entities: list[str]
+    ) -> str:
+        """Render a RELATIONSHIPS section listing direct relations of the
+        given canonical entities. Used together with (or as fallback for)
+        the entity-pages block."""
+        if not entities:
             return ""
+        rel_cfg = self.config.memory.relations
+        max_per_entity = max(1, rel_cfg.max_relations_per_entity)
 
-        # Top-N entities by mention count, ties broken by descending name length.
-        top_entities = sorted(
-            scores.items(),
-            key=lambda kv: (-kv[1], -len(kv[0])),
-        )[:max_entities]
-
-        # Build the rendered block.
         lines: list[str] = []
-        for ent, _mentions in top_entities:
+        for ent in entities:
             rels = self.db.get_relations(user_id, canonical=ent, limit=max_per_entity)
             if not rels:
                 continue
@@ -493,6 +513,33 @@ class ContextBuilder:
         if not lines:
             return ""
         return "RELATIONSHIPS:\n" + "\n".join(lines)
+
+    def _render_entity_pages_block(
+        self, user_id: str, entities: list[str]
+    ) -> str:
+        """Render an ENTITY PAGES section with compiled markdown summaries.
+
+        For each entity in the in-play list, fetch its
+        ``memory_entity_pages`` row. Pages are inserted as
+        ``## {Entity}\\n{markdown}``. Stale pages still surface (with a
+        marker) so the agent has *something* while the compiler catches
+        up; the compiler is debounced and may take ~60s after a write.
+        """
+        if not entities:
+            return ""
+        page_cfg = self.config.memory.entity_pages
+        max_pages = max(1, page_cfg.max_pages_in_context)
+
+        sections: list[str] = []
+        for ent in entities[:max_pages]:
+            page = self.db.get_entity_page(user_id, ent)
+            if not page:
+                continue
+            stale = " *(stale — recompile pending)*" if page.get("stale") else ""
+            sections.append(f"## {ent}{stale}\n{page['content_md']}")
+        if not sections:
+            return ""
+        return "ENTITY PAGES:\n" + "\n\n".join(sections)
 
     @staticmethod
     def _truncate(text: str, token_budget: int) -> str:
