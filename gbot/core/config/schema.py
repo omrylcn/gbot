@@ -85,6 +85,9 @@ class AssistantConfig(BaseModel):
         default_factory=ContextPrioritiesConfig
     )
     prompt_template: str | None = None
+    prompt_cache: "PromptCacheConfig" = Field(
+        default_factory=lambda: PromptCacheConfig()
+    )
 
 
 # Channels
@@ -182,6 +185,40 @@ class MemoryRetrievalConfig(BaseModel):
     max_distance: float | None = 0.45
     top_k_candidates: int = 20  # broad pool fed to rerank
     top_k_final: int = 10       # what enters context after rerank
+
+
+class PromptCacheConfig(BaseModel):
+    """Faz 22E — Anthropic / Gemini prompt caching via LiteLLM.
+
+    LiteLLM PR #15345 transforms message-level ``cache_control`` into the
+    provider-specific content-block format automatically. We just need to
+    mark which part of the system prompt is cacheable.
+
+    The static layers (identity, role, skills, agent_memory) are usually
+    repeatable across turns — good cache candidates. The dynamic layer
+    (user_context with retrieved memory facts) changes every turn — must
+    stay outside the cache breakpoint.
+    """
+
+    enabled: bool = True
+
+    # Provider prefixes that support cache_control. LiteLLM auto-injects
+    # the right format for these. Anything else is a silent no-op.
+    supported_prefixes: list[str] = [
+        "anthropic/", "claude",
+        "openrouter/anthropic/", "openrouter/claude",
+        "google/gemini-2.5-", "openrouter/google/gemini-2.5-",
+        "gemini-2.5-",
+    ]
+
+    # Models that should NOT cache even if they match a prefix above.
+    # Useful for preview models that haven't enabled caching yet.
+    excluded_models: list[str] = []
+
+    # Minimum system prompt size (chars) before we bother caching.
+    # Anthropic requires ≥1024 cached tokens (~4K chars) for cache to
+    # actually save money; below that the write cost outweighs reads.
+    min_chars_to_cache: int = 4000
 
 
 class MemoryRelationsConfig(BaseModel):

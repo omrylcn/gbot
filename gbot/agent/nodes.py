@@ -54,8 +54,11 @@ def make_nodes(config: Config, db: MemoryStore, tools: list | None = None, embed
 
     async def reason(state: AgentState) -> dict[str, Any]:
         """Call LLM with messages + tools (filtered by role)."""
-        # Build messages for litellm (dict format)
-        messages = [{"role": "system", "content": state["system_prompt"]}]
+        # Build the system message — Faz 22E adds prompt-caching support
+        # for Anthropic/Gemini via LiteLLM's auto-inject (PR #15345).
+        system_msg = _build_system_message(state["system_prompt"], config)
+
+        messages: list[dict[str, Any]] = [system_msg]
         for msg in state["messages"]:
             messages.append(_langchain_to_dict(msg))
 
@@ -84,6 +87,9 @@ def make_nodes(config: Config, db: MemoryStore, tools: list | None = None, embed
         else:
             snippet = (ai_message.content or "")[:80]
             logger.debug(f"LLM response (no tools): {snippet!r}")
+
+        # Faz 22E — log cache hit/miss telemetry if available
+        _log_cache_telemetry(ai_message)
 
         return {
             "messages": [ai_message],
@@ -186,6 +192,79 @@ def should_continue(state: AgentState) -> str:
         return "execute_tools"
 
     return "respond"
+
+
+def _build_system_message(system_prompt: str, config: Config) -> dict[str, Any]:
+    """Build the system message, optionally with prompt-cache breakpoint.
+
+    Faz 22E — When the active model supports prompt caching (Anthropic
+    family, Gemini 2.5+, accessed via OpenRouter or directly), we mark the
+    system prompt as cacheable using Anthropic's content-block format:
+
+        {"role": "system", "content": [
+            {"type": "text", "text": "...",
+             "cache_control": {"type": "ephemeral"}}
+        ]}
+
+    LiteLLM PR #15345 transforms this into the right format per provider
+    transparently. For unsupported providers (or when the prompt is too
+    short to benefit), we fall back to the plain string format.
+
+    Sticking the breakpoint at the END of the system prompt means
+    everything before it is cached — which works for us because the
+    dynamic part (retrieved memory facts) is currently inside the same
+    system block. v1.22.0 plans to split static/dynamic into two system
+    blocks for better cache hit rates.
+    """
+    cache_cfg = getattr(config.assistant, "prompt_cache", None)
+    if cache_cfg is None or not cache_cfg.enabled:
+        return {"role": "system", "content": system_prompt}
+
+    model = config.assistant.model or ""
+    if not _model_supports_caching(model, cache_cfg):
+        return {"role": "system", "content": system_prompt}
+
+    if len(system_prompt) < cache_cfg.min_chars_to_cache:
+        return {"role": "system", "content": system_prompt}
+
+    return {
+        "role": "system",
+        "content": [
+            {
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ],
+    }
+
+
+def _model_supports_caching(model: str, cache_cfg: Any) -> bool:
+    """Check whether ``model`` is on the cache-supported allowlist."""
+    if model in cache_cfg.excluded_models:
+        return False
+    return any(model.startswith(prefix) for prefix in cache_cfg.supported_prefixes)
+
+
+def _log_cache_telemetry(ai_message: AIMessage) -> None:
+    """Log cache_creation_tokens / cache_read_tokens when present.
+
+    Anthropic returns these in usage; LiteLLM normalises the shape.
+    Surfacing them on every turn lets us measure the actual savings
+    once Step 3 (benchmark suite) is in place.
+    """
+    try:
+        usage = (ai_message.response_metadata or {}).get("usage", {}) or {}
+        creation = usage.get("cache_creation_input_tokens") or usage.get(
+            "cache_creation_tokens"
+        )
+        read = usage.get("cache_read_input_tokens") or usage.get("cache_read_tokens")
+        if creation or read:
+            logger.info(
+                f"prompt cache: creation={creation or 0}, read={read or 0}"
+            )
+    except Exception:  # pragma: no cover — defensive, telemetry-only
+        pass
 
 
 def _langchain_to_dict(msg: Any) -> dict[str, Any]:
