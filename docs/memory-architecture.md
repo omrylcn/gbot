@@ -511,19 +511,21 @@ export-2026-05-08-owner.zip
 **Efor:** 1-2 saat. FastAPI streaming response, `zipfile` modülüyle
 in-memory ZIP. Admin auth zaten var.
 
-### 9.4 🟡 P1 — Summary `ARTIFACT_TRAIL` (Factory.ai pattern)
+### 9.4 🟡 P1 — Summary `ARTIFACT_TRAIL` (Factory.ai pattern) ✅ v1.21.0
 
-**Sorun:** Şu anki session summary "KONULAR / KARARLAR / BEKLEYEN /
-KULLANICI_BİLGİSİ" yapısında. Factory.ai paterni "Session Intent +
+**Sorundu:** Session summary "KONULAR / KARARLAR / BEKLEYEN /
+KULLANICI_BİLGİSİ" yapısındaydı. Factory.ai paterni "Session Intent +
 **Artifact Trail** + Breadcrumbs" diyor. Artifact = bu session'da
 üretilen somut çıktı (kod parçası, plan, karar listesi, mesaj
-şablonu). Bizde yok.
+şablonu). Bizde yoktu.
 
-**Çözüm:** `workspace/agents/memory/AGENT.md`'ye 1 satır ekleme:
-> "ARTIFACTS: Bu session'da üretilen somut çıktılar (kod, plan, taslak,
-> mesaj şablonu). Yoksa bu satırı atla."
-
-**Efor:** 30 dakika prompt değişikliği + 1 saat dogfood validation.
+**Çözüm (uygulandı):** `workspace/agents/memory/AGENT.md` Görev 1
+prompt'una ARTIFACTS satırı eklendi:
+> "ARTIFACTS: Bu session'da somut olarak üretilen çıktılar — kod
+> parçaları, planlar/taslaklar, alınan kararların listesi, oluşturulan
+> dökümanlar. SADECE üretildiyse yaz. 'X hakkında konuştuk' değil;
+> konuşmadan çıkan tutulur bir şey olmalı. Üretim yoksa bu satırı
+> tamamen atla."
 
 **Kazanım:** Session continuity. Kullanıcı 3 gün sonra geldiğinde "geçen
 sefer hangi planı yapmıştık?" demeden agent kendi getirir.

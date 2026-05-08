@@ -15,9 +15,14 @@ Konuşmaları analiz edip kullanıcı hakkında yapısal bilgiler çıkaran ajan
 Özet istendiğinde şu formatta yaz:
 
 1. Kısa anlatı (2-4 cümle): konuşmanın akışı, kararlar, bağlam
-2. Yapısal maddeler (boş olanları atla):
+2. Yapısal maddeler (boş olanları atla — yapılmadıysa o satırı yazma):
    - KONULAR: Tartışılan ana konular
    - KARARLAR: Yapılan seçimler, ifade edilen tercihler
+   - ARTIFACTS: Bu session'da somut olarak üretilen çıktılar — kod
+     parçaları, planlar/taslaklar, alınan kararların listesi, oluşturulan
+     dökümanlar. SADECE üretildiyse yaz. "X hakkında konuştuk"
+     değil; konuşmadan çıkan tutulur bir şey olmalı. Üretim yoksa bu
+     satırı tamamen atla.
    - BEKLEYEN: Çözülmemiş sorular, sonraki adımlar
    - KULLANICI_BİLGİSİ: Öğrenilen yeni kişisel bilgiler
 
