@@ -5,9 +5,12 @@ import { adminApi, type MemoryFact } from "@/api/admin";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { Badge } from "@/components/shared/Badge";
+import { RelationsGraph } from "@/components/RelationsGraph";
 import { formatDate } from "@/lib/utils";
 
-const FACT_TYPES = ["all", "semantic", "episodic", "preference", "procedural"] as const;
+const FACT_TYPES = [
+  "all", "semantic", "episodic", "preference", "procedural", "style",
+] as const;
 type FactFilter = (typeof FACT_TYPES)[number];
 
 const TABS = ["facts", "relations", "pages", "debug"] as const;
@@ -256,6 +259,7 @@ function FactsTab({
 
 function RelationsTab({ userId }: { userId: string }) {
   const [entity, setEntity] = useState<string>("");
+  const [view, setView] = useState<"table" | "graph">("table");
 
   const { data: entities } = useQuery({
     queryKey: ["memory-entities", userId],
@@ -269,6 +273,27 @@ function RelationsTab({ userId }: { userId: string }) {
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center justify-end gap-2">
+        <span className="text-xs text-muted">View:</span>
+        {(["table", "graph"] as const).map((v) => (
+          <button
+            key={v}
+            onClick={() => setView(v)}
+            className={`px-3 py-1 text-xs rounded-lg border ${
+              view === v
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-background text-muted border-border hover:text-foreground"
+            }`}
+          >
+            {v === "table" ? "Table" : "Graph"}
+          </button>
+        ))}
+      </div>
+
+      {view === "graph" && <RelationsGraph userId={userId} />}
+
+      {view === "table" && (
+      <div className="space-y-4">
       <div className="bg-card border border-border rounded-xl p-4">
         <h3 className="text-sm font-medium text-foreground mb-3">
           Canonical Entities ({entities?.count ?? 0})
@@ -339,6 +364,8 @@ function RelationsTab({ userId }: { userId: string }) {
           </tbody>
         </table>
       </div>
+      </div>
+      )}
     </div>
   );
 }
