@@ -210,8 +210,33 @@ class ContextBuilder:
             except Exception:  # pragma: no cover — defensive
                 pass
 
+            # Faz 22G — Style facts: how the user prefers to communicate.
+            # Pulled separately from semantic/episodic facts so they're
+            # *always* present (not subject to query-similarity gating)
+            # and clearly framed for the LLM.
+            style_block = ""
+            try:
+                style_facts = self.db.get_facts(
+                    user_id, fact_type="style", valid_only=True, limit=8
+                )
+                if style_facts:
+                    style_lines = "\n".join(
+                        f"- {f['content']}" for f in style_facts
+                    )
+                    style_block = f"USER STYLE:\n{style_lines}"
+            except Exception:  # pragma: no cover — defensive
+                pass
+
             combined = "\n\n".join(
-                p for p in [user_ctx, learned, relationships, entity_pages_block] if p
+                p
+                for p in [
+                    user_ctx,
+                    style_block,
+                    learned,
+                    relationships,
+                    entity_pages_block,
+                ]
+                if p
             )
             if combined:
                 _add("user_context", f"# User Context\n\n{combined}", priorities.user_context)

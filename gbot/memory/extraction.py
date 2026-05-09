@@ -168,7 +168,10 @@ class MemoryService:
                 continue
 
             fact_type = fact.get("type", "semantic")
-            if fact_type not in ("semantic", "episodic", "preference", "procedural"):
+            # Faz 22G adds 'style' — kullanıcının iletişim tonu / dil tercihi.
+            if fact_type not in (
+                "semantic", "episodic", "preference", "procedural", "style",
+            ):
                 fact_type = "semantic"
 
             # Embed the new fact

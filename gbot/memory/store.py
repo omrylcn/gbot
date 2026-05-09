@@ -1685,6 +1685,9 @@ class MemoryStore:
         "procedural": {"fade_days": 60,  "fade_factor": 0.85, "archive_days": 180, "archive_factor": 0.6},
         "semantic":   {"fade_days": 90,  "fade_factor": 0.85, "archive_days": 365, "archive_factor": 0.6},
         "preference": {"fade_days": 120, "fade_factor": 0.9,  "archive_days": 365, "archive_factor": 0.7},
+        # Faz 22G — communication style is the slowest-changing memory:
+        # how someone writes shifts over months/years, not days.
+        "style":      {"fade_days": 180, "fade_factor": 0.92, "archive_days": 540, "archive_factor": 0.75},
     }
 
     def apply_decay(

@@ -19,7 +19,7 @@ The extractor returns a single JSON object:
   "facts": [
     {
       "content": "...",
-      "type": "semantic | episodic | preference | procedural",
+      "type": "semantic | episodic | preference | procedural | style",
       "confidence": 0.0-1.0,
       "category": "<one of the categories below>",
       "keywords": ["...", "..."]
@@ -37,12 +37,33 @@ If nothing is worth extracting, return `{"facts": [], "relations": []}`.
 
 ## Fact types
 
-| Type | What it captures | Decay rate (Faz 22D) |
-|------|------------------|----------------------|
+| Type | What it captures | Decay rate |
+|------|------------------|------------|
 | `semantic` | Enduring truths — name, location, work, skills, identity | Slow |
 | `episodic` | Time-bound events — "had a meeting yesterday" | Fast |
 | `preference` | Likes / dislikes / settings — "prefers dark theme", "vegetarian" | Medium |
 | `procedural` | Behavioral patterns — "checks stock market every morning" | Slow |
+| `style` *(Faz 22G)* | Communication style — tone, length, formality, language mix, emoji use | Slowest |
+
+### Style fact extraction (Faz 22G)
+
+Capture **how** the user prefers to communicate, not what they're
+saying. Examples:
+
+- "Kullanıcı kısa, doğrudan cevaplar tercih ediyor"
+- "Kullanıcı küfür / argo içeren samimi bir dil kullanıyor"
+- "Kullanıcı emoji kullanmıyor"
+- "Kullanıcı teknik terimleri Türkçe karşılığıyla kullanıyor"
+- "Kullanıcı sohbette sen-zamiri yerine siz tercih ediyor"
+
+Extract a `style` fact only when:
+
+- The user explicitly states a preference ("kısa yaz", "Türkçe konuşalım"), **or**
+- A pattern is clearly consistent across the conversation (no need to
+  count messages — the model judges the strength of the signal).
+
+Use `category: "style"` (added in Faz 22G — see the table below).
+Tone facts age very slowly; the decay table reflects that.
 
 ---
 
@@ -60,6 +81,7 @@ If nothing is worth extracting, return `{"facts": [], "relations": []}`.
 | `finance` | Investments, budget, financial events |
 | `health` | Health, diet, nutrition |
 | `relationship` | Interpersonal — friends, colleagues, family |
+| `style` *(Faz 22G)* | Communication style — tone, length, formality, language mix, emoji use |
 
 > "uncategorized" is **not allowed**. Every fact must commit to a category.
 > If no category fits, the fact probably shouldn't be extracted.
