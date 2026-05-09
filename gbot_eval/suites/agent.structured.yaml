@@ -1,0 +1,138 @@
+name: agent.structured
+description: |
+  JSON-mode adherence — required keys, types, arrays, nesting, enums,
+  values. Each case forces ``response_format: json_object`` and scores
+  the parsed payload against case-specific expectations.
+runner: chat_completion
+requires_gbot: false
+default_max_tokens: 400
+default_temperature: 0.1
+default_response_format: {type: json_object}
+
+cases:
+  - id: st01
+    description: Flat 3-field object
+    messages:
+      - {role: system, content: "You are a JSON extractor. Return ONLY valid JSON."}
+      - {role: user, content: "Ahmet 25 yaşında bir yazılım mühendisi. JSON çıkar: {name, age, profession}."}
+    max_tokens: 300
+    scoring:
+      - {kind: json_valid}
+      - {kind: json_keys, keys: [name, age, profession]}
+      - {kind: json_types, types: {name: str, age: int, profession: str}}
+      - kind: python
+        expr: |
+          d = json.loads(text) if text.strip() else {}
+          ok = str(d.get("age")) == "25"
+          return {"score": 1.0 if ok else 0.0, "detail": {"age": d.get("age"), "ok": ok}}
+
+  - id: st02
+    description: String array of length 3
+    messages:
+      - {role: system, content: "Return only JSON."}
+      - {role: user, content: "Türkiye'nin en kalabalık 3 şehrini JSON listesi ver: {\"cities\": [\"...\", \"...\", \"...\"]}"}
+    max_tokens: 300
+    scoring:
+      - {kind: json_valid}
+      - {kind: json_keys, keys: [cities]}
+      - {kind: json_array_min, field: cities, min: 3}
+
+  - id: st03
+    description: Nested object
+    messages:
+      - {role: system, content: "Return only JSON."}
+      - {role: user, content: "Bir kullanıcı sipariş kaydı uydur, şu yapıda: {user: {name, email}, order: {id, items: [...], total}}."}
+    max_tokens: 500
+    scoring:
+      - {kind: json_valid}
+      - {kind: json_keys, keys: [user, order]}
+      - {kind: json_nested_keys, parent: user, children: [name, email]}
+      - {kind: json_nested_keys, parent: order, children: [id, items, total]}
+
+  - id: st04
+    description: Array of objects with required keys
+    messages:
+      - {role: system, content: "Return only JSON."}
+      - {role: user, content: "3 kitap uydur: [{title, author, year}]. Sadece JSON döndür: {\"books\": [...]}"}
+    max_tokens: 400
+    scoring:
+      - {kind: json_valid}
+      - {kind: json_keys, keys: [books]}
+      - {kind: json_array_min, field: books, min: 3}
+      - kind: python
+        expr: |
+          d = json.loads(text) if text.strip() else {}
+          books = d.get("books") or []
+          required = ["title", "author", "year"]
+          ok = all(isinstance(b, dict) and all(k in b for k in required) for b in books[:3])
+          return {"score": 1.0 if ok else 0.0, "detail": {"first_book": books[0] if books else None, "ok": ok}}
+
+  - id: st05
+    description: Boolean + nullable
+    messages:
+      - {role: system, content: "Return only JSON."}
+      - {role: user, content: "Şu görevi modelle: 'Yarın çamaşır yıka'. JSON: {task, completed (boolean), due_date (string or null), notes (string or null)}."}
+    max_tokens: 300
+    scoring:
+      - {kind: json_valid}
+      - {kind: json_keys, keys: [task, completed]}
+      - {kind: json_types, types: {task: str, completed: bool}}
+
+  - id: st06
+    description: Numeric fields
+    messages:
+      - {role: system, content: "Return only JSON."}
+      - {role: user, content: "Bir e-ticaret siparişi uydur: {order_id (int), item_count (int), subtotal (float), tax (float), total (float)}."}
+    max_tokens: 300
+    scoring:
+      - {kind: json_valid}
+      - {kind: json_keys, keys: [order_id, item_count, subtotal, tax, total]}
+      - {kind: json_types, types: {item_count: int, subtotal: float, total: float}}
+
+  - id: st07
+    description: Enum-like string field
+    messages:
+      - {role: system, content: "Return only JSON."}
+      - {role: user, content: "Şu içeriği sınıflandır: 'Bugün hava çok güzel.' JSON: {sentiment: positive|neutral|negative, confidence: 0-1 float}."}
+    max_tokens: 200
+    scoring:
+      - {kind: json_valid}
+      - {kind: json_keys, keys: [sentiment, confidence]}
+      - kind: python
+        expr: |
+          d = json.loads(text) if text.strip() else {}
+          ok = d.get("sentiment") in ("positive", "neutral", "negative")
+          return {"score": 1.0 if ok else 0.0, "detail": {"sentiment": d.get("sentiment"), "ok": ok}}
+
+  - id: st08
+    description: Deeply nested
+    messages:
+      - {role: system, content: "Return only JSON."}
+      - {role: user, content: "Şirket yapısı uydur: {company: {name, departments: [{name, employees: [{name, role}]}]}}. En az 1 departman, departmanda en az 2 çalışan."}
+    max_tokens: 600
+    scoring:
+      - {kind: json_valid}
+      - {kind: json_keys, keys: [company]}
+      - {kind: json_nested_keys, parent: company, children: [name, departments]}
+
+  - id: st09
+    description: Entity extraction with fixed types
+    messages:
+      - {role: system, content: "You extract structured data. Return only JSON."}
+      - {role: user, content: "'Murat dün İstanbul'da Ayşe ile tanıştı, kahve içtiler.' Bu cümleden JSON çıkar: {entities: [{name, type: PERSON|LOCATION|EVENT}], action}."}
+    max_tokens: 400
+    scoring:
+      - {kind: json_valid}
+      - {kind: json_keys, keys: [entities, action]}
+      - {kind: json_array_min, field: entities, min: 2}
+
+  - id: st10
+    description: Dict with dynamic keys (5 languages)
+    messages:
+      - {role: system, content: "Return only JSON."}
+      - {role: user, content: "5 dilin 'merhaba' karşılığını JSON dict olarak ver: {translations: {tr: '...', en: '...', es: '...', de: '...', fr: '...'}}."}
+    max_tokens: 300
+    scoring:
+      - {kind: json_valid}
+      - {kind: json_keys, keys: [translations]}
+      - {kind: json_nested_keys, parent: translations, children: [tr, en, es, de, fr]}

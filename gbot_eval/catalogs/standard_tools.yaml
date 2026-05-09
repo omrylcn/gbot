@@ -1,0 +1,68 @@
+# Shared OpenAI-function-format tool definitions.
+# Suites reference these by name in `available_tools: [...]`.
+
+web_search:
+  type: function
+  function:
+    name: web_search
+    description: Search the web for real-time information.
+    parameters:
+      type: object
+      properties:
+        query: {type: string, description: The search query}
+        count: {type: integer, default: 5}
+      required: [query]
+
+get_current_time:
+  type: function
+  function:
+    name: get_current_time
+    description: Returns the current date and time in ISO format.
+    parameters:
+      type: object
+      properties: {}
+
+read_file:
+  type: function
+  function:
+    name: read_file
+    description: Read a local file and return its content.
+    parameters:
+      type: object
+      properties:
+        path: {type: string, description: Absolute file path}
+      required: [path]
+
+write_file:
+  type: function
+  function:
+    name: write_file
+    description: Write text content to a local file (overwrites).
+    parameters:
+      type: object
+      properties:
+        path: {type: string}
+        content: {type: string}
+      required: [path, content]
+
+save_user_note:
+  type: function
+  function:
+    name: save_user_note
+    description: Persist a note to the user's long-term memory.
+    parameters:
+      type: object
+      properties:
+        content: {type: string}
+      required: [content]
+
+list_dir:
+  type: function
+  function:
+    name: list_dir
+    description: List the contents of a directory.
+    parameters:
+      type: object
+      properties:
+        path: {type: string}
+      required: [path]

@@ -1,0 +1,135 @@
+name: stress.long_context
+description: |
+  Needle-in-haystack on the raw model. 5 needles × 3 positions
+  (early / middle / late) = 15 cases. Each case ships a small
+  per-case override; the runner inflates 28 filler turns + needle +
+  query into a 30-turn dialog and asks for the answer.
+
+  Stub mode: pure LLM, no GraphRunner / memory layer. This is a
+  signal about the model's long-context attention, not the
+  production retrieval pipeline.
+runner: stress_long_context
+requires_gbot: false
+default_max_tokens: 200
+default_temperature: 0.0
+
+runner_config:
+  filler_count: 28
+  filler_topics:
+    - yapay zeka tarihi ve önemli olaylar
+    - antik Yunan filozofları
+    - uzayda yaşam ve gezegen keşifleri
+    - Türk müziğinin tarihi
+    - klasik edebiyat ve önemli yazarlar
+  system: "Sen kullanıcının asistanısın, kısa cevap ver."
+
+cases:
+  # Needle 1 — birthday — 3 positions
+  - id: ctx_n01_early
+    position: early
+    needle: "Önemli bilgi: Doğum günüm 24 Mart 1990. Bunu lütfen unutma."
+    query: "Sana söylediğim doğum günü tarihini hatırlıyor musun? Sadece tarihi yaz."
+    scoring:
+      - {kind: substring_any, values: ["24 mart", "24/03", "1990"], fold: turkish}
+
+  - id: ctx_n01_middle
+    position: middle
+    needle: "Önemli bilgi: Doğum günüm 24 Mart 1990. Bunu lütfen unutma."
+    query: "Sana söylediğim doğum günü tarihini hatırlıyor musun? Sadece tarihi yaz."
+    scoring:
+      - {kind: substring_any, values: ["24 mart", "24/03", "1990"], fold: turkish}
+
+  - id: ctx_n01_late
+    position: late
+    needle: "Önemli bilgi: Doğum günüm 24 Mart 1990. Bunu lütfen unutma."
+    query: "Sana söylediğim doğum günü tarihini hatırlıyor musun? Sadece tarihi yaz."
+    scoring:
+      - {kind: substring_any, values: ["24 mart", "24/03", "1990"], fold: turkish}
+
+  # Needle 2 — red pen — 3 positions
+  - id: ctx_n02_early
+    position: early
+    needle: "Lütfen şunu hatırla: Kasada bir kırmızı kalem var, çok değerli."
+    query: "Kasada hangi nesne vardı? Tek kelime cevap ver."
+    scoring:
+      - {kind: substring_any, values: [kalem]}
+
+  - id: ctx_n02_middle
+    position: middle
+    needle: "Lütfen şunu hatırla: Kasada bir kırmızı kalem var, çok değerli."
+    query: "Kasada hangi nesne vardı? Tek kelime cevap ver."
+    scoring:
+      - {kind: substring_any, values: [kalem]}
+
+  - id: ctx_n02_late
+    position: late
+    needle: "Lütfen şunu hatırla: Kasada bir kırmızı kalem var, çok değerli."
+    query: "Kasada hangi nesne vardı? Tek kelime cevap ver."
+    scoring:
+      - {kind: substring_any, values: [kalem]}
+
+  # Needle 3 — password — 3 positions
+  - id: ctx_n03_early
+    position: early
+    needle: "Dikkat: Bilgisayarımın şifresi 7421. Bu bilgiyi kaybetme."
+    query: "Bilgisayar şifresi neydi? Sadece sayıyı yaz."
+    scoring:
+      - {kind: substring_any, values: ["7421"]}
+
+  - id: ctx_n03_middle
+    position: middle
+    needle: "Dikkat: Bilgisayarımın şifresi 7421. Bu bilgiyi kaybetme."
+    query: "Bilgisayar şifresi neydi? Sadece sayıyı yaz."
+    scoring:
+      - {kind: substring_any, values: ["7421"]}
+
+  - id: ctx_n03_late
+    position: late
+    needle: "Dikkat: Bilgisayarımın şifresi 7421. Bu bilgiyi kaybetme."
+    query: "Bilgisayar şifresi neydi? Sadece sayıyı yaz."
+    scoring:
+      - {kind: substring_any, values: ["7421"]}
+
+  # Needle 4 — favourite movie — 3 positions
+  - id: ctx_n04_early
+    position: early
+    needle: "Bu önemli: En sevdiğim film Esaretin Bedeli (Shawshank Redemption)."
+    query: "En sevdiğim film neydi? Bir kelime cevap ver."
+    scoring:
+      - {kind: substring_any, values: [esaret, shawshank], fold: turkish}
+
+  - id: ctx_n04_middle
+    position: middle
+    needle: "Bu önemli: En sevdiğim film Esaretin Bedeli (Shawshank Redemption)."
+    query: "En sevdiğim film neydi? Bir kelime cevap ver."
+    scoring:
+      - {kind: substring_any, values: [esaret, shawshank], fold: turkish}
+
+  - id: ctx_n04_late
+    position: late
+    needle: "Bu önemli: En sevdiğim film Esaretin Bedeli (Shawshank Redemption)."
+    query: "En sevdiğim film neydi? Bir kelime cevap ver."
+    scoring:
+      - {kind: substring_any, values: [esaret, shawshank], fold: turkish}
+
+  # Needle 5 — pet — 3 positions
+  - id: ctx_n05_early
+    position: early
+    needle: "Şunu unutma: Ev kedimin adı Pamuk, 3 yaşında."
+    query: "Ev kedimin adı neydi?"
+    scoring:
+      - {kind: substring_any, values: [pamuk]}
+
+  - id: ctx_n05_middle
+    position: middle
+    needle: "Şunu unutma: Ev kedimin adı Pamuk, 3 yaşında."
+    query: "Ev kedimin adı neydi?"
+    scoring:
+      - {kind: substring_any, values: [pamuk]}
+
+  - id: ctx_n05_late
+    position: late
+    needle: "Şunu unutma: Ev kedimin adı Pamuk, 3 yaşında."
+    query: "Ev kedimin adı neydi?"
+    scoring:
+      - {kind: substring_any, values: [pamuk]}

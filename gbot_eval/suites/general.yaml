@@ -1,0 +1,56 @@
+name: general
+description: |
+  General-purpose smoke tests — quick sanity checks across factual
+  recall, basic reasoning, and short-form generation. Cheap, fast,
+  and useful for spot-checking a new model with `--sample=20`.
+runner: chat_completion
+requires_gbot: false
+default_max_tokens: 200
+default_temperature: 0.1
+
+cases:
+  - id: gen01
+    description: Factual recall — Turkish capital
+    task: "Türkiye'nin başkenti neresidir? Tek kelime yaz."
+    max_tokens: 50
+    scoring:
+      - {kind: substring_any, values: [ankara], fold: turkish}
+
+  - id: gen02
+    description: Trivial arithmetic
+    task: "1 + 1 kaç eder? Sadece sayıyı yaz."
+    max_tokens: 30
+    scoring:
+      - {kind: regex_match, pattern: "\\b2\\b"}
+
+  - id: gen03
+    description: Short technical explanation
+    task: "Python'da bir listeyi tersine çevirmenin en kısa yolu nedir? 1-2 cümle."
+    max_tokens: 200
+    scoring:
+      - kind: substring_any
+        values: ["[::-1]", "reverse", "reversed"]
+        fold: lower
+
+  - id: gen04
+    description: Basic reasoning — comparing
+    task: "İstanbul mu Ankara mı daha kalabalık? Tek kelime cevap ver."
+    max_tokens: 30
+    scoring:
+      - {kind: substring_any, values: [istanbul], fold: turkish}
+
+  - id: gen05
+    description: Date / time aware
+    task: "2026 yılında hangi sezonda Ramazan ayı oluyor, kısaca yaz."
+    max_tokens: 100
+    scoring:
+      - kind: substring_any
+        values: [şubat, mart, nisan, february, march, february]
+        fold: turkish
+
+  - id: gen06
+    description: Multilingual recall
+    task: "'Hello' kelimesinin İspanyolca karşılığı nedir? Tek kelime."
+    max_tokens: 30
+    scoring:
+      - {kind: substring_any, values: [hola], fold: lower}

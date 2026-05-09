@@ -1,0 +1,191 @@
+name: agent.tool_calling
+description: |
+  Tool-selection quality. Each case ships a prompt + a subset of tools
+  from catalogs/standard_tools.yaml and expectations on which tools
+  should/shouldn't be called and what args they should carry. Quality
+  per case is mean of applied scoring rules; aggregate quality is mean
+  across cases.
+runner: chat_completion
+requires_gbot: false
+default_max_tokens: 600
+default_temperature: 0.1
+
+runner_config:
+  tools_catalog: standard_tools.yaml
+
+cases:
+  - id: tc01
+    description: Single tool — web search (Turkish or English query is fine)
+    task: "İstanbul'un bugünkü hava durumunu öğrenmek istiyorum."
+    available_tools: [web_search]
+    scoring:
+      - {kind: tool_called, expected: web_search}
+      - {kind: required_args, tool: web_search, keys: [query]}
+      - kind: arg_substring_any
+        tool: web_search
+        arg: query
+        values: [istanbul, weather]
+        fold: turkish
+
+  - id: tc02
+    description: Single tool — current time, must NOT search the web
+    task: "Şu an saat kaç?"
+    available_tools: [get_current_time, web_search]
+    scoring:
+      - {kind: tool_called, expected: get_current_time}
+      - {kind: tool_not_called, forbidden: web_search}
+
+  - id: tc03
+    description: Single tool — read file, path arg required
+    task: "/etc/hostname dosyasını oku."
+    available_tools: [read_file, list_dir]
+    scoring:
+      - {kind: tool_called, expected: read_file}
+      - {kind: required_args, tool: read_file, keys: [path]}
+      - kind: arg_substring_any
+        tool: read_file
+        arg: path
+        values: [hostname]
+
+  - id: tc04
+    description: Single tool — list directory
+    task: "/tmp klasöründe ne var, listele."
+    available_tools: [read_file, list_dir]
+    scoring:
+      - {kind: tool_called, expected: list_dir}
+      - {kind: required_args, tool: list_dir, keys: [path]}
+
+  - id: tc05
+    description: Single tool — save note with Turkish content
+    task: "Şunu hatırla: yarın 15:00'te diş hekimi randevum var."
+    available_tools: [save_user_note, web_search]
+    scoring:
+      - {kind: tool_called, expected: save_user_note}
+      - {kind: required_args, tool: save_user_note, keys: [content]}
+      - kind: arg_substring_any
+        tool: save_user_note
+        arg: content
+        values: [diş, dis, dentist]
+        fold: turkish
+
+  - id: tc06
+    description: Single tool — write file with content
+    task: "/tmp/test.txt dosyasına 'Merhaba dünya' yaz."
+    available_tools: [write_file, read_file]
+    scoring:
+      - {kind: tool_called, expected: write_file}
+      - {kind: required_args, tool: write_file, keys: [path, content]}
+
+  - id: tc07
+    description: Single tool — Turkish product research
+    task: "OnePlus Pad 3 hakkında bilgi al."
+    available_tools: [web_search]
+    scoring:
+      - {kind: tool_called, expected: web_search}
+      - {kind: required_args, tool: web_search, keys: [query]}
+
+  - id: tc08
+    description: Single tool — preferred over time tool for live info
+    task: "Bitcoin fiyatı ne kadar şu anda?"
+    available_tools: [web_search, get_current_time]
+    scoring:
+      - {kind: tool_called, expected: web_search}
+
+  - id: tc09
+    description: Multi-tool — read + save (at least one of them called)
+    task: "/tmp/notes.txt dosyasını oku ve içeriğini hafızama kaydet."
+    available_tools: [read_file, save_user_note, write_file]
+    scoring:
+      - {kind: tool_count_min, min: 1}
+      - kind: python
+        expr: |
+          called = [c.get("name") for c in tool_calls]
+          ok = "read_file" in called or "save_user_note" in called
+          return {"score": 1.0 if ok else 0.0, "detail": {"called": called, "ok": ok}}
+
+  - id: tc10
+    description: Multi-tool — list + read (at least one called)
+    task: "/etc klasörünü listele, sonra /etc/os-release dosyasını oku."
+    available_tools: [list_dir, read_file]
+    scoring:
+      - {kind: tool_count_min, min: 1}
+      - kind: python
+        expr: |
+          called = [c.get("name") for c in tool_calls]
+          ok = "list_dir" in called or "read_file" in called
+          return {"score": 1.0 if ok else 0.0, "detail": {"called": called, "ok": ok}}
+
+  - id: tc11
+    description: Multi-tool — search + save
+    task: "Yapay zeka haberlerini araştır ve önemli olanı not et."
+    available_tools: [web_search, save_user_note]
+    scoring:
+      - {kind: tool_count_min, min: 1}
+      - kind: python
+        expr: |
+          called = [c.get("name") for c in tool_calls]
+          ok = "web_search" in called or "save_user_note" in called
+          return {"score": 1.0 if ok else 0.0, "detail": {"called": called, "ok": ok}}
+
+  - id: tc12
+    description: Multi-tool — read then write (transform pattern)
+    task: "/tmp/in.txt'i oku, içeriğini büyük harfe çevirip /tmp/out.txt'e yaz."
+    available_tools: [read_file, write_file]
+    scoring:
+      - {kind: tool_count_min, min: 1}
+
+  - id: tc13
+    description: Multi-tool — time + save
+    task: "Şu anki tarihi notuma ekle."
+    available_tools: [get_current_time, save_user_note]
+    scoring:
+      - {kind: tool_count_min, min: 1}
+
+  - id: tc14
+    description: No tool — pure conversation
+    task: "Merhaba, bugün nasılsın?"
+    available_tools: [web_search, get_current_time]
+    scoring:
+      - {kind: no_tool_call}
+
+  - id: tc15
+    description: No tool — internal knowledge suffices
+    task: "Python'da liste nasıl tersine çevrilir, kısa açıkla."
+    available_tools: [web_search]
+    scoring:
+      - {kind: no_tool_call}
+
+  - id: tc16
+    description: No tool — philosophical / opinion
+    task: "Mutluluk nedir sence?"
+    available_tools: [web_search, save_user_note]
+    scoring:
+      - {kind: no_tool_call}
+
+  - id: tc17
+    description: No tool — small talk acknowledgement
+    task: "Teşekkür ederim, çok yardımcı oldun."
+    available_tools: [save_user_note]
+    scoring:
+      - {kind: no_tool_call}
+
+  - id: tc18
+    description: Ambiguous — file path missing, model should clarify not hallucinate
+    task: "Şu dosyayı düzenler misin?"
+    available_tools: [read_file, write_file]
+    scoring:
+      - {kind: no_tool_call}
+
+  - id: tc19
+    description: Ambiguous — search query missing
+    task: "Bir şeyler ara."
+    available_tools: [web_search]
+    scoring:
+      - {kind: no_tool_call}
+
+  - id: tc20
+    description: Wrong tool offered — model shouldn't misuse save_user_note
+    task: "Hava durumu ne? (sadece save_user_note tool'u var)"
+    available_tools: [save_user_note]
+    scoring:
+      - {kind: no_tool_call}

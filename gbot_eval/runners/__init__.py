@@ -41,6 +41,7 @@ def list_names() -> list[str]:
 def _load_runners() -> None:
     """Import-time side-effect registration for shipped runners."""
     from gbot_eval.runners import chat_completion  # noqa: F401
+    from gbot_eval.runners import stress_long_context  # noqa: F401
     # gbot-bound runners — Step 6D
     try:
         from gbot_eval.runners import delegation  # noqa: F401

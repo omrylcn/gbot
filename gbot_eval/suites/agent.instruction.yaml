@@ -1,0 +1,157 @@
+name: agent.instruction
+description: |
+  System-instruction adherence — Turkish-only output, exact bullet
+  count, single-sentence answers, banned words, JSON parse, etc.
+  Cases mix deterministic regex / format checks (cheap) with five
+  LLM-as-judge cases (subjective tone / PII / structure).
+runner: chat_completion
+requires_gbot: false
+default_max_tokens: 400
+default_temperature: 0.3
+
+cases:
+  - id: if01
+    description: Turkish-only response
+    messages:
+      - {role: system, content: "Yanıtı sadece Türkçe ver."}
+      - {role: user, content: "What is the capital of Turkey?"}
+    max_tokens: 100
+    scoring:
+      - {kind: regex_match, pattern: "[ğşçıöüĞŞÇİÖÜ]"}
+
+  - id: if02
+    description: Exactly 3 bullets, nothing else
+    messages:
+      - {role: system, content: "Cevabını tam 3 madde işaretiyle ver, başka hiçbir metin yazma."}
+      - {role: user, content: "Sağlıklı yaşamın 3 önemli kuralı nedir?"}
+    max_tokens: 300
+    scoring:
+      - {kind: bullet_count, exact: 3}
+
+  - id: if03
+    description: Yes/no only
+    messages:
+      - {role: system, content: "Sadece 'evet' veya 'hayır' yaz, başka hiçbir şey ekleme."}
+      - {role: user, content: "Türkiye Avrupa ülkesi midir?"}
+    max_tokens: 30
+    scoring:
+      - {kind: regex_match, pattern: "(?i)^(evet|hayır)\\.?$", flags: I}
+
+  - id: if04
+    description: ≤50 words
+    messages:
+      - {role: system, content: "Cevabın 50 kelimeyi kesinlikle aşmasın."}
+      - {role: user, content: "Yapay zekanın tarihçesini özetle."}
+    max_tokens: 200
+    scoring:
+      - {kind: word_count, max: 50}
+
+  - id: if05
+    description: No URLs
+    messages:
+      - {role: system, content: "Cevabında hiçbir URL veya bağlantı bulundurma."}
+      - {role: user, content: "Python programlama dili hakkında 2 cümle yaz."}
+    max_tokens: 200
+    scoring:
+      - {kind: regex_not_match, pattern: "https?://"}
+
+  - id: if06
+    description: Numbered list 1. 2. 3.
+    messages:
+      - {role: system, content: "Cevabını numaralı liste formatında ver (1. 2. 3. şeklinde)."}
+      - {role: user, content: "Bir gün boyunca yapılabilecek 3 sağlıklı aktivite öner."}
+    max_tokens: 250
+    scoring:
+      - {kind: numbered_list, min: 3}
+
+  - id: if07
+    description: JSON-only response
+    messages:
+      - {role: system, content: "Cevabını sadece JSON olarak ver, başka hiçbir metin yazma. Format: {\"answer\": \"...\"}"}
+      - {role: user, content: "Türkiye'nin başkenti?"}
+    max_tokens: 100
+    scoring:
+      - {kind: json_valid}
+      - {kind: json_keys, keys: [answer]}
+
+  - id: if08
+    description: Banned word — 'önemli' must not appear
+    messages:
+      - {role: system, content: "Cevabında 'önemli' kelimesini kullanma."}
+      - {role: user, content: "Spor neden faydalıdır, kısa açıkla."}
+    max_tokens: 200
+    scoring:
+      - {kind: regex_not_match, pattern: "(?i)önemli"}
+
+  - id: if09
+    description: Single sentence
+    messages:
+      - {role: system, content: "Cevabını tam 1 cümle ile ver."}
+      - {role: user, content: "Karanlık madde nedir?"}
+    max_tokens: 200
+    scoring:
+      - {kind: sentence_count, max: 1}
+
+  - id: if10
+    description: Required word — 'merhaba'
+    messages:
+      - {role: system, content: "Cevabın içinde mutlaka 'merhaba' kelimesi geçsin."}
+      - {role: user, content: "Bir arkadaşına sabah selamı yaz."}
+    max_tokens: 100
+    scoring:
+      - {kind: regex_match, pattern: "(?i)merhaba"}
+
+  - id: if11
+    description: Professional tone (LLM-as-judge)
+    messages:
+      - {role: system, content: "Cevabını profesyonel ve resmi bir tonda yaz, samimi/teklifsiz dil kullanma."}
+      - {role: user, content: "Çalışana zam talep eden e-posta taslağı yaz."}
+    max_tokens: 400
+    scoring:
+      - kind: judge
+        criteria: "Yanıt profesyonel ve resmi tonda mı? Samimi / teklifsiz dil yok mu?"
+        min_score: 4
+
+  - id: if12
+    description: No PII examples (LLM-as-judge)
+    messages:
+      - {role: system, content: "Cevabında hiçbir kişisel bilgi (isim, telefon, adres, e-posta) örnek olarak bile verme."}
+      - {role: user, content: "Bir özgeçmiş örneği nasıl yazılır, anlat."}
+    max_tokens: 400
+    scoring:
+      - kind: judge
+        criteria: "Cevap somut isim / telefon / adres / e-posta vermiyor mu? Talimata tam uyuyor mu?"
+        min_score: 4
+
+  - id: if13
+    description: Structure — summary first, then detail (LLM-as-judge)
+    messages:
+      - {role: system, content: "Cevabını 'önce özet, sonra detay' formatında düzenle. Özet bir paragraf, detay madde işaretli."}
+      - {role: user, content: "Mikroservis mimarisinin avantajlarını ve dezavantajlarını anlat."}
+    max_tokens: 500
+    scoring:
+      - kind: judge
+        criteria: "Cevap önce kısa bir özet paragrafı, sonra madde işaretli detay yapısında mı?"
+        min_score: 3
+
+  - id: if14
+    description: Plain language for kids (LLM-as-judge)
+    messages:
+      - {role: system, content: "Cevabını çocuğa anlatır gibi sade bir dilde yaz, teknik jargon kullanma."}
+      - {role: user, content: "İnternet nasıl çalışır?"}
+    max_tokens: 400
+    scoring:
+      - kind: judge
+        criteria: "Cevap teknik jargon olmadan, çocuğa hitap eder şekilde sade bir dilde yazılmış mı?"
+        min_score: 3
+
+  - id: if15
+    description: Must end with a question (LLM-as-judge)
+    messages:
+      - {role: system, content: "Cevabını mutlaka bir soru ile bitir, kullanıcıyı düşünmeye davet et."}
+      - {role: user, content: "Tükenmişlik sendromuyla nasıl başa çıkılır?"}
+    max_tokens: 400
+    scoring:
+      - kind: judge
+        criteria: "Cevap kullanıcıyı düşünmeye davet eden bir soru ile bitiyor mu?"
+        min_score: 4
