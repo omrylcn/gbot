@@ -1,0 +1,75 @@
+name: agent.multi_turn
+description: |
+  Multi-turn conversation coherence — does the model follow context
+  shifts, remember earlier turns, and avoid bleed-through between
+  topics. 5 cases × 3-5 turns each. Per-turn quality is mean of
+  expect_contains_any / expect_not_contains checks; case quality is
+  mean across turns.
+runner: multi_turn
+requires_gbot: false
+default_max_tokens: 300
+default_system: "Sen kullanıcının asistanısın, kısa cevap ver."
+
+cases:
+  - id: mt01
+    description: Language switch mid-conversation, then callback
+    turns:
+      - user: "Bana python'da liste tersine çevirmenin yolunu yaz, kısa olsun."
+        expect_contains_any: ["[::-1]", "reverse", "reversed"]
+      - user: "Aslında JavaScript'te nasıl yapılır?"
+        expect_contains_any: ["reverse()", "reverse", "Array"]
+        expect_not_contains: ["python", "Python"]
+      - user: "Konuşmamızın başında hangi dilden bahsediyorduk?"
+        expect_contains_any: ["python"]
+        fold: turkish
+
+  - id: mt02
+    description: Number tracking across turns
+    turns:
+      - user: "Aklımda bir sayı tutuyorum: 42. Bunu hatırla."
+        expect_contains_any: ["42", "anladım", "tamam", "ok"]
+        fold: turkish
+      - user: "Hangi şehir Türkiye'nin başkenti?"
+        expect_contains_any: ["ankara"]
+        fold: turkish
+      - user: "Az önce sana söylediğim sayı neydi?"
+        expect_contains_any: ["42"]
+
+  - id: mt03
+    description: Topic shift — user changes subject
+    turns:
+      - user: "Bana Türkiye'nin coğrafyası hakkında 2 cümle anlat."
+        expect_contains_any: ["türkiye", "anadolu"]
+        fold: turkish
+      - user: "Şimdi başka bir konu: Sushi nedir?"
+        expect_contains_any: ["sushi", "japon", "pirinç", "rice"]
+        fold: turkish
+        expect_not_contains: ["türkiye"]
+        # NOTE: turkish-fold makes "Türkiye" → "turkiye"; the not_contains
+        # value is also folded so this excludes Turkish topic bleed.
+
+  - id: mt04
+    description: User contradicts themselves
+    turns:
+      - user: "En sevdiğim renk mavi."
+        expect_contains_any: ["mavi", "blue", "anladım", "tamam", "ok"]
+        fold: turkish
+      - user: "Aslında en sevdiğim renk yeşil. Düzeltme yaptım."
+        expect_contains_any: ["yeşil", "green", "tamam", "anladım", "düzelt"]
+        fold: turkish
+      - user: "En sevdiğim renk neydi?"
+        expect_contains_any: ["yeşil"]
+        fold: turkish
+
+  - id: mt05
+    description: Reference resolution — pronouns across turns
+    turns:
+      - user: "Murat 25 yaşında bir mühendis. Ankara'da yaşıyor."
+        expect_contains_any: ["murat", "anladım", "tamam", "ok"]
+        fold: turkish
+      - user: "O nerede yaşıyor?"
+        expect_contains_any: ["ankara"]
+        fold: turkish
+      - user: "Ne iş yapıyor?"
+        expect_contains_any: ["mühendis", "engineer"]
+        fold: turkish
