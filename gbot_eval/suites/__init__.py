@@ -1,0 +1,59 @@
+"""Suite registry. Each suite module imports its class and registers
+itself here so ``gbot-eval run --suite=<name>`` can find it.
+
+Step 5C-5H'de doldurulacak. Şu an boş, iskelet ayakta.
+"""
+
+from __future__ import annotations
+
+from gbot_eval.suites.base import Suite
+
+SUITE_REGISTRY: dict[str, Suite] = {}
+
+
+def register(suite: Suite) -> Suite:
+    """Decorator-friendly registration: ``SUITE_REGISTRY[name] = suite``."""
+    if suite.name in SUITE_REGISTRY:
+        raise ValueError(f"duplicate suite name: {suite.name}")
+    SUITE_REGISTRY[suite.name] = suite
+    return suite
+
+
+def list_names() -> list[str]:
+    return sorted(SUITE_REGISTRY.keys())
+
+
+def filter_suites(spec: str | None) -> list[Suite]:
+    """Resolve a CLI filter spec to suites.
+
+    ``spec`` examples:
+    - ``None`` or ``""`` → tüm suite'ler
+    - ``"memory"`` → tüm memory.* suite'ler
+    - ``"memory.extraction"`` → tek suite
+    - ``"memory,agent.delegation"`` → virgüllü list
+    """
+    if not spec:
+        return [SUITE_REGISTRY[n] for n in list_names()]
+
+    parts = [p.strip() for p in spec.split(",") if p.strip()]
+    selected: list[Suite] = []
+    for part in parts:
+        if part in SUITE_REGISTRY:
+            selected.append(SUITE_REGISTRY[part])
+            continue
+        # group filter — match anything starting with f"{part}."
+        prefix = f"{part}."
+        matches = [
+            SUITE_REGISTRY[n] for n in list_names() if n.startswith(prefix)
+        ]
+        if not matches:
+            raise KeyError(f"no suite matches '{part}'")
+        selected.extend(matches)
+    # de-dup preserving order
+    seen: set[str] = set()
+    out: list[Suite] = []
+    for s in selected:
+        if s.name not in seen:
+            seen.add(s.name)
+            out.append(s)
+    return out

@@ -56,3 +56,4 @@ gbot-philosophy.md
 # Benchmark / eval output (regenerated each run; CI artifacts only)
 tests/memory_benchmark/last_run.json
 tests/llm_eval/last_run_*.json
+gbot_eval/output/runs/

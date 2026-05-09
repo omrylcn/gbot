@@ -56,6 +56,7 @@ Changelog = "https://github.com/omrylcn/gbot/blob/main/CHANGELOG.md"
 
 [project.scripts]
 gbot = "gbot_cli.commands:app"
+gbot-eval = "gbot_eval.cli:app"
 
 [project.optional-dependencies]
 channels = [
@@ -81,7 +82,7 @@ build-backend = "hatchling.build"
 path = "gbot/__version__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["gbot", "gbot_cli"]
+packages = ["gbot", "gbot_cli", "gbot_eval"]
 
 [tool.ruff]
 line-length = 100
