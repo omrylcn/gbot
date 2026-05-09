@@ -1,0 +1,111 @@
+{
+  "_comment": "Entity page compile eval cases. Each case: an entity + its source facts + relations, and what the compiled markdown page must satisfy. Curated 2026-05-09.",
+  "cases": [
+    {
+      "case_id": "pg01",
+      "entity": "Murat",
+      "aliases": ["Murat"],
+      "facts": [
+        {"fact_id": "f00000001", "content": "Murat backend developer olarak çalışıyor", "importance": 0.7, "access_count": 5},
+        {"fact_id": "f00000002", "content": "Murat Ankara'da yaşıyor", "importance": 0.6, "access_count": 4},
+        {"fact_id": "f00000003", "content": "Murat user ile aynı takımda çalışıyor", "importance": 0.8, "access_count": 7},
+        {"fact_id": "f00000004", "content": "Murat hafta sonları yürüyüş yapıyor", "importance": 0.4, "access_count": 1}
+      ],
+      "relations": [
+        {"relation_id": "r0001", "canonical_source": "Murat", "relation": "works_with", "canonical_target": "owner"},
+        {"relation_id": "r0002", "canonical_source": "Murat", "relation": "lives_in", "canonical_target": "Ankara"}
+      ],
+      "expected": {
+        "must_cite_fact_ids": ["f00000001", "f00000002", "f00000003"],
+        "max_words_paragraph": 80,
+        "min_bullets": 3,
+        "max_bullets": 7,
+        "must_mention_keywords": ["Murat", "developer", "Ankara"],
+        "must_not_hallucinate_facts": ["İstanbul", "frontend", "evli"]
+      }
+    },
+    {
+      "case_id": "pg02",
+      "entity": "Ayşe",
+      "aliases": ["Ayşe", "eşim"],
+      "facts": [
+        {"fact_id": "fa0000001", "content": "Ayşe user'ın eşi", "importance": 0.9, "access_count": 12},
+        {"fact_id": "fa0000002", "content": "Ayşe doktor olarak çalışıyor", "importance": 0.7, "access_count": 6},
+        {"fact_id": "fa0000003", "content": "Ayşe ile user 3 yıldır evli", "importance": 0.8, "access_count": 9}
+      ],
+      "relations": [
+        {"relation_id": "r0010", "canonical_source": "owner", "relation": "married_to", "canonical_target": "Ayşe"}
+      ],
+      "expected": {
+        "must_cite_fact_ids": ["fa0000001", "fa0000002", "fa0000003"],
+        "max_words_paragraph": 80,
+        "min_bullets": 3,
+        "max_bullets": 7,
+        "must_mention_keywords": ["Ayşe", "eş", "doktor"],
+        "must_not_hallucinate_facts": ["İngilizce", "yazılım", "Ankara"]
+      }
+    },
+    {
+      "case_id": "pg03",
+      "entity": "HangiKredi",
+      "aliases": ["HangiKredi"],
+      "facts": [
+        {"fact_id": "fh0000001", "content": "User HangiKredi'de backend developer olarak çalışıyor", "importance": 0.9, "access_count": 20},
+        {"fact_id": "fh0000002", "content": "HangiKredi finansal teknoloji şirketi", "importance": 0.6, "access_count": 3},
+        {"fact_id": "fh0000003", "content": "HangiKredi İstanbul merkezli", "importance": 0.5, "access_count": 2}
+      ],
+      "relations": [
+        {"relation_id": "r0020", "canonical_source": "owner", "relation": "works_at", "canonical_target": "HangiKredi"}
+      ],
+      "expected": {
+        "must_cite_fact_ids": ["fh0000001", "fh0000002", "fh0000003"],
+        "max_words_paragraph": 80,
+        "min_bullets": 3,
+        "max_bullets": 7,
+        "must_mention_keywords": ["HangiKredi", "fintech"],
+        "must_not_hallucinate_facts": ["startup", "fonland", "kuruluş"]
+      }
+    },
+    {
+      "case_id": "pg04",
+      "entity": "Pamuk",
+      "aliases": ["Pamuk", "kedi"],
+      "facts": [
+        {"fact_id": "fp0000001", "content": "Pamuk user'ın kedisi", "importance": 0.7, "access_count": 5},
+        {"fact_id": "fp0000002", "content": "Pamuk beyaz tüylü bir kedi", "importance": 0.4, "access_count": 1}
+      ],
+      "relations": [
+        {"relation_id": "r0030", "canonical_source": "owner", "relation": "owns", "canonical_target": "Pamuk"}
+      ],
+      "expected": {
+        "must_cite_fact_ids": ["fp0000001", "fp0000002"],
+        "max_words_paragraph": 80,
+        "min_bullets": 2,
+        "max_bullets": 7,
+        "must_mention_keywords": ["Pamuk", "kedi"],
+        "must_not_hallucinate_facts": ["köpek", "yaş"]
+      }
+    },
+    {
+      "case_id": "pg05",
+      "entity": "İstanbul",
+      "aliases": ["İstanbul"],
+      "facts": [
+        {"fact_id": "fi0000001", "content": "User İstanbul'da yaşıyor", "importance": 0.9, "access_count": 25},
+        {"fact_id": "fi0000002", "content": "User önceden Ankara'da yaşıyordu, sonra İstanbul'a taşındı", "importance": 0.6, "access_count": 4},
+        {"fact_id": "fi0000003", "content": "User İstanbul Kadıköy'de oturuyor", "importance": 0.7, "access_count": 8}
+      ],
+      "relations": [
+        {"relation_id": "r0040", "canonical_source": "owner", "relation": "lives_in", "canonical_target": "İstanbul"}
+      ],
+      "expected": {
+        "must_cite_fact_ids": ["fi0000001", "fi0000003"],
+        "max_words_paragraph": 80,
+        "min_bullets": 2,
+        "max_bullets": 7,
+        "must_mention_keywords": ["İstanbul", "Kadıköy"],
+        "must_not_hallucinate_facts": ["İzmir", "Bursa", "Avrupa"]
+      }
+    }
+  ]
+}
