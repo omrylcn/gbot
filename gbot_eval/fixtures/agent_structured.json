@@ -1,0 +1,120 @@
+{
+  "_comment": "Structured-output adherence eval — 10 cases, JSON mode + per-case schema. Tests valid JSON, required fields, types, nesting, arrays. Curated 2026-05-09.",
+  "cases": [
+    {
+      "case_id": "st01",
+      "_intent": "flat 3-field object",
+      "messages": [
+        {"role": "system", "content": "You are a JSON extractor. Return ONLY valid JSON."},
+        {"role": "user", "content": "Ahmet 25 yaşında bir yazılım mühendisi. JSON çıkar: {name, age, profession}."}
+      ],
+      "max_tokens": 300,
+      "expected_keys": ["name", "age", "profession"],
+      "expected_types": {"name": "str", "age": "int", "profession": "str"},
+      "expected_field_values": {"age": 25}
+    },
+    {
+      "case_id": "st02",
+      "_intent": "string array of length 3",
+      "messages": [
+        {"role": "system", "content": "Return only JSON."},
+        {"role": "user", "content": "Türkiye'nin en kalabalık 3 şehrini JSON listesi ver: {\"cities\": [\"...\", \"...\", \"...\"]}"}
+      ],
+      "max_tokens": 300,
+      "expected_keys": ["cities"],
+      "expected_array_min_length": {"cities": 3},
+      "expected_array_max_length": {"cities": 3},
+      "expected_array_element_type": {"cities": "str"}
+    },
+    {
+      "case_id": "st03",
+      "_intent": "nested object",
+      "messages": [
+        {"role": "system", "content": "Return only JSON."},
+        {"role": "user", "content": "Bir kullanıcı sipariş kaydı uydur, şu yapıda: {user: {name, email}, order: {id, items: [...], total}}."}
+      ],
+      "max_tokens": 500,
+      "expected_keys": ["user", "order"],
+      "expected_nested_keys": {"user": ["name", "email"], "order": ["id", "items", "total"]},
+      "expected_types": {"user": "dict", "order": "dict"}
+    },
+    {
+      "case_id": "st04",
+      "_intent": "array of objects",
+      "messages": [
+        {"role": "system", "content": "Return only JSON."},
+        {"role": "user", "content": "3 kitap uydur: [{title, author, year}]. Sadece JSON döndür: {\"books\": [...]}"}
+      ],
+      "max_tokens": 400,
+      "expected_keys": ["books"],
+      "expected_array_min_length": {"books": 3},
+      "expected_array_element_keys": {"books": ["title", "author", "year"]}
+    },
+    {
+      "case_id": "st05",
+      "_intent": "boolean + nullable",
+      "messages": [
+        {"role": "system", "content": "Return only JSON."},
+        {"role": "user", "content": "Şu görevi modelle: 'Yarın çamaşır yıka'. JSON: {task, completed (boolean), due_date (string or null), notes (string or null)}."}
+      ],
+      "max_tokens": 300,
+      "expected_keys": ["task", "completed"],
+      "expected_types": {"task": "str", "completed": "bool"}
+    },
+    {
+      "case_id": "st06",
+      "_intent": "numeric fields",
+      "messages": [
+        {"role": "system", "content": "Return only JSON."},
+        {"role": "user", "content": "Bir e-ticaret siparişi uydur: {order_id (int), item_count (int), subtotal (float), tax (float), total (float)}."}
+      ],
+      "max_tokens": 300,
+      "expected_keys": ["order_id", "item_count", "subtotal", "tax", "total"],
+      "expected_types": {"item_count": "int", "subtotal": "float", "total": "float"}
+    },
+    {
+      "case_id": "st07",
+      "_intent": "enum-like string field",
+      "messages": [
+        {"role": "system", "content": "Return only JSON."},
+        {"role": "user", "content": "Şu içeriği sınıflandır: 'Bugün hava çok güzel.' JSON: {sentiment: positive|neutral|negative, confidence: 0-1 float}."}
+      ],
+      "max_tokens": 200,
+      "expected_keys": ["sentiment", "confidence"],
+      "expected_field_value_in": {"sentiment": ["positive", "neutral", "negative"]}
+    },
+    {
+      "case_id": "st08",
+      "_intent": "deeply nested",
+      "messages": [
+        {"role": "system", "content": "Return only JSON."},
+        {"role": "user", "content": "Şirket yapısı uydur: {company: {name, departments: [{name, employees: [{name, role}]}]}}. En az 1 departman, departmanda en az 2 çalışan."}
+      ],
+      "max_tokens": 600,
+      "expected_keys": ["company"],
+      "expected_nested_keys": {"company": ["name", "departments"]}
+    },
+    {
+      "case_id": "st09",
+      "_intent": "extraction with fixed entity types",
+      "messages": [
+        {"role": "system", "content": "You extract structured data. Return only JSON."},
+        {"role": "user", "content": "'Murat dün İstanbul'da Ayşe ile tanıştı, kahve içtiler.' Bu cümleden JSON çıkar: {entities: [{name, type: PERSON|LOCATION|EVENT}], action}."}
+      ],
+      "max_tokens": 400,
+      "expected_keys": ["entities", "action"],
+      "expected_array_min_length": {"entities": 2}
+    },
+    {
+      "case_id": "st10",
+      "_intent": "dict with dynamic keys",
+      "messages": [
+        {"role": "system", "content": "Return only JSON."},
+        {"role": "user", "content": "5 dilin 'merhaba' karşılığını JSON dict olarak ver: {translations: {tr: '...', en: '...', es: '...', de: '...', fr: '...'}}."}
+      ],
+      "max_tokens": 300,
+      "expected_keys": ["translations"],
+      "expected_nested_keys": {"translations": ["tr", "en", "es", "de", "fr"]}
+    }
+  ]
+}

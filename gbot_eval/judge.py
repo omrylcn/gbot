@@ -30,7 +30,7 @@ Scale:
 5 — fully compliant
 
 Respond with strict JSON:
-{"score": 1-5, "reason": "<one short sentence>"}
+{{"score": 1-5, "reason": "<one short sentence>"}}
 
 INSTRUCTION:
 {instruction}

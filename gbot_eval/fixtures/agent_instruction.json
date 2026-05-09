@@ -1,0 +1,127 @@
+{
+  "_comment": "Instruction-following eval — 15 cases. 10 regex-checkable (deterministic), 5 LLM-as-judge (subjective). Curated 2026-05-09.",
+  "cases": [
+    {
+      "case_id": "if01",
+      "_check": "regex",
+      "instruction": "Yanıtı sadece Türkçe ver.",
+      "user_prompt": "What is the capital of Turkey?",
+      "max_tokens": 100,
+      "regex_must_match": "[ğşçıöüĞŞÇİÖÜ]",
+      "regex_must_not_match": null
+    },
+    {
+      "case_id": "if02",
+      "_check": "regex",
+      "instruction": "Cevabını tam 3 madde işaretiyle ver, başka hiçbir metin yazma.",
+      "user_prompt": "Sağlıklı yaşamın 3 önemli kuralı nedir?",
+      "max_tokens": 300,
+      "bullet_count_exact": 3
+    },
+    {
+      "case_id": "if03",
+      "_check": "regex",
+      "instruction": "Sadece 'evet' veya 'hayır' yaz, başka hiçbir şey ekleme.",
+      "user_prompt": "Türkiye Avrupa ülkesi midir?",
+      "max_tokens": 30,
+      "regex_must_match": "(?i)^(evet|hayır)\\.?$"
+    },
+    {
+      "case_id": "if04",
+      "_check": "regex",
+      "instruction": "Cevabın 50 kelimeyi kesinlikle aşmasın.",
+      "user_prompt": "Yapay zekanın tarihçesini özetle.",
+      "max_tokens": 200,
+      "max_words": 50
+    },
+    {
+      "case_id": "if05",
+      "_check": "regex",
+      "instruction": "Cevabında hiçbir URL veya bağlantı bulundurma.",
+      "user_prompt": "Python programlama dili hakkında 2 cümle yaz.",
+      "max_tokens": 200,
+      "regex_must_not_match": "https?://"
+    },
+    {
+      "case_id": "if06",
+      "_check": "regex",
+      "instruction": "Cevabını numaralı liste formatında ver (1. 2. 3. şeklinde).",
+      "user_prompt": "Bir gün boyunca yapılabilecek 3 sağlıklı aktivite öner.",
+      "max_tokens": 250,
+      "regex_must_match": "(?m)^\\s*1\\..*\\n.*^\\s*2\\..*\\n.*^\\s*3\\."
+    },
+    {
+      "case_id": "if07",
+      "_check": "regex",
+      "instruction": "Cevabını sadece JSON olarak ver, başka hiçbir metin yazma. Format: {\"answer\": \"...\"}",
+      "user_prompt": "Türkiye'nin başkenti?",
+      "max_tokens": 100,
+      "json_must_parse": true,
+      "json_required_keys": ["answer"]
+    },
+    {
+      "case_id": "if08",
+      "_check": "regex",
+      "instruction": "Cevabında 'önemli' kelimesini kullanma.",
+      "user_prompt": "Spor neden faydalıdır, kısa açıkla.",
+      "max_tokens": 200,
+      "regex_must_not_match": "(?i)önemli"
+    },
+    {
+      "case_id": "if09",
+      "_check": "regex",
+      "instruction": "Cevabını tam 1 cümle ile ver.",
+      "user_prompt": "Karanlık madde nedir?",
+      "max_tokens": 200,
+      "max_sentences": 1
+    },
+    {
+      "case_id": "if10",
+      "_check": "regex",
+      "instruction": "Cevabın içinde mutlaka 'merhaba' kelimesi geçsin.",
+      "user_prompt": "Bir arkadaşına sabah selamı yaz.",
+      "max_tokens": 100,
+      "regex_must_match": "(?i)merhaba"
+    },
+    {
+      "case_id": "if11",
+      "_check": "judge",
+      "instruction": "Cevabını profesyonel ve resmi bir tonda yaz, samimi/teklifsiz dil kullanma.",
+      "user_prompt": "Çalışana zam talep eden e-posta taslağı yaz.",
+      "max_tokens": 400,
+      "judge_min_score": 4
+    },
+    {
+      "case_id": "if12",
+      "_check": "judge",
+      "instruction": "Cevabında hiçbir kişisel bilgi (isim, telefon, adres, e-posta) örnek olarak bile verme.",
+      "user_prompt": "Bir özgeçmiş örneği nasıl yazılır, anlat.",
+      "max_tokens": 400,
+      "judge_min_score": 4
+    },
+    {
+      "case_id": "if13",
+      "_check": "judge",
+      "instruction": "Cevabını 'önce özet, sonra detay' formatında düzenle. Özet bir paragraf, detay madde işaretli.",
+      "user_prompt": "Mikroservis mimarisinin avantajlarını ve dezavantajlarını anlat.",
+      "max_tokens": 500,
+      "judge_min_score": 3
+    },
+    {
+      "case_id": "if14",
+      "_check": "judge",
+      "instruction": "Cevabını çocuğa anlatır gibi sade bir dilde yaz, teknik jargon kullanma.",
+      "user_prompt": "İnternet nasıl çalışır?",
+      "max_tokens": 400,
+      "judge_min_score": 3
+    },
+    {
+      "case_id": "if15",
+      "_check": "judge",
+      "instruction": "Cevabını mutlaka bir soru ile bitir, kullanıcıyı düşünmeye davet et.",
+      "user_prompt": "Tükenmişlik sendromuyla nasıl başa çıkılır?",
+      "max_tokens": 400,
+      "judge_min_score": 4
+    }
+  ]
+}

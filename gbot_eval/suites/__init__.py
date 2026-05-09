@@ -26,9 +26,13 @@ def _load_suites() -> None:
     2. Append the import here.
     """
     from gbot_eval.suites import agent_delegation  # noqa: F401
+    from gbot_eval.suites import agent_instruction  # noqa: F401
+    from gbot_eval.suites import agent_structured  # noqa: F401
+    from gbot_eval.suites import agent_tool_calling  # noqa: F401
     from gbot_eval.suites import memory_audn  # noqa: F401
     from gbot_eval.suites import memory_extraction  # noqa: F401
     from gbot_eval.suites import memory_page_compile  # noqa: F401
+    from gbot_eval.suites import stress_long_context  # noqa: F401
 
 
 def list_names() -> list[str]:
