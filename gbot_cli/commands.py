@@ -564,3 +564,307 @@ def user_link(
 
     db.link_channel(username, channel, channel_user_id)
     console.print(f"[green]Linked[/green] {channel}:{channel_user_id} [green]to[/green] {username}")
+
+
+# ════════════════════════════════════════════════════════════
+# memory — direct DB access for inspection + lifecycle ops
+# (Faz 22H — quick path that bypasses the admin API token wall)
+# ════════════════════════════════════════════════════════════
+
+memory_app = typer.Typer(help="Inspect and manage user memory.")
+app.add_typer(memory_app, name="memory")
+
+
+def _open_db():
+    from gbot.core.config.loader import load_config
+    from gbot.memory.store import MemoryStore
+
+    config = load_config()
+    return MemoryStore(config.database.path)
+
+
+@memory_app.command("stats")
+def memory_stats(
+    user_id: str = typer.Argument(default="owner", help="User to inspect."),
+) -> None:
+    """Compact memory snapshot — counts by type and lifecycle state."""
+    db = _open_db()
+    with db._get_conn() as conn:
+        rows = conn.execute(
+            """SELECT fact_type, state, COUNT(*) AS n
+               FROM memory_facts WHERE user_id = ?
+               GROUP BY fact_type, state ORDER BY fact_type, state""",
+            (user_id,),
+        ).fetchall()
+        rel_count = conn.execute(
+            "SELECT COUNT(*) FROM memory_relations WHERE user_id = ? AND valid_until IS NULL",
+            (user_id,),
+        ).fetchone()[0]
+        page_count = conn.execute(
+            "SELECT COUNT(*) FROM memory_entity_pages WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()[0]
+
+    if not rows:
+        console.print(f"[dim]No facts found for {user_id}.[/dim]")
+        return
+    table = Table(title=f"Memory snapshot — {user_id}")
+    table.add_column("fact_type", style="cyan")
+    table.add_column("state", style="yellow")
+    table.add_column("count", justify="right", style="green")
+    for r in rows:
+        table.add_row(r["fact_type"], r["state"] or "—", str(r["n"]))
+    console.print(table)
+    console.print(
+        f"\n[dim]Live relations: {rel_count}   Entity pages: {page_count}[/dim]"
+    )
+
+
+@memory_app.command("facts")
+def memory_facts(
+    user_id: str = typer.Argument(default="owner"),
+    state: str = typer.Option(
+        None, "--state",
+        help="Filter by lifecycle state: active|weak|inhibited|archived",
+    ),
+    fact_type: str = typer.Option(None, "--type", help="Filter by fact_type"),
+    limit: int = typer.Option(50, "--limit"),
+    contains: str = typer.Option(None, "--contains", help="Substring match on content"),
+) -> None:
+    """List facts with state, type, importance, age."""
+    db = _open_db()
+    sql = "SELECT fact_id, fact_type, state, importance, access_count, created_at, content FROM memory_facts WHERE user_id = ?"
+    params: list = [user_id]
+    if state:
+        sql += " AND state = ?"
+        params.append(state)
+    if fact_type:
+        sql += " AND fact_type = ?"
+        params.append(fact_type)
+    if contains:
+        sql += " AND content LIKE ?"
+        params.append(f"%{contains}%")
+    sql += " ORDER BY created_at DESC LIMIT ?"
+    params.append(limit)
+    with db._get_conn() as conn:
+        rows = conn.execute(sql, params).fetchall()
+
+    if not rows:
+        console.print("[dim]No facts matched.[/dim]")
+        return
+    table = Table(title=f"{len(rows)} fact(s)")
+    table.add_column("fact_id", style="dim")
+    table.add_column("type", style="cyan")
+    table.add_column("state", style="yellow")
+    table.add_column("imp", justify="right")
+    table.add_column("acc", justify="right")
+    table.add_column("created", style="dim")
+    table.add_column("content", style="white")
+    for r in rows:
+        table.add_row(
+            r["fact_id"][:8],
+            r["fact_type"] or "—",
+            r["state"] or "—",
+            f"{r['importance']:.2f}",
+            str(r["access_count"]),
+            (r["created_at"] or "")[:16],
+            (r["content"] or "")[:80],
+        )
+    console.print(table)
+
+
+@memory_app.command("inhibit")
+def memory_inhibit(
+    fact_id: str = typer.Argument(help="Fact ID (full or 8-char prefix)"),
+    days: int = typer.Option(7, "--days", help="Hold duration"),
+) -> None:
+    """Temporarily exclude a fact from retrieval (Faz 22G)."""
+    db = _open_db()
+    full_id = _resolve_fact_id(db, fact_id)
+    if not full_id:
+        console.print(f"[red]Fact not found:[/red] {fact_id}")
+        raise typer.Exit(1)
+    ok = db.inhibit_fact(full_id, hold_days=days)
+    if ok:
+        console.print(f"[yellow]Inhibited[/yellow] {full_id[:8]} for {days} days")
+    else:
+        console.print(
+            "[dim]No change — fact already archived or not active.[/dim]"
+        )
+
+
+@memory_app.command("restore")
+def memory_restore(
+    fact_id: str = typer.Argument(help="Fact ID (full or 8-char prefix)"),
+) -> None:
+    """Restore an INHIBITED fact to ACTIVE (Faz 22G)."""
+    db = _open_db()
+    full_id = _resolve_fact_id(db, fact_id)
+    if not full_id:
+        console.print(f"[red]Fact not found:[/red] {fact_id}")
+        raise typer.Exit(1)
+    ok = db.restore_fact(full_id)
+    if ok:
+        console.print(f"[green]Restored[/green] {full_id[:8]} to active")
+    else:
+        console.print("[dim]Fact wasn't inhibited; nothing to restore.[/dim]")
+
+
+@memory_app.command("decay")
+def memory_decay(
+    user_id: str = typer.Argument(default="owner"),
+    archive_threshold: float = typer.Option(0.1, "--threshold"),
+) -> None:
+    """Run apply_decay manually — fade ACTIVE→WEAK, archive low-importance."""
+    db = _open_db()
+    result = db.apply_decay(user_id, archive_threshold=archive_threshold)
+    table = Table(title=f"Decay run — {user_id}")
+    table.add_column("metric", style="cyan")
+    table.add_column("count", justify="right", style="green")
+    table.add_row("faded (active→weak / weak→deeper)", str(result["faded"]))
+    table.add_row("archived", str(result["archived"]))
+    table.add_row("auto-restored from inhibited", str(result.get("restored", 0)))
+    console.print(table)
+    by_type = result.get("by_type", {})
+    if by_type:
+        console.print("\n[dim]Faded by type:[/dim]")
+        for t, n in by_type.items():
+            console.print(f"  {t}: {n}")
+
+
+@memory_app.command("archive-old")
+def memory_archive_old(
+    user_id: str = typer.Argument(default="owner"),
+    days: int = typer.Option(14, "--days", help="Min age in days"),
+    fact_type: str = typer.Option(
+        "episodic", "--type",
+        help="Restrict to a fact_type (default 'episodic'); use 'all' to skip the filter",
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+) -> None:
+    """Archive facts older than ``days`` regardless of access_count.
+
+    ``apply_decay`` skips frequently-accessed facts on purpose so loved
+    rows don't fade. That's right for semantic / preference, wrong for
+    stale episodic ones (a 'meeting yesterday' note is useless 23 days
+    later even if it kept getting retrieved). This command bypasses the
+    access_count guard for the cases where age alone should win.
+    """
+    db = _open_db()
+    sql = (
+        "SELECT fact_id, fact_type, content, importance, access_count, created_at "
+        "FROM memory_facts WHERE user_id = ? "
+        "  AND valid_until IS NULL "
+        "  AND julianday('now') - julianday(created_at) > ?"
+    )
+    params: list = [user_id, days]
+    if fact_type and fact_type != "all":
+        sql += " AND fact_type = ?"
+        params.append(fact_type)
+    sql += " ORDER BY created_at"
+    with db._get_conn() as conn:
+        rows = conn.execute(sql, params).fetchall()
+
+    if not rows:
+        console.print(
+            f"[dim]No {fact_type} facts older than {days}d for {user_id}.[/dim]"
+        )
+        return
+
+    console.print(
+        f"[yellow]Found {len(rows)} {fact_type} fact(s) older than {days}d:[/yellow]"
+    )
+    for r in rows[:10]:
+        console.print(
+            f"  {(r['fact_id'] or '')[:8]}  "
+            f"[dim]{(r['created_at'] or '')[:10]}[/dim]  "
+            f"acc={r['access_count']}  "
+            f"{(r['content'] or '')[:80]}"
+        )
+    if len(rows) > 10:
+        console.print(f"  [dim]... +{len(rows) - 10} more[/dim]")
+
+    if dry_run:
+        console.print("\n[cyan]Dry run — nothing changed.[/cyan]")
+        return
+
+    for r in rows:
+        db.invalidate_fact(r["fact_id"])
+    console.print(f"\n[green]Archived {len(rows)} fact(s).[/green]")
+
+
+@memory_app.command("forget")
+def memory_forget(
+    entity: str = typer.Argument(help="Canonical entity name to archive"),
+    user_id: str = typer.Argument(default="owner"),
+) -> None:
+    """Cascade-archive an entity — invalidates relations + facts mentioning it,
+    deletes its derived entity page.
+    """
+    db = _open_db()
+    surface_forms = {entity}
+    try:
+        from gbot.memory.entities import EntityResolver
+
+        resolver = EntityResolver(db)
+        surface_forms |= resolver.expand(user_id, entity)
+    except Exception:
+        pass
+
+    with db._get_conn() as conn:
+        # Relations
+        conn.execute(
+            """UPDATE memory_relations SET valid_until = CURRENT_TIMESTAMP
+               WHERE user_id = ? AND valid_until IS NULL
+                 AND (canonical_source = ? OR canonical_target = ?
+                      OR source_entity = ? OR target_entity = ?)""",
+            (user_id, entity, entity, entity, entity),
+        )
+        rel_n = conn.execute("SELECT changes()").fetchone()[0]
+        # Facts
+        forms_lower = [s.lower() for s in surface_forms if s]
+        rows = conn.execute(
+            "SELECT fact_id, content FROM memory_facts WHERE user_id = ? AND valid_until IS NULL",
+            (user_id,),
+        ).fetchall()
+        fact_n = 0
+        for r in rows:
+            content_lc = (r["content"] or "").lower()
+            if any(form in content_lc for form in forms_lower):
+                db.invalidate_fact(r["fact_id"])
+                fact_n += 1
+        conn.execute(
+            "DELETE FROM memory_entity_pages WHERE user_id = ? AND entity_canonical = ?",
+            (user_id, entity),
+        )
+        page_n = conn.execute("SELECT changes()").fetchone()[0]
+        conn.commit()
+
+    console.print(
+        f"[yellow]Forgot[/yellow] {entity}: "
+        f"{rel_n} relation(s) invalidated, "
+        f"{fact_n} fact(s) archived, "
+        f"{page_n} entity page(s) deleted."
+    )
+
+
+def _resolve_fact_id(db, prefix: str) -> str | None:
+    """Resolve an 8-char prefix to a full fact_id; returns full id unchanged."""
+    if not prefix:
+        return None
+    with db._get_conn() as conn:
+        if len(prefix) >= 24:
+            row = conn.execute(
+                "SELECT fact_id FROM memory_facts WHERE fact_id = ?",
+                (prefix,),
+            ).fetchone()
+            return row[0] if row else None
+        rows = conn.execute(
+            "SELECT fact_id FROM memory_facts WHERE fact_id LIKE ? LIMIT 2",
+            (prefix + "%",),
+        ).fetchall()
+    if len(rows) == 1:
+        return rows[0][0]
+    if len(rows) > 1:
+        console.print(f"[red]Ambiguous prefix:[/red] {prefix} matches multiple")
+    return None

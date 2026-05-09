@@ -6,6 +6,61 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.24.1] - 2026-05-09 — gbot memory CLI
+
+Direct DB-side commands for inspecting and managing memory without
+the admin API token wall. Operational gap discovered during a
+production audit (the running container's image was 11 days old —
+user_version=0, none of the 22D/22E/22F/22G migrations had ever
+executed). Rebuild + recreate brought the schema to user_version 23
+and surfaced a second gap: ``apply_decay`` skips frequently-accessed
+facts on purpose, so 23-day-old episodic notes survive even when
+they're stale. The new ``archive-old`` command bypasses that guard
+when age alone should win.
+
+### Added — `gbot memory <subcommand>`
+
+| Command | What |
+|---|---|
+| `stats [user]` | Counts by ``fact_type × state``, plus live relations + entity pages |
+| `facts [user] [--state X --type Y --contains "..." --limit N]` | Filtered fact listing with state/imp/age |
+| `inhibit <fact_id> [--days 7]` | Faz 22G — temporary retrieval exclusion (8-char prefix accepted) |
+| `restore <fact_id>` | Faz 22G — INHIBITED → ACTIVE |
+| `decay [user] [--threshold 0.1]` | Manual ``apply_decay`` trigger; reports faded / archived / restored |
+| `archive-old [user] [--days 14 --type episodic --dry-run]` | **NEW** — invalidates facts older than ``days`` regardless of access_count |
+| `forget <entity> [user]` | Cascade-archive: relations invalidated, mentioning facts archived, entity page deleted |
+
+All commands hit ``MemoryStore`` directly (no API auth needed) — same
+permission as the user running the CLI. Faster than `curl` against
+``/admin/memory/...`` for ad-hoc inspection.
+
+### Fixed (operational, not code)
+
+Production audit revealed the running gbot container had been up for
+2 days but the underlying image was 11 days old. Last 4 releases
+(v1.21.0 → v1.24.0) had been pushed but never rebuilt/redeployed:
+
+- DB ``user_version=0`` (expected 23)
+- ``state`` / ``inhibited_until`` columns absent
+- 24 maintenance cron jobs not registered
+- 53 episodic facts dating back 23 days still in retrieval pool
+
+After ``docker compose build gbot && docker compose up -d
+--force-recreate gbot``: migrations ran clean (94 relations
+backfilled, state column added with backfill from valid_until +
+importance), 44 stale episodic facts archived via the new
+``archive-old`` command. Lesson logged: every ship from v1.21.0
+onwards should explicitly call out 'private push' vs 'production
+deploy'; tests passing ≠ feature live.
+
+### Tests
+
+No new unit tests — these are thin DB-direct commands; coverage
+sits with the underlying ``MemoryStore`` methods (test_memory_lifecycle,
+test_persona_memory). 445 total still passing.
+
+---
+
 ## [1.24.0] - 2026-05-09 — Faz 22H: Temporal awareness
 
 GBot zamanı algılayamıyor diye 12 gün önceki bir niyeti hâlâ taze
