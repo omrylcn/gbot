@@ -179,6 +179,26 @@ class MemoryUpdateConfig(BaseModel):
     add_threshold: float = 0.65
 
 
+class LLMRerankConfig(BaseModel):
+    """Faz 22G Aşama 5 — Engram-style read-time deep scoring.
+
+    When ``enabled``, the ContextBuilder asks an LLM (typically the
+    cheap ``memory.model``) to re-rank the broad candidate pool against
+    the current query before truncating to ``top_k_final``. Multiplier:
+    one extra LLM call per turn — fail-safe falls back to the
+    multiplicative formula on any error.
+
+    Off by default; opt in once gbot-eval's retrieval_quality suite
+    shows a clear win on your fixture set.
+    """
+
+    enabled: bool = False
+    model: str | None = None         # None → uses MemoryConfig.model
+    candidates_pool: int = 30        # bumped from top_k_candidates when on
+    max_output_tokens: int = 200
+    temperature: float = 0.0
+
+
 class MemoryRetrievalConfig(BaseModel):
     """Faz 22D — semantic retrieval gating for memory_facts."""
 
@@ -188,6 +208,8 @@ class MemoryRetrievalConfig(BaseModel):
     max_distance: float | None = 0.45
     top_k_candidates: int = 20  # broad pool fed to rerank
     top_k_final: int = 10       # what enters context after rerank
+    # Faz 22G Aşama 5 — opt-in LLM rerank.
+    llm_rerank: LLMRerankConfig = Field(default_factory=LLMRerankConfig)
 
 
 class PromptCacheConfig(BaseModel):

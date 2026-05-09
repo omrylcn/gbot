@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from typing import Any
+
+from loguru import logger
 
 from gbot.agent.context.models import LayerResult
 from gbot.agent.profiles import get_agent_md, get_agent_skills
@@ -162,14 +165,31 @@ class ContextBuilder:
                     # Stage 1: broad candidates (similarity + distance gate).
                     # The gate is applied inside the SQL CTE so the rerank
                     # pool never sees distant-but-resurrectable noise.
+                    pool_size = retrieval_cfg.top_k_candidates
+                    if (
+                        retrieval_cfg.llm_rerank.enabled
+                        and retrieval_cfg.llm_rerank.candidates_pool > pool_size
+                    ):
+                        pool_size = retrieval_cfg.llm_rerank.candidates_pool
                     candidates = self.db.search_similar_facts(
                         user_id,
                         query_emb,
-                        top_k=retrieval_cfg.top_k_candidates,
+                        top_k=pool_size,
                         max_distance=retrieval_cfg.max_distance,
                     )
-                    # Stage 2: re-rank by similarity × retrieval_strength
-                    facts = self._rerank_facts(candidates, top_k=retrieval_cfg.top_k_final)
+                    # Stage 2: re-rank.
+                    if retrieval_cfg.llm_rerank.enabled and candidates:
+                        facts = self._llm_rerank(
+                            candidates,
+                            query=last_message,
+                            top_k=retrieval_cfg.top_k_final,
+                            llm_cfg=retrieval_cfg.llm_rerank,
+                            fallback_top_k=retrieval_cfg.top_k_final,
+                        )
+                    else:
+                        facts = self._rerank_facts(
+                            candidates, top_k=retrieval_cfg.top_k_final
+                        )
                 else:
                     facts = self.db.get_facts(user_id, valid_only=True, limit=15)
                 if facts:
@@ -455,6 +475,109 @@ class ContextBuilder:
 
         candidates.sort(key=lambda f: f["final_score"], reverse=True)
         return candidates[:top_k]
+
+    def _llm_rerank(
+        self,
+        candidates: list[dict],
+        query: str,
+        top_k: int,
+        llm_cfg: Any,
+        fallback_top_k: int | None = None,
+    ) -> list[dict]:
+        """Faz 22G Aşama 5 — Engram-style read-time deep scoring.
+
+        Asks an LLM to re-order the candidate pool against the actual
+        query text instead of the static multiplicative formula. The
+        LLM call is an extra hot-path latency hit; opt in via
+        ``memory.retrieval.llm_rerank.enabled``.
+
+        Always falls back to ``_rerank_facts`` on any error so a flaky
+        provider can never break retrieval. Async LLM call runs in a
+        worker thread so the surrounding sync ContextBuilder stays
+        compatible.
+        """
+        import asyncio
+        import concurrent.futures
+        import json
+
+        fallback = fallback_top_k or top_k
+        if not candidates:
+            return []
+        # Cap candidates for the prompt so token cost stays bounded.
+        prompt_pool = candidates[: max(top_k, llm_cfg.candidates_pool)]
+        listing = "\n".join(
+            f"[{i}] {(c.get('content') or '')[:240]}"
+            for i, c in enumerate(prompt_pool)
+        )
+        n = min(top_k, len(prompt_pool))
+        prompt = (
+            "Bu sorgu için en alakalı {n} fact'i seç ve sırala. Tam "
+            "JSON formatında dön: {{\"ranked\": [<index>, ...]}}\n\n"
+            "QUERY:\n{query}\n\n"
+            "CANDIDATES:\n{listing}"
+        ).format(n=n, query=query, listing=listing)
+
+        from gbot.core.providers import litellm as llm_provider
+
+        model = llm_cfg.model or self.config.memory.model
+
+        async def _call():
+            return await llm_provider.achat(
+                messages=[{"role": "user", "content": prompt}],
+                model=model,
+                temperature=llm_cfg.temperature,
+                max_tokens=llm_cfg.max_output_tokens,
+                response_format={"type": "json_object"},
+            )
+
+        # Drive the async call. If we're inside a running event loop
+        # (typical FastAPI handler), use a thread to avoid nested-loop
+        # errors. Otherwise asyncio.run is fine.
+        try:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop is not None:
+                with concurrent.futures.ThreadPoolExecutor() as ex:
+                    response = ex.submit(asyncio.run, _call()).result()
+            else:
+                response = asyncio.run(_call())
+            text = (response.content or "").strip()
+            if not text:
+                extras = getattr(response, "additional_kwargs", {}) or {}
+                text = (extras.get("reasoning_content") or "").strip()
+            data = json.loads(text)
+            ranked_indices = [
+                int(i) for i in (data.get("ranked") or [])
+                if isinstance(i, (int, float, str))
+                and str(i).strip().lstrip("-").isdigit()
+            ]
+        except Exception as e:
+            logger.warning(f"llm_rerank failed, falling back to static: {e}")
+            return self._rerank_facts(candidates, top_k=fallback)
+
+        if not ranked_indices:
+            return self._rerank_facts(candidates, top_k=fallback)
+
+        # Resolve indices to candidate rows; ignore out-of-range.
+        seen: set[int] = set()
+        ordered: list[dict] = []
+        for idx in ranked_indices:
+            if 0 <= idx < len(prompt_pool) and idx not in seen:
+                seen.add(idx)
+                ordered.append(prompt_pool[idx])
+            if len(ordered) >= top_k:
+                break
+        # Fill any remainder from the static-formula tail to keep
+        # top_k stable when the model returns fewer indices than asked.
+        if len(ordered) < top_k:
+            tail = self._rerank_facts(
+                [c for i, c in enumerate(prompt_pool) if i not in seen],
+                top_k=top_k - len(ordered),
+            )
+            ordered.extend(tail)
+        return ordered[:top_k]
 
     def _detect_canonical_entities(
         self, user_id: str, facts: list[dict]
