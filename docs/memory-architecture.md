@@ -1,9 +1,13 @@
 # Memory Architecture
 
 GBot'un hafıza katmanı — şu an nasıl çalışıyor, planda ne var, araştırmaya
-göre ne eklenebilir. Faz 22A→22D (v1.16.0–v1.20.1) ile inşa edilen bu
+göre ne eklenebilir. Faz 22A→22G (v1.16.0–v1.23.0) ile inşa edilen bu
 katman, A-Mem akademik temeli ve Engram open-source çizgisiyle %95
 hizalı; Karpathy LLM-Wiki paterninden entity-page kavramını alıyor.
+
+> **Pratik kullanım için** → `docs/memory-usage.md`. Bu dosya iç
+> mimari ve tasarım kararları odaklı; günlük operasyon ve config
+> opt-in flag'leri ayrı belgede.
 
 ---
 
@@ -40,6 +44,8 @@ dependency yok (Postgres, Redis, Qdrant, Neo4j hiçbiri yok). 8 tablo,
 │   confidence, importance, access_count,                     │
 │   valid_from, valid_until, superseded_by,                   │
 │   keywords, source, source_session, source_channel          │
+│   state ∈ {active, weak, inhibited, archived}  ◄ Faz 22G   │
+│   inhibited_until, last_accessed_at             ◄ Faz 22G   │
 │   created_at, updated_at                                    │
 └─────────────────────────────────────────────────────────────┘
         │
@@ -101,13 +107,22 @@ dependency yok (Postgres, Redis, Qdrant, Neo4j hiçbiri yok). 8 tablo,
 ```
 
 **Toplam: 8 tablo + 1 virtual.** Hepsi aynı `gbot.db` dosyasında.
+**PRAGMA user_version: 23** (Faz 22G ile bumped).
 
-`memory_facts.fact_type ∈ {semantic, episodic, preference, procedural}`
-A-Mem'in bilişsel taksonomisinden geliyor.
-`memory_facts.category` 10 sabit değer (location, work, tech, personal,
-preference, interest, habit, finance, health, relationship) →
+`memory_facts.fact_type ∈ {semantic, episodic, preference, procedural,
+style}` — A-Mem'in bilişsel taksonomisi + Faz 22G'de eklenen `style`
+(LinkedIn Cognitive Memory paterni).
+`memory_facts.category` 11 sabit değer (location, work, tech, personal,
+preference, interest, habit, finance, health, relationship, style) →
 `workspace/memory_schema.md`'de tanımlı (Karpathy schema-as-document
 paterni).
+
+`memory_facts.state` (Faz 22G) explicit lifecycle:
+- **active** — taze, retrieval'da tam ağırlık
+- **weak** — fade sonrası, retrieval'a giriyor ama düşük öncelik
+- **inhibited** — geçici dışlama (`inhibited_until` lapse'ına kadar);
+  `apply_decay` otomatik geri alır
+- **archived** — `valid_until` set, retrieval dışı (audit-only)
 
 ---
 
@@ -260,12 +275,21 @@ Her kullanıcı mesajında çalışır. Sync (~100-200ms toplam: 1 embed call
        │      - favorites (note_type='favorite')
        │      Render: "USER NOTES: ...\nPREFERENCES: ...\nFAVORITES: ..."
        │
-       │  2.2 LEARNED — 2-stage retrieval:
+       │  2.2 STYLE — Faz 22G, kullanıcının iletişim tonu:
+       │      style_facts = db.get_facts(fact_type='style', limit=8)
+       │          (query-similarity gating UYGULANMAZ — her turn'de göster)
+       │      Render: "USER STYLE:\n- Kısa cevap tercih ediyor\n- ..."
+       │      LLM her cevabı bu stil sinyallerine göre şekillendirir.
+       │
+       │  2.3 LEARNED — 2-stage retrieval:
        │      embedder.embed(last_message)  ← 1 API call
        │      candidates = db.search_similar_facts(
        │          top_k=20, max_distance=0.45)
        │          ← SQL CTE: vec_memory_facts MATCH + JOIN memory_facts
-       │             WHERE valid_until IS NULL AND distance ≤ 0.45
+       │             WHERE valid_until IS NULL
+       │               AND state IN ('active', 'weak')             ◄ Faz 22G
+       │               AND (inhibited_until IS NULL OR expired)    ◄ Faz 22G
+       │               AND distance ≤ 0.45
        │      facts = _rerank_facts(candidates, top_k=10):
        │          for each fact:
        │              recency = max(0.1, 1.0 - days_old/365)
@@ -274,10 +298,19 @@ Her kullanıcı mesajında çalışır. Sync (~100-200ms toplam: 1 embed call
        │              similarity = 1.0 - distance
        │              final_score = similarity × strength
        │          sort desc, take top_k
+       │
+       │      OPSİYONEL (memory.retrieval.llm_rerank.enabled — Faz 22G):
+       │          candidates_pool=30 (statik formula yerine 20)
+       │          LLM call (memory.model — gemini-3-flash):
+       │              "Bu sorgu için en alakalı {top_k} fact'i sırala"
+       │              JSON: {"ranked": [<index>, ...]}
+       │          On error → static formula'ya graceful fallback.
+       │          Cost: ~$0.0002/query, latency +0.5-1.5s.
+       │
        │      Render: "LEARNED FACTS:\n- ..."
        │      db.batch_increment_access(fact_ids)  ← feedback loop
        │
-       │  2.3 BACKLINKS (config.memory.relations.enabled ise):
+       │  2.4 BACKLINKS (config.memory.relations.enabled ise):
        │      _detect_canonical_entities(facts):
        │          - Tek SQL: kullanıcı için tüm canonical entity set'i çek
        │          - Her fact.content içinde substring match
@@ -288,7 +321,7 @@ Her kullanıcı mesajında çalışır. Sync (~100-200ms toplam: 1 embed call
        │              Render: "**Entity**:\n  - src → relation → tgt"
        │      Block: "RELATIONSHIPS:\n..."
        │
-       │  2.4 ENTITY PAGES (config.memory.entity_pages.enabled ise):
+       │  2.5 ENTITY PAGES (config.memory.entity_pages.enabled ise):
        │      _render_entity_pages_block(entities):
        │          For top max_pages_in_context (default 3) entity:
        │              page = db.get_entity_page(canonical)  ← access++
@@ -296,9 +329,10 @@ Her kullanıcı mesajında çalışır. Sync (~100-200ms toplam: 1 embed call
        │              Stale page → "## Entity *(stale — recompile pending)*"
        │      Block: "ENTITY PAGES:\n..."
        │
-       │  Combined: explicit + learned + relationships + entity_pages
-       │  (en üstte raw fact'ler, en altta derlenmiş — LLM "raw → derived"
-       │  okur, stale page fresh fact'i ezme riski azalır)
+       │  Combined: explicit + style + learned + relationships + entity_pages
+       │  (USER STYLE en üstte — voice, sonra raw fact'ler, en altta
+       │  derlenmiş; LLM "voice → raw → derived" okur, stale page fresh
+       │  fact'i ezme riski azalır)
        │
        ├─ session_summary (önceki session özeti — anchored summary pattern)
        ├─ skills (always-on skill content — workspace/skills/*/SKILL.md)
@@ -321,19 +355,27 @@ Yerine `gbot/memory/maintenance.py`.
 
 ```
 MemoryMaintenance.run_daily(user_id):
-    1. Type-aware decay (db.apply_decay):
-         For each fact_type in {episodic, procedural, semantic, preference}:
-             Stage 1 fade — older than fade_days, access_count=0
+    1. Type-aware decay with explicit state transitions (db.apply_decay):
+         For each fact_type in {episodic, procedural, semantic,
+                                preference, style}:        ◄ Faz 22G
+             Stage 1 fade — older than fade_days, access_count=0,
+                            state='active'
                  → importance × fade_factor
+                 → state = 'weak'                          ◄ Faz 22G
              Stage 2 fade — older than archive_days, still untouched
                  → importance × archive_factor
-         Archive — importance < 0.1 → valid_until = now()
+         Archive — importance < threshold (default 0.1)
+                 → valid_until = now()
+                 → state = 'archived'                      ◄ Faz 22G
+         Auto-restore — INHIBITED rows whose hold expired   ◄ Faz 22G
+                 → state = 'active', inhibited_until = NULL
 
          Defaults:
              episodic    14d × 0.7  / 60d × 0.4
              procedural  60d × 0.85 / 180d × 0.6
              semantic    90d × 0.85 / 365d × 0.6
              preference  120d × 0.9 / 365d × 0.7
+             style       180d × 0.92 / 540d × 0.75   ◄ Faz 22G (slowest)
 
     2. Stale page recompile catch-up:
          For each page WHERE stale=1:
@@ -353,9 +395,21 @@ MemoryMaintenance.run_now(user_id):
     Daily + weekly birden — admin endpoint için manuel tetik.
 ```
 
-Şu an **otomatik schedule yok** — admin endpoint (`POST
-/admin/memory/{user_id}/maintenance/run`) ile manuel tetiklenebilir. Faz
-22E'de cron entegrasyonu planlı.
+**Otomatik schedule (Faz 22E Step 2):** her kullanıcı için
+APScheduler ile `daily-maintenance-{user}` (default `0 4 * * *`) ve
+`weekly-maintenance-{user}` (default `30 4 * * 0`) cron job'ları
+startup'ta `_ensure_maintenance_jobs` ile idempotent olarak kayıt
+edilir. Manuel tetik hâlâ
+`POST /admin/memory/{user_id}/maintenance/run` üzerinden mümkün.
+
+**Lifecycle helpers (Faz 22G admin endpoints):**
+
+- `POST /admin/memory/{user}/facts/{id}/inhibit?hold_days=7` —
+  geçici dışlama; varsayılan 7 gün sonra `apply_decay` otomatik
+  geri alır.
+- `POST /admin/memory/{user}/facts/{id}/restore` — INHIBITED → ACTIVE
+- `GET /admin/memory/{user}/facts?state=weak|inhibited|archived` —
+  state'e göre filtrelenmiş liste.
 
 ---
 
@@ -416,25 +470,28 @@ extraction kontratını paylaşır. Per-user kişisel prompt'lama yok (Faz
 | 22D Part 1 — Backlinks revival | v1.19.0 | Partial UNIQUE on relations, dedup migration (155→94), canonical_source/target columns, EntityResolver (3-tier), distance gate (max_distance=0.45), backlinks injection in ContextBuilder (RELATIONSHIPS block), opportunistic backfill at startup |
 | 22D Part 2 — Entity Pages + Maintenance + Forget | v1.20.0 | memory_entity_pages tablosu, EntityPageCompiler (debounced 60s), Karpathy LLM-Wiki entity-page injection, type-aware decay rates, MemoryMaintenance (consolidation.py dead code'u silindi), forget_entity cascade, memory_schema.md (public extraction contract) |
 | 22D Part 3 — Admin + Dashboard | v1.20.1 | 7 admin endpoint (relations/entities/pages/recompile/maintenance/retrieval-debug/forget), Memory.tsx 4 tab (Facts/Relations/Pages/Debug), retrieval debug ile distance histogram |
+| 22E — Hardening + gbot-eval (Step 5) | v1.21.0 | Anthropic/Gemini prompt caching (cache_control breakpoint), otomatik daily/weekly maintenance cron schedule, LOCOMO-mini retrieval benchmark (`tests/memory_benchmark/`), session summary'lerine ARTIFACTS section, gbot-eval LLM evaluation framework (3 memory + 4 agent + 1 stress suite) |
+| 22E Step 5K — LiteLLM removal | v1.21.1 | OpenRouter SDK provider'a kesin geçiş; LiteLLM dead code silindi, `litellm` dep çıkarıldı (~50MB) |
+| 22F — gbot-eval YAML refactor | v1.22.0 | Suite definitions YAML'a taşındı (Python yerine), 22 scoring kind'lık DSL + restricted Python escape hatch, multi_turn coherence suite, OpenRouter `/api/v1/models` live pricing refresh, soft-dep import-guards, reasoning model auto-handling |
+| 22G — Memory roadmap (5 features) | v1.23.0 | 4-state lifecycle (ACTIVE/WEAK/INHIBITED/ARCHIVED) on memory_facts + auto state transitions in apply_decay + inhibit/restore admin endpoints, persona/style memory (`fact_type='style'` slow decay + USER STYLE block), D3/cytoscape relations graph viz in dashboard, Obsidian vault sync (entity pages → markdown export, opt-in cron), Engram-style LLM rerank (opt-in retrieval-time deep scoring with static fallback) |
 
-**Şu an: 374 unit test geçiyor. Memory layer canlı dogfood'da, gerçek
-DB'de 71 fact + 94 unique relation çalışıyor.**
+**Şu an: 434 unit test geçiyor. Memory layer canlı dogfood'da; PRAGMA
+user_version=23.**
 
-### Mevcut planda bekleyen (Faz 22E — sıradaki release)
+### Bekleyen / sonraki adımlar
 
-Bunlar v1.20'de plan edildi ama kapsam dışında bırakıldı:
+Faz 22A→22G ile memory roadmap'in TBD listesi tamamlandı. İleri adımlar:
 
-1. **Otomatik maintenance scheduling** — `MemoryMaintenance.run_daily`
-   günlük cron olarak `background_tasks` tablosuna kayıtlı şekilde.
-   Şu an admin endpoint ile manuel tetikleniyor.
-2. **Manual alias editing UI** — dashboard'da `memory_entity_aliases`
-   düzenleme. Yanlış canonical eşleşmelerini düzeltmek için.
-3. **D3 / cytoscape relations graph viz** — şu an liste; node-edge
-   gezinme ileri sürüm.
-4. **Obsidian sync** — entity pages'i gerçek `.md` dosyalarına export.
-   Kullanıcı kendi vault'una bağlasın.
-5. **3-state lifecycle (ACTIVE / WEAK / ARCHIVED)** — şu an binary
-   (valid/invalid). WEAK middle-state retrieval priority düşürür.
+1. **GDPR hard-delete + audit log** — `forget_entity(hard=True)` ile
+   gerçek satır silimi + `memory_audit_log` separate file. Personal
+   asistan için non-blocker, multi-tenant SaaS için zorunlu.
+2. **GDPR data export endpoint** — `GET /admin/memory/{user}/export`
+   ZIP olarak (Art. 20 portability).
+3. **Manual alias editing UI** — dashboard'da
+   `memory_entity_aliases` düzenleme. Yanlış canonical eşleşmelerini
+   düzeltmek için.
+4. **Dashboard user-facing vs internal split** — `min_confidence`
+   slider, "Senin hakkında ne biliyoruz" sade view.
 
 ---
 
@@ -444,7 +501,7 @@ Bunlar v1.20'de plan edildi ama kapsam dışında bırakıldı:
 2026, Factory.ai anchored summary, GDPR heydata, SpeakBetter memory
 notes) çıktısı. Önceliğe göre.
 
-### 9.1 🟢 P0 — Prompt caching (yüksek ROI, az iş)
+### 9.1 🟢 P0 — Prompt caching (yüksek ROI, az iş) ✅ v1.21.0
 
 **Sorun:** Sistem prompt'u (identity + skills + role + agent_memory)
 yaklaşık 3-5K token. Her turn'de yeniden gönderiliyor. Kullanıcı 20
@@ -548,7 +605,7 @@ karşılaştırması yapılmadı.
 
 **Efor:** 4-6 saat. Internal benchmark suite (LOCOMO mini).
 
-### 9.6 🟡 P1 — Read-time relevance scoring (Engram pattern)
+### 9.6 🟡 P1 — Read-time relevance scoring (Engram pattern) ✅ v1.23.0 (opt-in)
 
 **Sorun:** Engram %80 LOCOMO ulaşıyor; Mem0 %67. Engram'ın insight'ı:
 **"read-time optimization over write-time"**. Bizde write-time'da fact
@@ -583,7 +640,7 @@ sil" butonlarıyla.
 
 **Efor:** 4-6 saat dashboard + 2 yeni endpoint.
 
-### 9.8 🟢 P2 — Internal memory benchmark suite
+### 9.8 🟢 P2 — Internal memory benchmark suite ✅ v1.21.0
 
 **Sorun:** Versiyondan versiyona regresyon yok diye bilmiyoruz.
 "v1.20.0 v1.19.0'dan iyi mi?" niceliksel cevabımız yok.
@@ -597,7 +654,7 @@ sil" butonlarıyla.
 
 **Efor:** 6-10 saat (en zoru fixture küratörü).
 
-### 9.9 🔵 P3 — 4-state lifecycle (ACTIVE / WEAK / INHIBITED / ARCHIVED)
+### 9.9 🔵 P3 — 4-state lifecycle (ACTIVE / WEAK / INHIBITED / ARCHIVED) ✅ v1.23.0
 
 **Sorun:** Şu an binary. Decay importance düşürdükçe sadece score
 düşüyor; "yarı-unutulmuş" state yok.
@@ -628,7 +685,7 @@ academic insight sadece bu paterne **isim** veriyor.
 "LECTOR-style semantic neighbor injection via memory_relations" diye
 belgele.
 
-### 9.11 🔵 P3 — Persona / style memory (declared + behavioural)
+### 9.11 🔵 P3 — Persona / style memory (declared + behavioural) ✅ v1.23.0
 
 **Sorun:** Şu an "kullanıcı resmi mi konuşuyor, samimi mi" gibi style
 sinyalleri saklanmıyor. Memory'de "Ömer İstanbul'da yaşıyor" var ama
@@ -689,7 +746,43 @@ GBot'un memory layer kararları şu kaynaklardan beslenir:
 
 ---
 
-## 12. İlerlemeyi nereden takip etmek
+## 12. Kalite ölçümü — `gbot-eval` (Faz 22E + 22F)
+
+Memory layer'ın LLM-yoğun adımları (extraction, AUDN, entity-page
+compile) artık `gbot-eval` framework'unda regression-tested.
+
+| Suite | Ne ölçer |
+|---|---|
+| `memory.extraction` | Fact recall + relation recall + category accuracy |
+| `memory.audn` | ADD/UPDATE/DELETE/NOOP exact-match accuracy |
+| `memory.page_compile` | Composite: 40% keyword + 30% no-hallu + 15% format + 15% citation |
+
+```bash
+# Production model baseline
+gbot-eval run --suite=memory --model=openrouter/google/gemini-3-flash-preview
+
+# Hızlı %20 sample
+gbot-eval run --suite=memory --sample=20
+
+# Yeni model dene
+gbot-eval run --suite=memory --model=openrouter/moonshotai/kimi-k2.6
+gbot-eval matrix
+gbot-eval baseline diff
+```
+
+Ek olarak `tests/memory_benchmark/` LOCOMO-mini retrieval benchmark
+(recall@K, MRR) `pytest -m benchmark` ile koşar.
+
+**Baseline (gemini-3-flash, v1.23.0):**
+- memory.extraction quality 0.80
+- memory.audn quality 0.93
+- memory.page_compile composite ~0.85
+
+Detay: `gbot_eval/README.md`.
+
+---
+
+## 13. İlerlemeyi nereden takip etmek
 
 | Konu | Yer |
 |---|---|
@@ -697,7 +790,9 @@ GBot'un memory layer kararları şu kaynaklardan beslenir:
 | Mimari kararlar (tarihsel) | `notes/mimari_kararlar.md` |
 | Bug günlüğü (root causes + fixes) | `notes/journal.md` |
 | Manuel test rehberi | `notes/test.md` |
-| Bu dosya (memory) | `docs/memory-architecture.md` |
+| Bu dosya (memory iç mimari) | `docs/memory-architecture.md` |
+| Memory pratik kullanım rehberi | `docs/memory-usage.md` |
 | Kod | `gbot/memory/` |
 | Schema kontratı | `workspace/memory_schema.md` |
 | Memory agent prompt | `workspace/agents/memory/AGENT.md` |
+| LLM kalite ölçümü | `gbot_eval/README.md` |
