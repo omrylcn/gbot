@@ -25,6 +25,7 @@ def _load_suites() -> None:
     1. Create ``gbot_eval/suites/<name>.py`` that calls ``register(...)``
     2. Append the import here.
     """
+    from gbot_eval.suites import agent_delegation  # noqa: F401
     from gbot_eval.suites import memory_audn  # noqa: F401
     from gbot_eval.suites import memory_extraction  # noqa: F401
     from gbot_eval.suites import memory_page_compile  # noqa: F401

@@ -1,0 +1,187 @@
+{
+  "_comment": "Provider benchmark — 4 alan × 3 case = 12 case. Each case runs through both LiteLLM and OpenRouter SDK so we can score them head-to-head per (model, provider).",
+  "_areas": ["general", "tool_call", "structured", "long_context"],
+  "cases": [
+    {
+      "case_id": "gen01",
+      "area": "general",
+      "messages": [
+        {"role": "user", "content": "Türkiye'nin başkenti neresidir? Tek kelime yaz."}
+      ],
+      "max_tokens": 50,
+      "expected_substring": "ankara"
+    },
+    {
+      "case_id": "gen02",
+      "area": "general",
+      "messages": [
+        {"role": "user", "content": "1 + 1 kaç eder? Sadece sayıyı yaz."}
+      ],
+      "max_tokens": 30,
+      "expected_substring": "2"
+    },
+    {
+      "case_id": "gen03",
+      "area": "general",
+      "messages": [
+        {"role": "user", "content": "Python'da bir listeyi tersine çevirmenin en kısa yolu nedir? 1-2 cümle."}
+      ],
+      "max_tokens": 200,
+      "expected_substring_any": ["[::-1]", "reverse", ".reversed("]
+    },
+    {
+      "case_id": "tool01",
+      "area": "tool_call",
+      "messages": [
+        {"role": "user", "content": "İstanbul'un bugünkü hava durumunu öğrenmek istiyorum."}
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "web_search",
+            "description": "Search the web for real-time information.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "query": {"type": "string", "description": "Search query"},
+                "count": {"type": "integer", "description": "Number of results", "default": 5}
+              },
+              "required": ["query"]
+            }
+          }
+        }
+      ],
+      "expected_tool_name": "web_search",
+      "expected_arg_substring": {"query": "istanbul"}
+    },
+    {
+      "case_id": "tool02",
+      "area": "tool_call",
+      "messages": [
+        {"role": "user", "content": "Şu anki tarih ve saat nedir?"}
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "get_current_time",
+            "description": "Returns the current date and time in ISO format.",
+            "parameters": {"type": "object", "properties": {}}
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "web_search",
+            "description": "Search the web for real-time information.",
+            "parameters": {
+              "type": "object",
+              "properties": {"query": {"type": "string"}},
+              "required": ["query"]
+            }
+          }
+        }
+      ],
+      "expected_tool_name": "get_current_time",
+      "forbidden_tool_names": ["web_search"]
+    },
+    {
+      "case_id": "tool03",
+      "area": "tool_call",
+      "messages": [
+        {"role": "user", "content": "Merhaba, bugün nasılsın?"}
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "web_search",
+            "description": "Search the web for real-time information.",
+            "parameters": {
+              "type": "object",
+              "properties": {"query": {"type": "string"}},
+              "required": ["query"]
+            }
+          }
+        }
+      ],
+      "expected_no_tool_call": true
+    },
+    {
+      "case_id": "struct01",
+      "area": "structured",
+      "messages": [
+        {"role": "system", "content": "You are a JSON extractor. Return ONLY valid JSON, no prose."},
+        {"role": "user", "content": "Ahmet 25 yaşında bir yazılım mühendisi. Onu JSON olarak çıkar: {name, age, profession}"}
+      ],
+      "max_tokens": 300,
+      "response_format": {"type": "json_object"},
+      "expected_json_keys": ["name", "age", "profession"],
+      "expected_field_values": {"age": 25}
+    },
+    {
+      "case_id": "struct02",
+      "area": "structured",
+      "messages": [
+        {"role": "system", "content": "You are a JSON extractor. Return ONLY valid JSON, no prose."},
+        {"role": "user", "content": "Türkiye'nin en kalabalık 3 şehrini JSON listesi olarak ver: {\"cities\": [\"...\", \"...\", \"...\"]}"}
+      ],
+      "max_tokens": 300,
+      "response_format": {"type": "json_object"},
+      "expected_json_keys": ["cities"],
+      "expected_array_min_length": {"cities": 3}
+    },
+    {
+      "case_id": "struct03",
+      "area": "structured",
+      "messages": [
+        {"role": "system", "content": "You are a JSON extractor. Return ONLY valid JSON, no prose."},
+        {"role": "user", "content": "Bir kullanıcının sipariş kaydını JSON olarak modelle: {user: {name, email}, order: {id, items: [...], total}}. Örnek veri uydur."}
+      ],
+      "max_tokens": 500,
+      "response_format": {"type": "json_object"},
+      "expected_json_keys": ["user", "order"],
+      "expected_nested_keys": {"user": ["name", "email"], "order": ["id", "items", "total"]}
+    },
+    {
+      "case_id": "ctx01",
+      "area": "long_context",
+      "_needle_position": "early",
+      "needle_substring": "24 mart 1990",
+      "max_tokens": 200,
+      "messages_template": {
+        "needle": "Önemli bilgi: Doğum günüm 24 Mart 1990. Lütfen bunu unutma.",
+        "filler_count": 28,
+        "filler_topic": "yapay zeka tarihi ve önemli olaylar",
+        "query": "Sana söylediğim doğum günü tarihini hatırlıyor musun? Sadece tarihi yaz."
+      }
+    },
+    {
+      "case_id": "ctx02",
+      "area": "long_context",
+      "_needle_position": "middle",
+      "needle_substring": "kırmızı kalem",
+      "max_tokens": 200,
+      "messages_template": {
+        "needle": "Lütfen şunu hatırla: Kasada bir kırmızı kalem var, çok değerli.",
+        "filler_count": 28,
+        "filler_topic": "antik Yunan filozofları",
+        "query": "Kasada ne var? Tek kelime."
+      }
+    },
+    {
+      "case_id": "ctx03",
+      "area": "long_context",
+      "_needle_position": "late",
+      "needle_substring": "şifre 7421",
+      "max_tokens": 200,
+      "messages_template": {
+        "needle": "Dikkat: Bilgisayarımın şifresi 7421. Bu önemli.",
+        "filler_count": 28,
+        "filler_topic": "uzayda yaşam ve gezegen keşifleri",
+        "query": "Bilgisayar şifresi neydi? Sadece sayıyı yaz."
+      }
+    }
+  ]
+}

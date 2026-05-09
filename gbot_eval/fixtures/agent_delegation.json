@@ -1,0 +1,121 @@
+{
+  "_comment": "DelegationPlanner eval — 15 cases. Tests the LLM's ability to pick correct (execution, processor, tool_name, cron_expr) tuple from a natural-language request. Curated 2026-05-09.",
+  "cases": [
+    {
+      "case_id": "del01",
+      "_intent": "immediate web search → web tool",
+      "task": "İstanbul'un bugünkü hava durumunu öğrenmek istiyorum.",
+      "expected_execution": "immediate",
+      "expected_processor_in": ["agent", "function"],
+      "expected_tool_keywords": ["web", "search"]
+    },
+    {
+      "case_id": "del02",
+      "_intent": "immediate file read",
+      "task": "/tmp/notes.txt dosyasını oku ve içeriğini göster.",
+      "expected_execution": "immediate",
+      "expected_processor_in": ["agent", "function"],
+      "expected_tool_keywords": ["read", "file"]
+    },
+    {
+      "case_id": "del03",
+      "_intent": "immediate time query → static tool",
+      "task": "Şu an saat kaç?",
+      "expected_execution": "immediate",
+      "expected_processor_in": ["function", "static", "agent"],
+      "expected_tool_keywords": ["time", "current"]
+    },
+    {
+      "case_id": "del04",
+      "_intent": "immediate memory note save",
+      "task": "Şunu hatırla: yarın saat 15:00'te diş hekimi randevum var.",
+      "expected_execution": "immediate",
+      "expected_processor_in": ["agent", "function"],
+      "expected_tool_keywords": ["note", "memory", "save"]
+    },
+    {
+      "case_id": "del05",
+      "_intent": "immediate sohbet, no tool",
+      "task": "Merhaba, bugün nasıl gidiyor?",
+      "expected_execution": "immediate",
+      "expected_processor_in": ["agent", "static"]
+    },
+    {
+      "case_id": "del06",
+      "_intent": "delayed — 30 dakika sonra hatırlat",
+      "task": "30 dakika sonra bana çay molası vermem gerektiğini hatırlat.",
+      "expected_execution": "delayed",
+      "expected_processor_in": ["agent", "static"],
+      "expected_delay_seconds_min": 1500,
+      "expected_delay_seconds_max": 2100
+    },
+    {
+      "case_id": "del07",
+      "_intent": "recurring — every morning at 9am",
+      "task": "Her sabah saat 09:00'da bana günlük haber özeti gönder.",
+      "expected_execution": "recurring",
+      "expected_processor_in": ["agent"],
+      "expected_cron_substring": "9"
+    },
+    {
+      "case_id": "del08",
+      "_intent": "recurring — Pazartesi akşam 8",
+      "task": "Her Pazartesi akşamı 20:00'de haftalık planı hazırla.",
+      "expected_execution": "recurring",
+      "expected_processor_in": ["agent"],
+      "expected_cron_substring": "20"
+    },
+    {
+      "case_id": "del09",
+      "_intent": "recurring — günde 3 kez su iç hatırlatması",
+      "task": "Bana günde 3 kez su içmemi hatırlat.",
+      "expected_execution": "recurring",
+      "expected_processor_in": ["agent", "static"]
+    },
+    {
+      "case_id": "del10",
+      "_intent": "multi-step — file edit + commit",
+      "task": "/tmp/code.py'da hatayı düzelt, sonra git commit yap.",
+      "expected_execution": "immediate",
+      "expected_processor_in": ["agent"],
+      "expected_tools_min": 2
+    },
+    {
+      "case_id": "del11",
+      "_intent": "multi-step — search + summarize + save",
+      "task": "Yapay zeka haberlerini araştır, özetini çıkar ve notlarıma kaydet.",
+      "expected_execution": "immediate",
+      "expected_processor_in": ["agent"],
+      "expected_tools_min": 2
+    },
+    {
+      "case_id": "del12",
+      "_intent": "multi-step — read 3 files + analyze",
+      "task": "config.yaml, schema.py ve loader.py dosyalarını oku ve aralarındaki tutarsızlıkları analiz et.",
+      "expected_execution": "immediate",
+      "expected_processor_in": ["agent"],
+      "expected_tools_min": 2
+    },
+    {
+      "case_id": "del13",
+      "_intent": "ambiguous time — 'yarın bir şey yap' (no specific action)",
+      "task": "Yarın bir şey yapmam lazım.",
+      "expected_execution_in": ["immediate", "delayed"],
+      "expected_processor_in": ["agent", "static"]
+    },
+    {
+      "case_id": "del14",
+      "_intent": "ambiguous — vague intent",
+      "task": "Bir şeyler yapalım mı?",
+      "expected_execution": "immediate",
+      "expected_processor_in": ["agent", "static"]
+    },
+    {
+      "case_id": "del15",
+      "_intent": "monitor — kontrol et periyodik",
+      "task": "Sunucumun durumunu sürekli kontrol et, sorun çıkarsa beni uyar.",
+      "expected_execution_in": ["monitor", "recurring"],
+      "expected_processor_in": ["agent"]
+    }
+  ]
+}
