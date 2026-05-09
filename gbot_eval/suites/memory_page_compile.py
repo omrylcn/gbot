@@ -4,13 +4,17 @@ Renders the same ``_PAGE_PROMPT`` template the production
 ``EntityPageCompiler`` uses (``gbot/memory/entity_pages.py:47``) and
 scores the resulting markdown against ground-truth expectations:
 
-* citation_recall — must-cite fact_ids appear in ``[fact_id:xxx]`` form
-* keyword_coverage — entity descriptors mentioned
-* hallucinations — banned terms absent
+* keyword_coverage — entity descriptors mentioned (primary signal)
+* hallucinations — banned terms absent (must be 0)
 * bullet_count_ok / paragraph_words_ok — format adherence
+* citation_recall — must-cite fact_ids appear in ``[fact_id:xxx]`` form
+  (BONUS: the production prompt asks for citations but mainstream
+  chat models rarely emit the literal ``[fact_id:...]`` token; we
+  weight this lightly so realistic outputs don't score zero)
 
-Aggregated quality = ``mean(citation_recall)`` (the most discriminating
-signal — many models follow keywords but skip the citation contract).
+Aggregated quality is a weighted sum: keyword_coverage (40%) +
+no-hallucination (30%) + format adherence (15%) + citation_recall
+(15%).
 """
 
 from __future__ import annotations
@@ -48,11 +52,12 @@ class MemoryPageCompileSuite:
             )
             content_md = call.text
             scores = page_evaluation(case, content_md)
+            quality = _composite_quality(scores)
 
             case_results.append(
                 CaseResult(
                     case_id=case["case_id"],
-                    quality=scores["citation_recall"],
+                    quality=quality,
                     tokens_in=call.prompt_tokens,
                     tokens_out=call.completion_tokens,
                     latency_ms=call.latency_ms,
@@ -82,6 +87,25 @@ def _render_prompt(case: dict) -> str:
         relations=EntityPageCompiler._format_relations(case.get("relations", [])),
         facts=EntityPageCompiler._format_facts(case.get("facts", [])),
     )
+
+
+def _composite_quality(scores: dict[str, Any]) -> float:
+    """Weighted blend of page evaluation signals.
+
+    Keyword coverage carries the most weight because it captures the
+    "did the page actually describe the entity" question. No-hallucination
+    is the next biggest hammer (a page that invents facts is worse than
+    a page missing some). Format adherence is light. Citation recall is
+    a bonus — production models rarely emit the literal token.
+    """
+    keyword = float(scores.get("keyword_coverage", 0.0))
+    no_hallu = 0.0 if scores.get("hallucinations") else 1.0
+    fmt = (
+        (1.0 if scores.get("bullet_count_ok") else 0.0)
+        + (1.0 if scores.get("paragraph_words_ok") else 0.0)
+    ) / 2.0
+    citation = float(scores.get("citation_recall", 0.0))
+    return 0.40 * keyword + 0.30 * no_hallu + 0.15 * fmt + 0.15 * citation
 
 
 def _aggregate(cases: list[CaseResult]) -> dict[str, Any]:

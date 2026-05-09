@@ -79,11 +79,12 @@
   "cases": [
     {
       "case_id": "tc01",
-      "_intent": "single tool — web search",
+      "_intent": "single tool — web search (Turkish or English query is fine)",
       "task": "İstanbul'un bugünkü hava durumunu öğrenmek istiyorum.",
       "tools": ["web_search"],
       "expected_tool_names": ["web_search"],
-      "required_args": {"web_search": ["query"]}
+      "required_args": {"web_search": ["query"]},
+      "expected_arg_substring_any": {"web_search": {"query": ["istanbul", "i̇stanbul", "istambul", "weather"]}}
     },
     {
       "case_id": "tc02",

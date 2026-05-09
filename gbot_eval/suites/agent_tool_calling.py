@@ -31,6 +31,27 @@ from gbot_eval.suites.base import CaseResult, SuiteResult, sample_cases
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
 
 
+_TR_FOLD = str.maketrans({
+    "ı": "i", "İ": "i", "i": "i",
+    "ş": "s", "Ş": "s",
+    "ç": "c", "Ç": "c",
+    "ğ": "g", "Ğ": "g",
+    "ü": "u", "Ü": "u",
+    "ö": "o", "Ö": "o",
+})
+
+
+def _fold(s: str) -> str:
+    """Lowercase + Turkish→ASCII fold for forgiving substring matching.
+
+    ``"İstanbul'un".lower()`` produces ``"i̇stanbul'un"`` (combining dot
+    above), so the bare ``"istanbul"`` ASCII string never matches.
+    Mapping Turkish-specific letters to their ASCII counterparts before
+    comparison sidesteps that and also lets fixtures stay readable.
+    """
+    return s.translate(_TR_FOLD).lower()
+
+
 class AgentToolCallingSuite:
     name = "agent.tool_calling"
     fixture_file = "agent_tool_calling"
@@ -149,8 +170,8 @@ def _score(case: dict, tool_calls: list[dict], content: str) -> tuple[float, dic
                 args = tc.get("args") or {}
                 results = {}
                 for k, v in kvs.items():
-                    actual = str(args.get(k, "")).lower()
-                    ok_kv = v.lower() in actual
+                    actual = _fold(str(args.get(k, "")))
+                    ok_kv = _fold(v) in actual
                     results[k] = {"want": v, "got": str(args.get(k, ""))[:80], "ok": ok_kv}
                     if not ok_kv:
                         all_ok = False
@@ -158,6 +179,38 @@ def _score(case: dict, tool_calls: list[dict], content: str) -> tuple[float, dic
                 break
         parts.append(1.0 if all_ok else 0.0)
         detail["arg_substring"] = per_tool
+
+    if "expected_arg_substring_any" in case:
+        # Same as ``expected_arg_substring`` but each value is a list of
+        # acceptable options — any one match passes. Lets fixtures cover
+        # Turkish / English variants without forcing the model to a
+        # single-language preference.
+        all_ok = True
+        per_tool = {}
+        for tname, kvs in case["expected_arg_substring_any"].items():
+            for tc in tool_calls:
+                if tc.get("name") != tname:
+                    continue
+                args = tc.get("args") or {}
+                results = {}
+                for k, options in kvs.items():
+                    actual = _fold(str(args.get(k, "")))
+                    hit = next(
+                        (opt for opt in options if _fold(opt) in actual), None
+                    )
+                    ok_kv = hit is not None
+                    results[k] = {
+                        "want_any": options,
+                        "got": str(args.get(k, ""))[:80],
+                        "matched": hit,
+                        "ok": ok_kv,
+                    }
+                    if not ok_kv:
+                        all_ok = False
+                per_tool[tname] = results
+                break
+        parts.append(1.0 if all_ok else 0.0)
+        detail["arg_substring_any"] = per_tool
 
     quality = sum(parts) / len(parts) if parts else 0.0
     return quality, detail
