@@ -161,6 +161,20 @@ def models_add_cmd(
     )
 
 
+@models_app.command("refresh")
+def models_refresh_cmd():
+    """Pull live pricing from OpenRouter's /api/v1/models and persist."""
+    try:
+        result = pricing.refresh_from_openrouter()
+    except Exception as e:
+        console.print(f"[red]Refresh failed:[/red] {e}")
+        raise typer.Exit(1)
+    console.print(
+        f"[green]Refreshed {result['updated']} models[/green] "
+        f"from {result['source']}"
+    )
+
+
 # ── list-runs ───────────────────────────────────────────────────
 
 
@@ -368,13 +382,36 @@ def baseline_diff_cmd(
 
 @app.command("list")
 def list_cmd():
-    """List registered suites."""
+    """List registered suites — split by whether they require gbot."""
+    from gbot_eval.suites import SUITE_REGISTRY
+
     names = list_names()
     if not names:
         console.print("[yellow]No suites registered yet.[/yellow]")
         return
+
+    standalone = []
+    gbot_bound = []
+    other = []
     for n in names:
-        console.print(f"  • {n}")
+        suite = SUITE_REGISTRY[n]
+        if hasattr(suite, "requires_gbot"):
+            (gbot_bound if suite.requires_gbot else standalone).append(n)
+        else:
+            other.append(n)
+
+    if standalone:
+        console.print("[bold]Standalone suites[/bold] (no gbot required):")
+        for n in standalone:
+            console.print(f"  • {n}")
+    if gbot_bound:
+        console.print("\n[bold]gbot-bound suites:[/bold]")
+        for n in gbot_bound:
+            console.print(f"  • {n}")
+    if other:
+        console.print("\n[bold]Other:[/bold]")
+        for n in other:
+            console.print(f"  • {n}")
 
 
 if __name__ == "__main__":

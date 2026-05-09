@@ -145,4 +145,58 @@ def add_model(model: str, prompt: float, completion: float) -> None:
     PRICES[model] = overrides[model]
 
 
+def refresh_from_openrouter(timeout: float = 15.0) -> dict[str, int | str]:
+    """Pull live pricing from ``https://openrouter.ai/api/v1/models``
+    and write every entry to the overrides file.
+
+    OpenRouter prices are listed per token; we multiply by 1e6 so the
+    in-memory ``PRICES`` table stays $/1M-token consistent. Returns a
+    summary dict for the CLI.
+    """
+    import httpx
+
+    resp = httpx.get(
+        "https://openrouter.ai/api/v1/models", timeout=timeout
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    models = payload.get("data") or []
+    if not models:
+        return {"updated": 0, "source": resp.url}
+
+    overrides: dict = {}
+    if _OVERRIDES_PATH.exists():
+        try:
+            overrides = json.loads(_OVERRIDES_PATH.read_text())
+            if not isinstance(overrides, dict):
+                overrides = {}
+        except (json.JSONDecodeError, OSError):
+            overrides = {}
+
+    written = 0
+    for m in models:
+        mid = m.get("id")
+        pricing = m.get("pricing") or {}
+        prompt = pricing.get("prompt")
+        completion = pricing.get("completion")
+        if not mid or prompt is None or completion is None:
+            continue
+        try:
+            prompt_per_million = float(prompt) * 1_000_000.0
+            completion_per_million = float(completion) * 1_000_000.0
+        except (TypeError, ValueError):
+            continue
+        key = f"openrouter/{mid}"
+        overrides[key] = {
+            "prompt": prompt_per_million,
+            "completion": completion_per_million,
+        }
+        PRICES[key] = overrides[key]
+        written += 1
+
+    _OVERRIDES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _OVERRIDES_PATH.write_text(json.dumps(overrides, indent=2))
+    return {"updated": written, "source": str(resp.url)}
+
+
 _load_overrides()

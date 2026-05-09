@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Any
 
 from gbot.core.providers import litellm as llm_provider
-from gbot_eval.capture import track_call
+from gbot_eval.capture import reasoning_off_kwargs, track_call
 from gbot_eval.runners import register
 from gbot_eval.runners.base import Runner
 from gbot_eval.scoring import ScoringContext, run_scoring_rule
@@ -56,6 +56,13 @@ class ChatCompletionRunner(Runner):
             kwargs["response_format"] = response_format
         if tools:
             kwargs["tools"] = tools
+
+        # Suite YAML can opt out: `disable_reasoning: false`. Default is
+        # "auto" — only known reasoning models get the parameter.
+        disable_mode = case.get(
+            "disable_reasoning", suite_config.get("disable_reasoning", "auto")
+        )
+        kwargs.update(reasoning_off_kwargs(model, disable_mode))
 
         call = await track_call(llm_provider.achat(**kwargs), model=model)
 

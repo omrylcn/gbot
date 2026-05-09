@@ -20,7 +20,7 @@ import time
 from typing import Any
 
 from gbot.core.providers import litellm as llm_provider
-from gbot_eval.capture import track_call
+from gbot_eval.capture import reasoning_off_kwargs, track_call
 from gbot_eval.runners import register
 from gbot_eval.runners.base import Runner
 from gbot_eval.scoring.builtins import _fold
@@ -49,6 +49,11 @@ class MultiTurnRunner(Runner):
         start = time.monotonic()
         any_error: str | None = None
 
+        disable_mode = case.get(
+            "disable_reasoning", suite_config.get("disable_reasoning", "auto")
+        )
+        extra = reasoning_off_kwargs(model, disable_mode)
+
         for i, turn in enumerate(case.get("turns", [])):
             user_msg = turn.get("user") or turn.get("content")
             history.append({"role": "user", "content": user_msg})
@@ -61,6 +66,7 @@ class MultiTurnRunner(Runner):
                         "max_tokens",
                         suite_config.get("default_max_tokens", 300),
                     ),
+                    **extra,
                 ),
                 model=model,
             )

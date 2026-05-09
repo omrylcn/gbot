@@ -14,7 +14,7 @@ pipeline.
 from __future__ import annotations
 
 from gbot.core.providers import litellm as llm_provider
-from gbot_eval.capture import track_call
+from gbot_eval.capture import reasoning_off_kwargs, track_call
 from gbot_eval.runners import register
 from gbot_eval.runners.base import Runner
 from gbot_eval.scoring import ScoringContext, run_scoring_rule
@@ -35,12 +35,17 @@ class StressLongContextRunner(Runner):
         max_tokens = case.get(
             "max_tokens", suite_config.get("default_max_tokens", 200)
         )
+        disable_mode = case.get(
+            "disable_reasoning", suite_config.get("disable_reasoning", "auto")
+        )
+        extra = reasoning_off_kwargs(model, disable_mode)
         call = await track_call(
             llm_provider.achat(
                 messages=messages,
                 model=model,
                 temperature=case.get("temperature", 0.0),
                 max_tokens=max_tokens,
+                **extra,
             ),
             model=model,
         )

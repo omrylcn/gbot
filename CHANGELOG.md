@@ -6,6 +6,90 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.22.0] - 2026-05-09 — Faz 22F: gbot-eval YAML refactor
+
+gbot-eval mimarisi "Python-first" → "YAML-first with Python escape
+hatch" yapısına geçti. Yeni suite eklemek için kod yazma; bir YAML
+dosyası ekle, biten. 11 alt-step ile geldi.
+
+### Added — scoring DSL & runners
+
+- `scoring/` paketi — 22 built-in `kind` (regex_match/_not_match,
+  substring_any/_all/_none, tool_called/_not_called/_count_min/
+  no_tool_call, required_args, arg_substring_any, json_valid/
+  _keys/_types/_array_min/_nested_keys, bullet_count, numbered_list,
+  word_count, sentence_count, judge, python). Async dispatcher
+  awaits coroutine handlers (judge) and unwraps sync handlers.
+- `scoring/expr.py` — `kind: python` escape hatch with AST-validated
+  restricted exec. No imports, no os/sys/subprocess, no dunder
+  attribute probing. Locals: text, tool_calls, case, call.
+- `scoring/builtins._fold(s, "turkish")` — Turkish-aware ASCII fold
+  (İ→i, ş→s, ç→c, ğ→g, ü→u, ö→o + lowercase) so substring rules
+  with `fold: turkish` accept Turkish or English variants.
+- `runners/` paketi — 6 runner: chat_completion (generic),
+  stress_long_context (30-turn dialog), multi_turn (state-threaded),
+  memory_extraction / memory_audn / memory_page_compile / delegation
+  (gbot-bound, soft import-guard).
+- `suites/base.YamlBackedSuite` — declarative wrapper that reads
+  `name / runner / requires_gbot / cases` from a YAML and dispatches
+  to the registered runner.
+
+### Added — new suite
+
+- `agent.multi_turn` (5 cases × 2-3 turns) — multi-turn dialog
+  coherence. Covers language switch + callback, number tracking,
+  topic shift without bleed, self-correction, and pronoun
+  resolution. Closes the gap that none of the 9 prior suites
+  addressed (all were single-turn).
+
+### Added — CLI
+
+- `gbot-eval models refresh` — pulls live pricing from OpenRouter's
+  `/api/v1/models` and persists to `output/pricing_overrides.json`.
+  Refreshed 367 models on first run.
+- `gbot-eval list` — split output into standalone vs gbot-bound
+  suites. Standalone ones run without gbot installed.
+
+### Added — reasoning auto-handling (Step 6K)
+
+`capture.reasoning_off_kwargs(model, mode)` returns
+`{"reasoning": {"effort": "none"}}` for known reasoning models
+(Kimi-K2, MiniMax-M2, DeepSeek-R1) when `mode="auto"` (default for
+standalone suites). gbot-bound suites keep production parity (no
+auto-disable). YAML can override per case or per suite with
+`disable_reasoning: false|auto|true`.
+
+### Changed
+
+- All 10 suites are now YAML files in `gbot_eval/suites/*.yaml`.
+  No more Python class per suite. Adding a suite = writing one
+  YAML file.
+- `memory.page_compile` quality is now a weighted composite
+  (40% keyword_coverage + 30% no-hallucination + 15% format
+  adherence + 15% citation_recall). Fixes the v1.21.0 bug where
+  the legacy `_aggregate` produced 0.00 despite per-case 0.85.
+- `agent.tool_calling.tc01` Turkish-fold rule means English-arg
+  responses ("Istanbul weather") now score 1.00 instead of 0.50.
+
+### Removed
+
+- `gbot_eval/ASSESSMENT.md` — content folded into README's
+  Architecture / Known limitations sections.
+- 8 legacy Python suite files + their JSON fixtures (data lives
+  in YAML now).
+- `suites/_metrics.py` (moved to `scoring/memory_metrics.py`).
+- `suites/_memory_helpers.py` (runner does its own bootstrap).
+
+### Tests
+
+- 410 passing — gbot core untouched.
+- Live smoke (gemini-3-flash-preview) confirms baselines hold:
+  general 1.00, agent.* 0.73-1.00, memory.audn 0.93-1.00,
+  memory.extraction 0.80, memory.page_compile composite ~0.85,
+  stress.long_context 1.00, agent.multi_turn 1.00.
+
+---
+
 ## [1.21.1] - 2026-05-09 — Faz 22E Step 5K: LiteLLM removed
 
 The empirical bench in v1.21.0's `gbot-eval bench-providers` showed

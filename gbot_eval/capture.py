@@ -3,7 +3,7 @@
 Wraps every LLM call with tokens / latency / cost capture so suites
 don't have to repeat the same boilerplate. Reads
 ``response.response_metadata["usage"]`` populated by
-``gbot.core.providers.{openrouter_llm,litellm_llm}``.
+``gbot.core.providers.openrouter_llm``.
 """
 
 from __future__ import annotations
@@ -15,6 +15,42 @@ from typing import Any, Awaitable
 from loguru import logger
 
 from gbot_eval.pricing import calc_cost
+
+# Models that default to reasoning/thinking on; eval suites that want
+# raw answer behaviour should opt in to ``disable_reasoning="auto"``.
+# `bench_providers.py` had an earlier list; keeping it here so the
+# capture layer can detect them on its own.
+REASONING_MODEL_PREFIXES = (
+    "moonshotai/kimi-k2",
+    "minimax/minimax-m2",
+    "deepseek/deepseek-r1",
+)
+
+
+def is_reasoning_model(model: str) -> bool:
+    short = model.removeprefix("openrouter/").lower()
+    return any(p in short for p in REASONING_MODEL_PREFIXES)
+
+
+def reasoning_off_kwargs(
+    model: str, mode: str | bool | None = "auto"
+) -> dict[str, Any]:
+    """Return achat() kwargs that disable reasoning for reasoning models.
+
+    ``mode`` semantics:
+    - ``"auto"`` (default): inject for known reasoning models only
+    - ``True``:  inject regardless of model (force-off)
+    - ``False`` / ``None``: never inject (keep production parity)
+
+    The right OpenRouter parameter is ``reasoning={"effort": "none"}``
+    — ``{"enabled": false}`` is silently dismissed by the API
+    (verified empirically in the v1.21.0 bench).
+    """
+    if mode is False or mode is None:
+        return {}
+    if mode == "auto" and not is_reasoning_model(model):
+        return {}
+    return {"reasoning": {"effort": "none"}}
 
 
 @dataclass
