@@ -451,6 +451,76 @@ async def admin_run_maintenance(
     return await maintenance.run_now(user_id)
 
 
+# ── Faz 22G: lifecycle state controls ──────────────────────────
+
+
+@router.get("/memory/{user_id}/facts")
+async def admin_facts_by_state(
+    user_id: str,
+    state: str | None = Query(
+        default=None,
+        description="Filter by lifecycle state: active|weak|inhibited|archived",
+    ),
+    fact_type: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    db: MemoryStore = Depends(get_db),
+):
+    """List facts, optionally filtered by lifecycle state.
+
+    With ``state=archived`` the legacy ``valid_only`` gate is dropped
+    so audit-only rows show up.
+    """
+    _require_owner(current_user, config)
+    valid_only = state != "archived"
+    return {
+        "user_id": user_id,
+        "state": state,
+        "facts": db.get_facts(
+            user_id,
+            fact_type=fact_type,
+            valid_only=valid_only,
+            state=state,
+            limit=limit,
+        ),
+    }
+
+
+@router.post("/memory/{user_id}/facts/{fact_id}/inhibit")
+async def admin_inhibit_fact(
+    user_id: str,
+    fact_id: str,
+    hold_days: int = Query(default=7, ge=1, le=90),
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    db: MemoryStore = Depends(get_db),
+):
+    """Faz 22G — temporarily hide a fact from retrieval.
+
+    Defaults to a 7-day hold. ``apply_decay`` auto-restores the row to
+    ``state='active'`` once ``inhibited_until`` lapses; restore early
+    via the ``/restore`` endpoint.
+    """
+    _require_owner(current_user, config)
+    ok = db.inhibit_fact(fact_id, hold_days=hold_days)
+    return {"ok": ok, "fact_id": fact_id, "hold_days": hold_days}
+
+
+@router.post("/memory/{user_id}/facts/{fact_id}/restore")
+async def admin_restore_fact(
+    user_id: str,
+    fact_id: str,
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    db: MemoryStore = Depends(get_db),
+):
+    """Faz 22G — undo an INHIBITED fact, putting it back in ACTIVE."""
+    _require_owner(current_user, config)
+    ok = db.restore_fact(fact_id)
+    return {"ok": ok, "fact_id": fact_id}
+
+
 @router.get("/memory/{user_id}/retrieval-debug")
 async def admin_retrieval_debug(
     user_id: str,

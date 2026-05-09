@@ -97,6 +97,12 @@ class MemoryStore:
             self._migrate_22d(conn)
             conn.execute("PRAGMA user_version = 22")
 
+        # Faz 22G: 4-state lifecycle on memory_facts.
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if version < 23:
+            self._migrate_22g(conn)
+            conn.execute("PRAGMA user_version = 23")
+
     _TASK_TABLES_SQL = """
         CREATE TABLE IF NOT EXISTS background_tasks (
             task_id TEXT PRIMARY KEY,
@@ -171,6 +177,16 @@ class MemoryStore:
             keywords TEXT,
             category TEXT,
             embedding BLOB,
+            -- Faz 22G: explicit lifecycle state.
+            -- ACTIVE   = fresh, full retrieval weight
+            -- WEAK     = post-fade decay, retrieved at lower priority
+            -- INHIBITED= temporarily excluded; auto-restores after
+            --            inhibited_until expires (default 7d undo window)
+            -- ARCHIVED = invalidated, retrieval-excluded, audit-only
+            state TEXT NOT NULL DEFAULT 'active'
+                CHECK (state IN ('active','weak','inhibited','archived')),
+            inhibited_until TIMESTAMP,
+            last_accessed_at TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(user_id)
@@ -179,6 +195,8 @@ class MemoryStore:
             ON memory_facts(user_id, fact_type);
         CREATE INDEX IF NOT EXISTS idx_facts_valid
             ON memory_facts(user_id, valid_until);
+        CREATE INDEX IF NOT EXISTS idx_facts_state
+            ON memory_facts(user_id, state);
 
         CREATE VIRTUAL TABLE IF NOT EXISTS vec_memory_facts
             USING vec0(embedding float[3072] distance_metric=cosine);
@@ -351,6 +369,54 @@ class MemoryStore:
         )
 
         logger.info("Faz 22D schema migration applied (relations dedup + canonical cols + entity pages/aliases)")
+
+    def _migrate_22g(self, conn) -> None:
+        """Faz 22G — explicit lifecycle state on memory_facts.
+
+        Adds ``state`` (active / weak / inhibited / archived),
+        ``inhibited_until``, and ``last_accessed_at`` columns. Backfills
+        existing rows from ``valid_until`` and ``importance`` so the
+        explicit state matches the prior implicit logic. Idempotent.
+        """
+        cols = {
+            r[1]
+            for r in conn.execute("PRAGMA table_info(memory_facts)").fetchall()
+        }
+
+        if "state" not in cols:
+            conn.execute(
+                "ALTER TABLE memory_facts ADD COLUMN state TEXT "
+                "NOT NULL DEFAULT 'active'"
+            )
+        if "inhibited_until" not in cols:
+            conn.execute(
+                "ALTER TABLE memory_facts ADD COLUMN inhibited_until TIMESTAMP"
+            )
+        if "last_accessed_at" not in cols:
+            conn.execute(
+                "ALTER TABLE memory_facts ADD COLUMN last_accessed_at TIMESTAMP"
+            )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_facts_state "
+            "ON memory_facts(user_id, state)"
+        )
+
+        # Backfill: derive state from prior implicit signals.
+        # Only updates rows still at the default 'active' to avoid
+        # clobbering anything a later run already promoted.
+        conn.execute(
+            """UPDATE memory_facts SET state = CASE
+                   WHEN valid_until IS NOT NULL THEN 'archived'
+                   WHEN importance < 0.3 THEN 'weak'
+                   ELSE 'active'
+               END
+               WHERE state = 'active'"""
+        )
+
+        logger.info(
+            "Faz 22G schema migration applied (memory_facts.state + "
+            "inhibited_until + last_accessed_at; existing rows backfilled)"
+        )
 
     def _migrate_to_unified_tasks(self, conn, old_tables: set[str]) -> None:
         """Migrate cron_jobs + reminders + old background_tasks + delegation_log → unified tables."""
@@ -1461,8 +1527,16 @@ class MemoryStore:
         user_id: str,
         fact_type: str | None = None,
         valid_only: bool = True,
+        state: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
+        """Fetch facts.
+
+        ``state`` (Faz 22G) filters the explicit lifecycle state —
+        'active' / 'weak' / 'inhibited' / 'archived'. ``valid_only``
+        keeps the legacy ``valid_until IS NULL`` gate; passing both
+        is fine (the predicates are independent).
+        """
         conditions = ["user_id = ?"]
         params: list[Any] = [user_id]
         if fact_type:
@@ -1470,6 +1544,9 @@ class MemoryStore:
             params.append(fact_type)
         if valid_only:
             conditions.append("valid_until IS NULL")
+        if state:
+            conditions.append("state = ?")
+            params.append(state)
         params.append(limit)
         where = " AND ".join(conditions)
         with self._get_conn() as conn:
@@ -1520,6 +1597,7 @@ class MemoryStore:
             conn.execute(
                 """UPDATE memory_facts
                    SET valid_until = CURRENT_TIMESTAMP,
+                       state = 'archived',
                        superseded_by = ?,
                        updated_at = CURRENT_TIMESTAMP
                    WHERE fact_id = ?""",
@@ -1539,6 +1617,40 @@ class MemoryStore:
                     (row["user_id"], pattern),
                 )
             conn.commit()
+
+    def inhibit_fact(
+        self, fact_id: str, hold_days: int = 7
+    ) -> bool:
+        """Mark a fact INHIBITED — excluded from retrieval until
+        ``hold_days`` pass. Auto-restores via ``apply_decay`` once the
+        hold lapses. Returns False if the fact wasn't found.
+        """
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                """UPDATE memory_facts
+                   SET state = 'inhibited',
+                       inhibited_until = datetime('now', '+' || ? || ' days'),
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE fact_id = ? AND valid_until IS NULL""",
+                (int(hold_days), fact_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+
+    def restore_fact(self, fact_id: str) -> bool:
+        """INHIBITED → ACTIVE. No effect on archived facts. Returns
+        False if the fact isn't currently inhibited.
+        """
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                """UPDATE memory_facts
+                   SET state = 'active', inhibited_until = NULL,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE fact_id = ? AND state = 'inhibited'""",
+                (fact_id,),
+            )
+            conn.commit()
+            return cur.rowcount > 0
 
     def increment_fact_access(self, fact_id: str) -> None:
         with self._get_conn() as conn:
@@ -1608,13 +1720,16 @@ class MemoryStore:
 
         with self._get_conn() as conn:
             for fact_type, params in rates.items():
-                # Stage 1 fade
+                # Stage 1 fade — ACTIVE rows past fade_days drop importance
+                # and flip to WEAK.
                 conn.execute(
                     """UPDATE memory_facts
                        SET importance = importance * ?,
+                           state = 'weak',
                            updated_at = CURRENT_TIMESTAMP
                        WHERE user_id = ? AND valid_until IS NULL
                          AND fact_type = ?
+                         AND state = 'active'
                          AND access_count = 0
                          AND julianday('now') - julianday(created_at) > ?""",
                     (
@@ -1624,13 +1739,15 @@ class MemoryStore:
                 )
                 f1 = conn.execute("SELECT changes()").fetchone()[0]
 
-                # Stage 2 deeper fade (older + still untouched)
+                # Stage 2 deeper fade — WEAK rows past archive_days
+                # take a second hit; they archive below if importance drops.
                 conn.execute(
                     """UPDATE memory_facts
                        SET importance = importance * ?,
                            updated_at = CURRENT_TIMESTAMP
                        WHERE user_id = ? AND valid_until IS NULL
                          AND fact_type = ?
+                         AND state IN ('weak', 'active')
                          AND access_count = 0
                          AND julianday('now') - julianday(created_at) > ?""",
                     (
@@ -1644,18 +1761,38 @@ class MemoryStore:
                 total_faded += f1 + f2
 
             # Archive — applies to all types uniformly via importance threshold.
+            # Set both valid_until (legacy gate) and state='archived' (Faz 22G).
             conn.execute(
                 """UPDATE memory_facts
                    SET valid_until = CURRENT_TIMESTAMP,
+                       state = 'archived',
                        updated_at = CURRENT_TIMESTAMP
                    WHERE user_id = ? AND valid_until IS NULL
                      AND importance < ?""",
                 (user_id, archive_threshold),
             )
             archived = conn.execute("SELECT changes()").fetchone()[0]
+
+            # Faz 22G: auto-restore — INHIBITED rows whose hold expired
+            # come back as ACTIVE.
+            conn.execute(
+                """UPDATE memory_facts
+                   SET state = 'active', inhibited_until = NULL,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE user_id = ? AND state = 'inhibited'
+                     AND inhibited_until IS NOT NULL
+                     AND inhibited_until <= CURRENT_TIMESTAMP""",
+                (user_id,),
+            )
+            restored = conn.execute("SELECT changes()").fetchone()[0]
             conn.commit()
 
-        return {"faded": total_faded, "archived": archived, "by_type": per_type}
+        return {
+            "faded": total_faded,
+            "archived": archived,
+            "restored": restored,
+            "by_type": per_type,
+        }
 
     def search_similar_facts(
         self,
@@ -1688,6 +1825,9 @@ class MemoryStore:
             if max_distance is not None:
                 distance_filter = "AND knn.distance <= ?"
                 params.append(max_distance)
+            # Faz 22G: ACTIVE + WEAK make it into retrieval; INHIBITED is
+            # excluded until ``inhibited_until`` lapses; ARCHIVED is never
+            # retrieved (audit-only).
             rows = conn.execute(
                 f"""WITH knn AS (
                         SELECT rowid, distance
@@ -1697,7 +1837,11 @@ class MemoryStore:
                     SELECT f.*, knn.distance
                     FROM knn
                     JOIN memory_facts f ON f.rowid = knn.rowid
-                    WHERE f.user_id = ? AND f.valid_until IS NULL
+                    WHERE f.user_id = ?
+                          AND f.valid_until IS NULL
+                          AND f.state IN ('active', 'weak')
+                          AND (f.inhibited_until IS NULL
+                               OR f.inhibited_until < CURRENT_TIMESTAMP)
                           {distance_filter}
                     ORDER BY knn.distance""",
                 params,
