@@ -3,12 +3,25 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
 
 import typer
+from loguru import logger
 from rich.console import Console
 from rich.table import Table
 
-from gbot import __version__
+# CLI'ın varsayılan loguru ayarı bilgi-yoğun (DEBUG/INFO her satır
+# stderr'e düşüyor). Operatör ``gbot memory stats`` çalıştırırken
+# 5 satır tablo görmek istiyor, 5 satır log değil. Default WARNING'e
+# çek; ``GBOT_LOG_LEVEL=DEBUG gbot ...`` ile geri getirilebilir.
+logger.remove()
+logger.add(
+    sys.stderr,
+    level=os.environ.get("GBOT_LOG_LEVEL", "WARNING"),
+)
+
+from gbot import __version__  # noqa: E402 — after logger setup
 
 app = typer.Typer(
     name="gbot",
@@ -510,18 +523,61 @@ def user_list() -> None:
 @user_app.command("remove")
 def user_remove(
     username: str = typer.Argument(help="User ID to remove"),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Skip the y/N confirmation prompt.",
+    ),
 ) -> None:
-    """Remove a user and their channel links."""
+    """Remove a user and ALL their per-user data (cascade across every
+    Faz 22 table). Confirmation prompt protects against typos; pass
+    ``--yes`` for unattended runs (cron, scripts).
+    """
     from gbot.core.config.loader import load_config
     from gbot.memory.store import MemoryStore
 
     config = load_config()
     db = MemoryStore(config.database.path)
 
+    if not db.user_exists(username):
+        console.print(f"[red]User not found:[/red] {username}")
+        raise typer.Exit(code=1)
+
+    # Show what will be cascaded so the operator knows the blast radius.
+    with db._get_conn() as conn:
+        fact_n = conn.execute(
+            "SELECT COUNT(*) FROM memory_facts WHERE user_id = ?", (username,),
+        ).fetchone()[0]
+        rel_n = conn.execute(
+            "SELECT COUNT(*) FROM memory_relations WHERE user_id = ?",
+            (username,),
+        ).fetchone()[0]
+        msg_n = conn.execute(
+            "SELECT COUNT(*) FROM messages "
+            "WHERE session_id IN (SELECT session_id FROM sessions WHERE user_id = ?)",
+            (username,),
+        ).fetchone()[0]
+
+    console.print(
+        f"[yellow]Will remove user[/yellow] [bold]{username}[/bold] and:"
+    )
+    console.print(f"  • {fact_n} memory facts")
+    console.print(f"  • {rel_n} memory relations")
+    console.print(f"  • {msg_n} chat messages (across sessions)")
+    console.print("  • all channel links, notes, tasks, api_keys")
+
+    if not yes:
+        confirm = typer.confirm(
+            f"\nDelete '{username}' and everything above? This cannot be undone",
+            default=False,
+        )
+        if not confirm:
+            console.print("[dim]Aborted.[/dim]")
+            raise typer.Exit(code=0)
+
     if db.delete_user(username):
         console.print(f"[green]Removed user:[/green] {username}")
     else:
         console.print(f"[red]User not found:[/red] {username}")
+        raise typer.Exit(code=1)
 
 
 @user_app.command("set-password")

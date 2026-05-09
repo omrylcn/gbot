@@ -26,7 +26,11 @@ class MemoryStore:
         self.db_path = db_path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
-        logger.info(f"MemoryStore initialized: {db_path}")
+        # Debug-level — CLI commands construct a fresh MemoryStore on
+        # every invocation; info-level chatter would dominate output.
+        # The server's lifespan logs a single 'GraphBot API started'
+        # line that's the right place to track 'memory is up'.
+        logger.debug(f"MemoryStore initialized: {db_path}")
 
     @contextmanager
     def _get_conn(self):
@@ -642,11 +646,90 @@ class MemoryStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def delete_user(self, user_id: str) -> bool:
-        """Delete user and all channel links. Returns True if user existed."""
+    def update_user_name(self, user_id: str, name: str) -> bool:
+        """Update display name. Returns True iff a row was updated."""
         with self._get_conn() as conn:
-            conn.execute("DELETE FROM user_channels WHERE user_id = ?", (user_id,))
-            cursor = conn.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+            cur = conn.execute(
+                "UPDATE users SET name = ? WHERE user_id = ?",
+                (name, user_id),
+            )
+            conn.commit()
+        return cur.rowcount > 0
+
+    def set_user_password(self, user_id: str, password: str) -> bool:
+        """Hash + store a password. Empty string clears it."""
+        import bcrypt
+
+        if password:
+            hashed = bcrypt.hashpw(
+                password.encode("utf-8"), bcrypt.gensalt()
+            ).decode("utf-8")
+        else:
+            hashed = None
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "UPDATE users SET password_hash = ? WHERE user_id = ?",
+                (hashed, user_id),
+            )
+            conn.commit()
+        return cur.rowcount > 0
+
+    def delete_user(self, user_id: str) -> bool:
+        """Delete user and every row in every per-user table.
+
+        Faz 22 added a fistful of tables with ``user_id`` foreign keys
+        (memory_facts, memory_relations, memory_entity_pages,
+        memory_entity_aliases, memory_processing_log, user_notes,
+        background_tasks, task_executions, sessions, messages,
+        agent_memory, api_keys). Without explicit cascade the bare
+        DELETE FROM users hits a FOREIGN KEY constraint failure.
+
+        Cleans up the vec_memory_facts shadow rows too — they're tied
+        to ``memory_facts.rowid`` so the join must happen *before*
+        deleting the parent rows.
+
+        Returns True iff the users row actually existed.
+        """
+        # Per-user tables. Order: detail rows first, then sessions,
+        # then the user row itself.
+        per_user_tables = [
+            "user_channels",
+            "user_notes",
+            "memory_processing_log",
+            "memory_relations",
+            "memory_entity_pages",
+            "memory_entity_aliases",
+            "task_executions",
+            "background_tasks",
+            "messages",
+            "sessions",
+            "api_keys",
+        ]
+        with self._get_conn() as conn:
+            # vec_memory_facts mirrors memory_facts.rowid — delete
+            # shadow rows first while we can still resolve them.
+            conn.execute(
+                """DELETE FROM vec_memory_facts
+                   WHERE rowid IN (
+                       SELECT rowid FROM memory_facts WHERE user_id = ?
+                   )""",
+                (user_id,),
+            )
+            conn.execute("DELETE FROM memory_facts WHERE user_id = ?", (user_id,))
+
+            # Tables with optional existence (older DBs may miss some)
+            for table in per_user_tables:
+                try:
+                    conn.execute(
+                        f"DELETE FROM {table} WHERE user_id = ?", (user_id,)
+                    )
+                except sqlite3.OperationalError:
+                    # Table doesn't exist on this schema version — skip silently.
+                    continue
+
+            cursor = conn.execute(
+                "DELETE FROM users WHERE user_id = ?", (user_id,)
+            )
             conn.commit()
         return cursor.rowcount > 0
 

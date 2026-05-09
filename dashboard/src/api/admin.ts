@@ -209,6 +209,12 @@ export const adminApi = {
   getUsers: () => api.get<User[]>("/admin/users"),
   setUserRole: (userId: string, role: string) =>
     api.put<{ user_id: string; role: string }>(`/admin/users/${userId}/role`, { role }),
+  createUser: (data: { user_id: string; name?: string; role?: string; password?: string }) =>
+    api.post<{ user_id: string; name?: string; role: string }>(`/admin/users`, data),
+  updateUser: (userId: string, data: { name?: string; role?: string; password?: string }) =>
+    api.patch<{ user_id: string; name?: string; role?: string }>(`/admin/users/${userId}`, data),
+  deleteUser: (userId: string) =>
+    api.delete<{ ok: boolean; user_id: string }>(`/admin/users/${userId}`),
   getTasks: () => api.get<BackgroundTask[]>("/admin/tasks"),
   deleteTask: (taskId: string) => api.delete<{ status: string }>(`/admin/tasks/${taskId}`),
   // Legacy aliases

@@ -133,6 +133,32 @@ def test_delete_user(store):
     assert store.delete_user("u1") is False
 
 
+def test_delete_user_cascades_through_memory(store):
+    """delete_user cascades through every per-user Faz 22 table.
+
+    Regression: bare ``DELETE FROM users`` previously hit a foreign-key
+    failure once memory_facts / memory_relations / user_notes had any
+    rows for the user.
+    """
+    store.get_or_create_user("u1", name="Alice")
+    store.add_fact(
+        fact_id="f1", user_id="u1", content="taze fact", embedding=[0.1] * 3072
+    )
+    store.add_relation(
+        relation_id="r1", user_id="u1",
+        source_entity="u1", relation="works_at", target_entity="X",
+    )
+    store.upsert_entity_page(
+        user_id="u1", entity_canonical="X", content_md="# X\n",
+        source_fact_ids=[], source_relation_ids=[], surface_forms=[],
+    )
+
+    assert store.delete_user("u1") is True
+    assert store.get_facts("u1", valid_only=False) == []
+    assert store.get_relations("u1") == []
+    assert store.list_entity_pages("u1") == []
+
+
 def test_get_channel_link(store):
     """get_channel_link returns token + metadata for user+channel."""
     store.link_channel("u1", "telegram", "123456:ABC_TOKEN")

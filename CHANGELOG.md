@@ -6,6 +6,81 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.24.2] - 2026-05-09 — User CRUD: cascade fix + admin panel + CLI confirm
+
+`gbot user remove me` failed with `IntegrityError: FOREIGN KEY
+constraint failed` — fallout from Faz 22A-G adding 10+ user-foreign-keyed
+tables that ``MemoryStore.delete_user`` never learned about. While
+fixing the cascade, the admin dashboard was missing user management
+entirely (only role dropdown), and CLI `user remove` had no
+confirmation guard. Bundled all three.
+
+### Fixed — `delete_user` cascade
+
+``MemoryStore.delete_user`` now deletes from every per-user table
+before dropping the ``users`` row:
+
+- ``vec_memory_facts`` (sqlite-vec virtual table — explicit rowid join)
+- ``memory_facts``, ``memory_processing_log``
+- ``memory_relations``, ``memory_entity_pages``, ``memory_entity_aliases``
+- ``user_channels``, ``user_notes``, ``api_keys``
+- ``sessions``, ``messages``, ``background_tasks``, ``task_executions``
+
+Tables that may not exist in older databases are wrapped in
+``try/except OperationalError`` so the helper stays idempotent across
+schema versions. Regression test: `test_delete_user_cascades_through_memory`
+seeds facts, relations, sessions, messages, then asserts row count = 0
+after delete.
+
+### Added — Admin user CRUD
+
+Backend (``gbot/api/admin.py``):
+
+| Endpoint | Body | Guard |
+|---|---|---|
+| `POST /admin/users` | `{user_id, name?, role?, password?}` | owner-only |
+| `PATCH /admin/users/{id}` | `{name?, role?, password?}` | owner-only |
+| `DELETE /admin/users/{id}` | — | owner-only, refuses self + last owner |
+
+`MemoryStore` helpers added: ``update_user_name``, ``set_user_password``
+(bcrypt round-trip via existing ``_hash_password``).
+
+Dashboard (``dashboard/src/pages/Users.tsx`` rewrite):
+
+- **+ New User** button → modal with user_id / name / role / password
+- **Edit** icon → modal with name + new password (role kept on inline
+  dropdown to match existing UX)
+- **Delete** icon → modal with red blast-radius warning + "type the
+  user_id to confirm" input. Disabled for self and for owner rows.
+- New `api.patch` method on `dashboard/src/api/client.ts` (was missing).
+
+### Added — CLI delete confirmation
+
+`gbot user remove <id>`:
+
+- Prints blast-radius before prompt: "Bu işlem N fact, M relation,
+  K mesaj, L session silecek."
+- ``typer.confirm`` Y/n prompt (default no).
+- ``--yes / -y`` flag bypasses for scripted use.
+
+### Fixed — CLI log noise
+
+Every `gbot ...` invocation logged ``MemoryStore initialized:
+data/gbot.db`` because INFO was the loguru default. Changed:
+
+- ``MemoryStore.__init__`` log line: INFO → DEBUG.
+- ``gbot_cli/commands.py`` top: ``logger.remove() ; logger.add(sys.stderr,
+  level=os.environ.get("GBOT_LOG_LEVEL", "WARNING"))``.
+
+Override per-invocation: ``GBOT_LOG_LEVEL=DEBUG gbot memory stats``.
+
+### Tests
+
+Existing 445 still pass. New: `test_delete_user_cascades_through_memory`
+(31 store tests total).
+
+---
+
 ## [1.24.1] - 2026-05-09 — gbot memory CLI
 
 Direct DB-side commands for inspecting and managing memory without

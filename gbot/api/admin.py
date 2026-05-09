@@ -20,6 +20,25 @@ class RoleUpdate(BaseModel):
     role: str
 
 
+class UserCreate(BaseModel):
+    """Body for ``POST /admin/users``."""
+
+    user_id: str
+    name: str | None = None
+    role: str = "member"
+    password: str | None = None
+
+
+class UserUpdate(BaseModel):
+    """Body for ``PATCH /admin/users/{user_id}``. Every field optional —
+    only provided ones are updated.
+    """
+
+    name: str | None = None
+    role: str | None = None
+    password: str | None = None
+
+
 class LayerOverrideRequest(BaseModel):
     """Request body for layer override."""
 
@@ -138,6 +157,96 @@ async def set_user_role(
         raise HTTPException(status_code=404, detail=f"User '{user_id}' not found")
     db.set_user_role(user_id, body.role)
     return {"user_id": user_id, "role": body.role}
+
+
+@router.post("/users")
+async def create_user(
+    body: UserCreate,
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    db: MemoryStore = Depends(get_db),
+):
+    """Create a new user (owner only)."""
+    _require_owner(current_user, config)
+    if not body.user_id or not body.user_id.strip():
+        raise HTTPException(status_code=400, detail="user_id required")
+    if body.role not in _VALID_ROLES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid role '{body.role}'. Must be one of: {_VALID_ROLES}",
+        )
+    if db.user_exists(body.user_id):
+        raise HTTPException(
+            status_code=409, detail=f"User '{body.user_id}' already exists"
+        )
+    db.get_or_create_user(body.user_id, name=body.name)
+    db.set_user_role(body.user_id, body.role)
+    if body.password:
+        db.set_user_password(body.user_id, body.password)
+    return {
+        "user_id": body.user_id, "name": body.name, "role": body.role,
+    }
+
+
+@router.patch("/users/{user_id}")
+async def update_user(
+    user_id: str,
+    body: UserUpdate,
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    db: MemoryStore = Depends(get_db),
+):
+    """Update name / role / password — only provided fields touched."""
+    _require_owner(current_user, config)
+    if not db.user_exists(user_id):
+        raise HTTPException(status_code=404, detail=f"User '{user_id}' not found")
+    if body.role is not None and body.role not in _VALID_ROLES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid role '{body.role}'. Must be one of: {_VALID_ROLES}",
+        )
+    if body.name is not None:
+        db.update_user_name(user_id, body.name)
+    if body.role is not None:
+        db.set_user_role(user_id, body.role)
+    if body.password is not None:
+        db.set_user_password(user_id, body.password)
+    user = db.get_user(user_id) or {}
+    return {
+        "user_id": user_id,
+        "name": user.get("name"),
+        "role": user.get("role"),
+    }
+
+
+@router.delete("/users/{user_id}")
+async def delete_user_endpoint(
+    user_id: str,
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    db: MemoryStore = Depends(get_db),
+):
+    """Delete a user and ALL their per-user rows (cascade).
+
+    Refuses to delete the configured owner — that one's removed via
+    config + DB edit, not the API.
+    """
+    _require_owner(current_user, config)
+    owner_id = getattr(getattr(config.assistant, "owner", None), "username", None)
+    if owner_id and user_id == owner_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Refusing to delete the configured owner via API. "
+                   "Change config.assistant.owner first.",
+        )
+    if user_id == current_user:
+        raise HTTPException(
+            status_code=400, detail="Cannot delete the user you're authenticated as.",
+        )
+    existed = db.delete_user(user_id)
+    if not existed:
+        raise HTTPException(status_code=404, detail=f"User '{user_id}' not found")
+    return {"ok": True, "user_id": user_id}
 
 
 @router.get("/tasks")
