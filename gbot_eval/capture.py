@@ -30,6 +30,22 @@ class CallResult:
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def text(self) -> str:
+        """Best-effort text — falls back to ``reasoning_content`` for
+        thinking/reasoning models (Kimi-K2 family, DeepSeek-R1, etc.)
+        whose final answer sometimes lands in ``additional_kwargs``
+        when token limits run short. Mirrors the production fallback
+        in ``gbot/agent/delegation.py:214``.
+        """
+        if not self.response:
+            return ""
+        content = (getattr(self.response, "content", "") or "").strip()
+        if content:
+            return content
+        extras = getattr(self.response, "additional_kwargs", {}) or {}
+        return (extras.get("reasoning_content") or "").strip()
+
 
 async def track_call(
     coro: Awaitable[Any], model: str

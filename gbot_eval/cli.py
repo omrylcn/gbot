@@ -75,6 +75,18 @@ def run_cmd(
             "Default: all registered suites."
         ),
     ),
+    sample: int = typer.Option(
+        100,
+        "--sample",
+        help=(
+            "Run only the first N%% of each fixture (1-100). "
+            "Useful for fast smoke tests / cost saving. The actual "
+            "value is recorded in manifest.json so comparisons stay "
+            "honest."
+        ),
+        min=1,
+        max=100,
+    ),
 ):
     """Run one or more eval suites and write results under output/runs/."""
     if not eval_config.has_api_key():
@@ -93,9 +105,13 @@ def run_cmd(
 
     eval_config.init_provider()
     resolved = eval_config.resolve_model(model)
-    console.print(f"[cyan]gbot-eval run[/cyan] — model=[bold]{resolved}[/bold] suite={suite or 'ALL'}")
+    sample_label = f"{sample}%" if sample < 100 else "ALL"
+    console.print(
+        f"[cyan]gbot-eval run[/cyan] — model=[bold]{resolved}[/bold] "
+        f"suite={suite or 'ALL'} sample={sample_label}"
+    )
 
-    results = asyncio.run(eval_runner.run_all(resolved, suite))
+    results = asyncio.run(eval_runner.run_all(resolved, suite, sample_pct=sample))
     run_dir = eval_runner.write_run(results)
 
     console.print(f"\n[green]Run complete:[/green] {run_dir}")

@@ -1,7 +1,6 @@
-"""Suite registry. Each suite module imports its class and registers
-itself here so ``gbot-eval run --suite=<name>`` can find it.
-
-Step 5C-5H'de doldurulacak. Şu an boş, iskelet ayakta.
+"""Suite registry. Each suite module imports itself via ``register()``
+during import; the listing ``_load_suites()`` at the bottom triggers
+that side effect for every shipped suite.
 """
 
 from __future__ import annotations
@@ -17,6 +16,18 @@ def register(suite: Suite) -> Suite:
         raise ValueError(f"duplicate suite name: {suite.name}")
     SUITE_REGISTRY[suite.name] = suite
     return suite
+
+
+def _load_suites() -> None:
+    """Import every shipped suite so its ``register()`` side effect runs.
+
+    Called once from this module's bottom. Adding a new suite:
+    1. Create ``gbot_eval/suites/<name>.py`` that calls ``register(...)``
+    2. Append the import here.
+    """
+    from gbot_eval.suites import memory_audn  # noqa: F401
+    from gbot_eval.suites import memory_extraction  # noqa: F401
+    from gbot_eval.suites import memory_page_compile  # noqa: F401
 
 
 def list_names() -> list[str]:
@@ -57,3 +68,6 @@ def filter_suites(spec: str | None) -> list[Suite]:
             seen.add(s.name)
             out.append(s)
     return out
+
+
+_load_suites()

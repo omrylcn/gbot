@@ -1,0 +1,143 @@
+{
+  "_comment": "Fact extraction eval cases. Each case: a short conversation + ground-truth facts the LLM should extract. Curated 2026-05-09.",
+  "cases": [
+    {
+      "case_id": "ex01",
+      "conversation": [
+        {"role": "user", "content": "Merhaba, ben Ömer. İstanbul'da yaşıyorum ve HangiKredi'de backend developer olarak çalışıyorum."},
+        {"role": "assistant", "content": "Memnun oldum Ömer."}
+      ],
+      "expected_facts": [
+        {"content_keywords": ["Ömer", "İstanbul"], "category": "location", "type": "semantic"},
+        {"content_keywords": ["HangiKredi", "backend"], "category": "work", "type": "semantic"}
+      ],
+      "expected_relations": [
+        {"source_keyword": "Ömer", "relation": "lives_in", "target_keyword": "İstanbul"},
+        {"source_keyword": "Ömer", "relation": "works_at", "target_keyword": "HangiKredi"}
+      ],
+      "min_facts": 2
+    },
+    {
+      "case_id": "ex02",
+      "conversation": [
+        {"role": "user", "content": "Bugün Murat ile öğle yemeği yedik. Türk lokantasındaydık, mantı sipariş ettim."},
+        {"role": "assistant", "content": "Lezzetli olmuştur."}
+      ],
+      "expected_facts": [
+        {"content_keywords": ["Murat", "yemek"], "category": "relationship", "type": "episodic"}
+      ],
+      "expected_relations": [],
+      "min_facts": 1
+    },
+    {
+      "case_id": "ex03",
+      "conversation": [
+        {"role": "user", "content": "Python ve Go kullanıyorum genelde. Vejetaryen bir hayat tarzım var, et yemiyorum."},
+        {"role": "assistant", "content": "Anladım."}
+      ],
+      "expected_facts": [
+        {"content_keywords": ["Python", "Go"], "category": "tech", "type": "semantic"},
+        {"content_keywords": ["vejetaryen"], "category": "preference", "type": "preference"}
+      ],
+      "expected_relations": [
+        {"source_keyword": "user", "relation": "uses", "target_keyword": "Python"}
+      ],
+      "min_facts": 2
+    },
+    {
+      "case_id": "ex04",
+      "conversation": [
+        {"role": "user", "content": "Eşim Ayşe ile 3 yıldır evliyiz. Kedimiz var, adı Pamuk."},
+        {"role": "assistant", "content": "Güzel."}
+      ],
+      "expected_facts": [
+        {"content_keywords": ["Ayşe", "evli"], "category": "personal", "type": "semantic"},
+        {"content_keywords": ["Pamuk", "kedi"], "category": "personal", "type": "semantic"}
+      ],
+      "expected_relations": [
+        {"source_keyword": "user", "relation": "married_to", "target_keyword": "Ayşe"},
+        {"source_keyword": "user", "relation": "owns", "target_keyword": "Pamuk"}
+      ],
+      "min_facts": 2
+    },
+    {
+      "case_id": "ex05",
+      "conversation": [
+        {"role": "user", "content": "Sabahları hava durumu kontrol etmeyi alışkanlık edindim. Borsa da takip ederim, Bitcoin yatırımım var."},
+        {"role": "assistant", "content": "İlginç rutin."}
+      ],
+      "expected_facts": [
+        {"content_keywords": ["sabah", "hava"], "category": "habit", "type": "procedural"},
+        {"content_keywords": ["borsa", "Bitcoin"], "category": "finance", "type": "procedural"}
+      ],
+      "expected_relations": [],
+      "min_facts": 2
+    },
+    {
+      "case_id": "ex06",
+      "conversation": [
+        {"role": "user", "content": "Selam, nasılsın? Hava bugün biraz soğuk."},
+        {"role": "assistant", "content": "İyiyim, sen?"}
+      ],
+      "expected_facts": [],
+      "expected_relations": [],
+      "min_facts": 0,
+      "max_facts": 0
+    },
+    {
+      "case_id": "ex07",
+      "conversation": [
+        {"role": "user", "content": "Geçen yıl Ankara'dan İstanbul'a taşındım. Önceden Java kullanıyordum, şimdi Python'a geçtim."},
+        {"role": "assistant", "content": "Hayırlı olsun."}
+      ],
+      "expected_facts": [
+        {"content_keywords": ["İstanbul", "taşın"], "category": "location", "type": "episodic"},
+        {"content_keywords": ["Python"], "category": "tech", "type": "semantic"}
+      ],
+      "expected_relations": [],
+      "min_facts": 2
+    },
+    {
+      "case_id": "ex08",
+      "conversation": [
+        {"role": "user", "content": "Murat backend developer, benimle aynı takımda çalışıyor. Ankara'da yaşıyor, hibrit gelir bazen."},
+        {"role": "assistant", "content": "Anladım."}
+      ],
+      "expected_facts": [
+        {"content_keywords": ["Murat", "developer"], "category": "work", "type": "semantic"},
+        {"content_keywords": ["Murat", "Ankara"], "category": "location", "type": "semantic"}
+      ],
+      "expected_relations": [
+        {"source_keyword": "Murat", "relation": "works_with", "target_keyword": "user"},
+        {"source_keyword": "Murat", "relation": "lives_in", "target_keyword": "Ankara"}
+      ],
+      "min_facts": 2
+    },
+    {
+      "case_id": "ex09",
+      "conversation": [
+        {"role": "user", "content": "Hafta sonu kitap okumayı seviyorum, daha çok teknik kitaplar. Akşamları yürüyüş yapıyorum."},
+        {"role": "assistant", "content": "Sağlıklı."}
+      ],
+      "expected_facts": [
+        {"content_keywords": ["kitap"], "category": "habit", "type": "preference"},
+        {"content_keywords": ["yürüyüş"], "category": "habit", "type": "procedural"}
+      ],
+      "expected_relations": [],
+      "min_facts": 2
+    },
+    {
+      "case_id": "ex10",
+      "conversation": [
+        {"role": "user", "content": "İngilizce konuşabiliyorum, ileri seviye. Açık kaynak projelere katkı veriyorum, daha çok developer tools."},
+        {"role": "assistant", "content": "Güzel."}
+      ],
+      "expected_facts": [
+        {"content_keywords": ["İngilizce"], "category": "personal", "type": "semantic"},
+        {"content_keywords": ["açık kaynak", "developer tools"], "category": "interest", "type": "procedural"}
+      ],
+      "expected_relations": [],
+      "min_facts": 2
+    }
+  ]
+}

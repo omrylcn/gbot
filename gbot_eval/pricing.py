@@ -16,9 +16,10 @@ _LAST_UPDATED = "2026-05-09"
 
 PRICES: dict[str, dict[str, float]] = {
     # Google
-    "openrouter/google/gemini-3-flash-preview": {"prompt": 0.075, "completion": 0.30},
-    "openrouter/google/gemini-2.5-flash":       {"prompt": 0.075, "completion": 0.30},
-    "openrouter/google/gemini-2.5-pro":         {"prompt": 1.25,  "completion": 10.00},
+    "openrouter/google/gemini-3-flash-preview":   {"prompt": 0.075, "completion": 0.30},
+    "openrouter/google/gemini-3.1-flash-lite":    {"prompt": 0.05,  "completion": 0.20},
+    "openrouter/google/gemini-2.5-flash":         {"prompt": 0.075, "completion": 0.30},
+    "openrouter/google/gemini-2.5-pro":           {"prompt": 1.25,  "completion": 10.00},
     # Anthropic
     "openrouter/anthropic/claude-haiku-4.5":    {"prompt": 1.00,  "completion": 5.00},
     "openrouter/anthropic/claude-sonnet-4.5":   {"prompt": 3.00,  "completion": 15.00},
@@ -34,12 +35,14 @@ PRICES: dict[str, dict[str, float]] = {
     "openrouter/deepseek/deepseek-v3.2":        {"prompt": 0.27,  "completion": 1.10},
     "openrouter/deepseek/deepseek-r1":          {"prompt": 0.55,  "completion": 2.19},
     # MiniMax
-    "openrouter/minimax/minimax-m2.5":          {"prompt": 0.30,  "completion": 1.20},
+    "openrouter/minimax/minimax-m2.5":           {"prompt": 0.30,  "completion": 1.20},
+    "openrouter/minimax/minimax-m2.7":           {"prompt": 0.30,  "completion": 1.20},
     # Qwen
-    "openrouter/qwen/qwen-3-235b-instruct":     {"prompt": 0.20,  "completion": 0.60},
-    # GLM
-    "openrouter/zhipuai/glm-4.7-flash":         {"prompt": 0.10,  "completion": 0.30},
-    "openrouter/zhipuai/glm-5":                 {"prompt": 0.50,  "completion": 1.50},
+    "openrouter/qwen/qwen-3-235b-instruct":      {"prompt": 0.20,  "completion": 0.60},
+    # GLM (z-ai / zhipuai)
+    "openrouter/zhipuai/glm-4.7-flash":          {"prompt": 0.10,  "completion": 0.30},
+    "openrouter/zhipuai/glm-5":                  {"prompt": 0.50,  "completion": 1.50},
+    "openrouter/z-ai/glm-5.1":                   {"prompt": 0.50,  "completion": 1.50},
 }
 
 

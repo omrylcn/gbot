@@ -59,4 +59,20 @@ class Suite(Protocol):
     name: str
     fixture_file: str
 
-    async def run(self, model: str) -> SuiteResult: ...
+    async def run(self, model: str, sample_pct: int = 100) -> SuiteResult: ...
+
+
+def sample_cases(cases: list[Any], sample_pct: int) -> list[Any]:
+    """Deterministic sub-sample of fixture cases.
+
+    Takes the first ``ceil(N * pct/100)`` cases — fixtures are already
+    ordered for diversity, so a prefix slice is representative without
+    introducing run-to-run variance.
+
+    Always returns at least 1 case (clamped) so 1% on a 5-case fixture
+    still runs one case rather than zero.
+    """
+    if sample_pct >= 100 or not cases:
+        return list(cases)
+    n = max(1, (len(cases) * sample_pct + 99) // 100)
+    return list(cases[:n])
