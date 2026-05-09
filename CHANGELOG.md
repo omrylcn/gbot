@@ -6,6 +6,109 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.23.0] - 2026-05-09 — Faz 22G: Memory roadmap (5 features)
+
+Five memory features ship together: explicit lifecycle states,
+persona/style memory, an interactive relations graph in the
+dashboard, Obsidian vault export, and an opt-in LLM-rerank for
+retrieval. ~30 saatlik iş, 5 commit dizisi, 434 test geçer.
+
+### Aşama 1 — 4-state lifecycle (memory_facts)
+
+`memory_facts` now carries an explicit ``state`` column instead of
+relying on implicit ``valid_until + importance`` signals. PRAGMA
+user_version 22 → 23.
+
+- **States:** ACTIVE / WEAK / INHIBITED / ARCHIVED
+- **Schema:** new ``state``, ``inhibited_until``, ``last_accessed_at``
+  columns + ``idx_facts_state``. Backfill maps existing rows from
+  prior implicit logic.
+- **Decay:** ``apply_decay`` flips ACTIVE→WEAK at fade and
+  WEAK→ARCHIVED at archive; auto-restores INHIBITED rows whose
+  hold expired.
+- **Retrieval:** ``search_similar_facts`` filters
+  ``state IN ('active', 'weak')`` and skips active inhibits.
+- **Helpers:** ``inhibit_fact(hold_days=7)``, ``restore_fact``,
+  ``get_facts(state=)``.
+- **Admin:** ``GET /admin/memory/{user}/facts?state=``,
+  ``POST .../facts/{id}/inhibit``, ``POST .../facts/{id}/restore``.
+- 10 new tests.
+
+### Aşama 2 — Persona / style memory
+
+New `style` fact_type captures how the user prefers to communicate
+(tone, length, formality, language mix, emoji use). Slowest decay
+of all types (180d fade / 540d archive).
+
+- ``_DEFAULT_DECAY_RATES`` gets a ``style`` entry.
+- ``MemoryService._extract_typed_facts`` accepts ``style`` alongside
+  the existing four types.
+- ``workspace/memory_schema.md`` documents the type, sample facts,
+  and the extraction trigger.
+- ``ContextBuilder`` injects a ``USER STYLE:`` block in user_context
+  separate from semantic/episodic facts; it's always present (not
+  query-similarity gated) so the LLM sees voice preferences every
+  turn.
+- 4 new tests.
+
+### Aşama 3 — D3/cytoscape relations graph (dashboard)
+
+Memory page Relations tab gains a Graph view alongside the existing
+Table. Nodes are canonical entities, edges are relations; node size
+scales with degree.
+
+- `cytoscape@^3.33`, `react-cytoscapejs@^2.0`, `cytoscape-cose-bilkent`.
+- ``dashboard/src/components/RelationsGraph.tsx`` (~220 LOC) with
+  filter, click-to-inspect side panel, cose-bilkent layout.
+- No backend change — uses the existing
+  ``GET /admin/memory/{user}/relations`` endpoint.
+- ``style`` added to FACT_TYPES filter so persona facts show up in
+  the table.
+
+### Aşama 4 — Obsidian vault sync
+
+`memory_entity_pages.content_md` is already markdown — now it can
+sync to a local Obsidian vault on a configurable cron schedule with
+YAML frontmatter (entity, compiled_at, synced_at, source_facts).
+
+- ``gbot/memory/obsidian_sync.py`` — ``ObsidianSyncer.run(user_id)``.
+- New cron processor ``memory_obsidian_sync`` in
+  ``gbot/core/cron/scheduler.py``.
+- Lifespan bootstrap registers a recurring task per user when
+  ``memory.obsidian_sync.enabled``.
+- Admin endpoint ``POST /admin/memory/{user}/obsidian-sync/run``
+  for manual triggers.
+- Off by default. 5 new tests.
+
+### Aşama 5 — Engram-style LLM rerank (opt-in)
+
+ContextBuilder picks up an opt-in LLM-based re-ranker that asks the
+model to score the candidate pool against the actual query text
+instead of the static multiplicative formula.
+
+- ``MemoryRetrievalConfig.llm_rerank`` config block (off by default,
+  cheap fail-safe to static formula).
+- ``ContextBuilder._llm_rerank()`` — JSON-mode prompt, robust JSON
+  parsing, partial-result handling (fills from static tail), full
+  exception fallback. Sync caller drives the async LLM call via
+  threaded ``asyncio.run`` so the existing sync builder API stays
+  intact.
+- 5 new tests covering happy path, partial result, parse failure,
+  exception, empty input.
+
+### Tests
+
+434 total (was 429). All gbot-eval suites unchanged.
+
+### Migration
+
+PRAGMA user_version bumps from 22 to 23. Backfill is automatic and
+idempotent. No config changes required for the default-off
+features (Obsidian sync, LLM rerank). ``style`` fact_type is
+silently accepted by extraction; existing fixtures keep working.
+
+---
+
 ## [1.22.0] - 2026-05-09 — Faz 22F: gbot-eval YAML refactor
 
 gbot-eval mimarisi "Python-first" → "YAML-first with Python escape
