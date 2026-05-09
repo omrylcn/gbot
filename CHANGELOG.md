@@ -6,6 +6,84 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.21.0] - 2026-05-09 — Faz 22E: Hardening + gbot-eval framework
+
+Five steps land together. Operational hardening on the memory layer
+(prompt caching, scheduled maintenance, retrieval benchmark,
+artifact-trail summaries) plus a brand-new evaluation CLI that
+benchmarks every LLM call gbot makes.
+
+### Added — gbot-eval (`gbot_eval/` standalone CLI package)
+
+`gbot-eval` is a sibling to `gbot-cli`: a Typer entry point that runs
+8 evaluation suites against any OpenRouter-routable model and reports
+quality / cost / latency in a Rich matrix. Lives at
+`gbot_eval/`, registered as `gbot-eval` in `pyproject.toml`.
+
+Suites (8 — see `gbot_eval/README.md`):
+- `memory.extraction`, `memory.audn`, `memory.page_compile`
+- `agent.delegation`, `agent.tool_calling`, `agent.structured`,
+  `agent.instruction` (regex + LLM-as-judge)
+- `stress.long_context` (30-turn stub needle-in-haystack)
+
+Cross-cutting infra:
+- `pricing.py` — built-in $/1M token table + user override file
+  (`gbot-eval models add`)
+- `capture.py` — wraps every LLM call with token / latency / cost
+- `judge.py` — fixed-model (claude-haiku-4.5) LLM-as-judge for
+  subjective adherence checks
+- `reporting.py` — Rich tables, matrix aggregator, A/B compare
+
+CLI commands: `run`, `list`, `list-runs`, `matrix`, `compare`,
+`bench-providers`, `models [add]`, `baseline [set|diff]`, `clean`.
+
+Sampling: `--sample=N%` deterministic prefix slice for cost-saving
+smoke tests; recorded in `manifest.json`.
+
+Provider decision: empirical bench (4 models × 12 cases × 2 providers)
+showed LiteLLM and OpenRouter SDK tied on quality/cost; OpenRouter
+SDK won on latency in reasoning-model paths (Kimi K2.6 reasoning ON:
+9s vs 25s p95). Decision: OpenRouter SDK is sole provider going
+forward. LiteLLM is dead code, removal scheduled.
+
+Reasoning gotcha discovered: disable thinking with
+`reasoning={"effort": "none"}`, NOT `{"enabled": false}` — OpenRouter
+silently dismisses the latter.
+
+Baseline (gemini-3-flash-preview, full run): mean quality 0.80
+across 8 suites, ~$0.012 / 4-min wall-clock.
+
+### Added — Faz 22E hardening (Steps 1-4, previously parked)
+
+- **Prompt caching** (`gbot/agent/nodes.py`): system messages get
+  `cache_control: {"type": "ephemeral"}` for Anthropic + Gemini 2.5
+  models; LiteLLM auto-injects the rest. Provider-gated, length-gated.
+  Cache hit telemetry written to logs.
+- **Auto-maintenance scheduling** (`gbot/api/app.py`,
+  `gbot/core/cron/scheduler.py`): per-user daily + weekly memory
+  maintenance cron jobs registered idempotently at startup. Default
+  04:00 daily / Sunday 04:30 weekly.
+- **`tests/memory_benchmark/`** — internal LOCOMO-mini retrieval
+  benchmark (recall@K, MRR, latency, tokens). Opt-in with
+  `pytest -m benchmark`. Baseline: recall@10=0.947 on 30-fact
+  fixture.
+- **ARTIFACT_TRAIL** — memory agent's session-summary prompt now
+  includes an "ARTIFACTS" section that lists concrete outputs (code,
+  plans, decisions) produced in the session.
+
+### Removed
+
+- `tests/llm_eval/` pytest suite — superseded by `gbot_eval/` standalone
+  CLI. Memory eval cases migrated to `gbot_eval/fixtures/memory_*.json`.
+
+### Tests
+
+- 412+ pytest regression suite stays green.
+- `gbot-eval run` produces a deterministic, comparable output for
+  each model.
+
+---
+
 ## [1.20.1] - 2026-05-08 — Faz 22D Part 3: Admin API + Dashboard
 
 Operational layer for everything that landed in v1.19/v1.20: admin

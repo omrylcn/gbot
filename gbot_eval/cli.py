@@ -24,6 +24,7 @@ from rich.table import Table
 
 from gbot_eval import bench_providers as bench_providers_module
 from gbot_eval import config as eval_config
+from gbot_eval import pricing
 from gbot_eval import runner as eval_runner
 from gbot_eval.__version__ import __version__
 from gbot_eval.pricing import list_models
@@ -34,6 +35,8 @@ from gbot_eval.reporting import (
     format_provider_winners,
 )
 from gbot_eval.suites import list_names
+
+BASELINE_PATH = eval_runner.OUTPUT_ROOT.parent / "baseline.json"
 
 app = typer.Typer(
     help="GBot LLM evaluation CLI — measures memory + agent + stress LLM quality.",
@@ -128,9 +131,15 @@ def run_cmd(
 # ── models ──────────────────────────────────────────────────────
 
 
-@app.command("models")
-def models_cmd():
-    """List models with known pricing."""
+models_app = typer.Typer(help="Pricing table inspection and overrides.")
+app.add_typer(models_app, name="models")
+
+
+@models_app.callback(invoke_without_command=True)
+def models_root(ctx: typer.Context):
+    """List models with known pricing (default action)."""
+    if ctx.invoked_subcommand is not None:
+        return
     table = Table(title="Known model pricing ($/1M tokens)")
     table.add_column("Model", style="cyan")
     table.add_column("Prompt", justify="right", style="green")
@@ -139,7 +148,22 @@ def models_cmd():
         table.add_row(model, f"{prompt:.3f}", f"{completion:.3f}")
     console.print(table)
     console.print(
-        "\n[dim]Add new entries via 'gbot-eval models add' (Step 5I).[/dim]"
+        "\n[dim]Add custom pricing via 'gbot-eval models add <id> "
+        "--prompt=X --completion=Y' (writes to gbot_eval/output/pricing_overrides.json).[/dim]"
+    )
+
+
+@models_app.command("add")
+def models_add_cmd(
+    model: str = typer.Argument(..., help="Model id, e.g. 'openrouter/foo/bar-2'."),
+    prompt: float = typer.Option(..., "--prompt", help="$/1M prompt tokens."),
+    completion: float = typer.Option(..., "--completion", help="$/1M completion tokens."),
+):
+    """Add or update a model's pricing entry (persists to overrides file)."""
+    pricing.add_model(model, prompt, completion)
+    console.print(
+        f"[green]Saved pricing for {model}[/green]: "
+        f"prompt=${prompt}/1M, completion=${completion}/1M"
     )
 
 
@@ -241,6 +265,107 @@ def clean_cmd(
     for r in to_remove:
         shutil.rmtree(r)
     console.print(f"[yellow]Removed {len(to_remove)} run(s); {keep} kept.[/yellow]")
+
+
+# ── baseline ────────────────────────────────────────────────────
+
+
+baseline_app = typer.Typer(help="Manage and diff against the blessed baseline run.")
+app.add_typer(baseline_app, name="baseline")
+
+
+def _read_baseline() -> str | None:
+    if not BASELINE_PATH.exists():
+        return None
+    try:
+        data = __import__("json").loads(BASELINE_PATH.read_text())
+        return data.get("run_dir")
+    except Exception:
+        return None
+
+
+def _write_baseline(run_dir: str) -> None:
+    import json as _json
+
+    BASELINE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    BASELINE_PATH.write_text(
+        _json.dumps({"run_dir": run_dir}, indent=2)
+    )
+
+
+@baseline_app.callback(invoke_without_command=True)
+def baseline_root(ctx: typer.Context):
+    """Show the current baseline (default action)."""
+    if ctx.invoked_subcommand is not None:
+        return
+    rd = _read_baseline()
+    if not rd:
+        console.print(
+            "[yellow]No baseline set.[/yellow] "
+            "Use 'gbot-eval baseline set --run=<timestamp>' to promote one."
+        )
+        return
+    p = eval_runner.OUTPUT_ROOT / rd
+    if not p.exists():
+        console.print(f"[red]Baseline run missing on disk:[/red] {rd}")
+        return
+    matrix = eval_runner.load_run(p)
+    console.print(f"[cyan]Baseline:[/cyan] {rd}")
+    console.print(format_matrix_table(matrix))
+
+
+@baseline_app.command("set")
+def baseline_set_cmd(
+    run: str = typer.Option(..., "--run", help="Run directory name to promote."),
+):
+    """Promote a run as the baseline (subsequent 'baseline diff' compares to it)."""
+    p = eval_runner.OUTPUT_ROOT / run
+    if not p.exists():
+        console.print(f"[red]Run not found:[/red] {run}")
+        raise typer.Exit(1)
+    if not (p / "matrix.json").exists():
+        console.print(f"[red]Run is missing matrix.json:[/red] {run}")
+        raise typer.Exit(1)
+    _write_baseline(run)
+    console.print(f"[green]Baseline set to:[/green] {run}")
+
+
+@baseline_app.command("diff")
+def baseline_diff_cmd(
+    run: str | None = typer.Option(
+        None, "--run", help="Run to compare against baseline. Default: most recent."
+    ),
+):
+    """Side-by-side comparison of a run vs the baseline."""
+    rd = _read_baseline()
+    if not rd:
+        console.print(
+            "[yellow]No baseline set.[/yellow] "
+            "Use 'gbot-eval baseline set --run=<timestamp>' first."
+        )
+        raise typer.Exit(1)
+    base = eval_runner.OUTPUT_ROOT / rd
+    if not base.exists():
+        console.print(f"[red]Baseline run missing on disk:[/red] {rd}")
+        raise typer.Exit(1)
+
+    if run:
+        target = eval_runner.OUTPUT_ROOT / run
+        if not target.exists():
+            console.print(f"[red]Run not found:[/red] {run}")
+            raise typer.Exit(1)
+    else:
+        runs = eval_runner.list_runs()
+        if not runs:
+            console.print("[yellow]No runs to diff.[/yellow]")
+            raise typer.Exit(1)
+        target = runs[0]
+
+    matrix_a = eval_runner.load_run(base)
+    matrix_b = eval_runner.load_run(target)
+    console.print(f"[dim]baseline: {base.name}[/dim]")
+    console.print(f"[dim]    run:  {target.name}[/dim]")
+    console.print(compare_runs(matrix_a, matrix_b))
 
 
 # ── bench-providers ────────────────────────────────────────────

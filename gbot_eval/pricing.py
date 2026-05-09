@@ -4,10 +4,17 @@ Prices are expressed as USD per **1 million** tokens. Source: OpenRouter
 public pricing pages, sampled at ``_LAST_UPDATED``. Update via
 ``gbot-eval models add`` or by editing this file.
 
+User-added entries land in ``gbot_eval/output/pricing_overrides.json``
+(gitignored) and merge in at import time, so the in-tree table stays
+clean while ad-hoc additions are still picked up automatically.
+
 Unknown models cost 0 with a warning; the run still completes.
 """
 
 from __future__ import annotations
+
+import json
+from pathlib import Path
 
 from loguru import logger
 
@@ -82,3 +89,60 @@ def list_models() -> list[tuple[str, float, float]]:
         (m, p["prompt"], p["completion"])
         for m, p in sorted(PRICES.items())
     ]
+
+
+# ── User-side pricing overrides ─────────────────────────────────
+
+_OVERRIDES_PATH = (
+    Path(__file__).parent / "output" / "pricing_overrides.json"
+)
+
+
+def _load_overrides() -> None:
+    """Merge user-added pricing entries from
+    ``gbot_eval/output/pricing_overrides.json`` into ``PRICES``.
+
+    Silent no-op if the file doesn't exist or is malformed; logs a
+    warning rather than failing the import.
+    """
+    if not _OVERRIDES_PATH.exists():
+        return
+    try:
+        data = json.loads(_OVERRIDES_PATH.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(f"pricing overrides invalid: {e}")
+        return
+    if not isinstance(data, dict):
+        return
+    for model, entry in data.items():
+        if (
+            isinstance(entry, dict)
+            and "prompt" in entry
+            and "completion" in entry
+        ):
+            PRICES[model] = {
+                "prompt": float(entry["prompt"]),
+                "completion": float(entry["completion"]),
+            }
+
+
+def add_model(model: str, prompt: float, completion: float) -> None:
+    """Persist a new pricing entry to the overrides file."""
+    overrides: dict = {}
+    if _OVERRIDES_PATH.exists():
+        try:
+            overrides = json.loads(_OVERRIDES_PATH.read_text())
+            if not isinstance(overrides, dict):
+                overrides = {}
+        except (json.JSONDecodeError, OSError):
+            overrides = {}
+    overrides[model] = {
+        "prompt": float(prompt),
+        "completion": float(completion),
+    }
+    _OVERRIDES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _OVERRIDES_PATH.write_text(json.dumps(overrides, indent=2))
+    PRICES[model] = overrides[model]
+
+
+_load_overrides()

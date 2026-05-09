@@ -57,3 +57,5 @@ gbot-philosophy.md
 tests/memory_benchmark/last_run.json
 tests/llm_eval/last_run_*.json
 gbot_eval/output/runs/
+gbot_eval/output/pricing_overrides.json
+gbot_eval/output/baseline.json
