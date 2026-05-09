@@ -6,6 +6,60 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.24.0] - 2026-05-09 — Faz 22H: Temporal awareness
+
+GBot zamanı algılayamıyor diye 12 gün önceki bir niyeti hâlâ taze
+gibi gösterebiliyordu. Bu release context'in dört noktasına zaman
+sinyali enjekte ediyor — Chronos (arXiv 2603.16862) dual-calendar
+ve Cognee Temporal Cognification yaklaşımına uygun.
+
+### Conversation history (Chronos turn calendar)
+
+- ``Runner._load_history`` her mesajın ``created_at`` değerini
+  LangChain mesajının ``additional_kwargs.timestamp`` alanına koyar
+  (yeni HumanMessage de aynı şekilde).
+- ``nodes._with_temporal_markers`` her chat dict'ine
+  ``[14:30 (12 gün önce)]`` inline tag ekler ve **>20dk** boşluklara
+  ``--- 12 gün geçti ---`` synthetic system marker enjekte eder.
+- 20-dakikalık eşik kullanılan literatür standardı (conversational
+  agents session-boundary heuristic).
+
+### Memory facts (Chronos event calendar)
+
+- ``ContextBuilder`` LEARNED FACTS bloğunda her fact'in başına
+  ``(12 gün önce)`` prefix'i ekler. ``_relative_age`` helper
+  ``created_at``'ı tolere edecek şekilde tasarlandı (None / garbage
+  → ``"yakın zaman"``).
+- Style fact'leri timeless olduğu için tag almaz.
+
+### Session summary
+
+- Yeni ``MemoryStore.get_last_session_meta`` summary + ``ended_at``
+  döndürür. ContextBuilder header'ı
+  ``# Previous Conversation (12 gün önce)`` formatında render eder.
+
+### Runtime layer
+
+- ``Bugün: Cuma, 22 Mayıs 2026, 14:30`` (Türkçe gün + ay adı).
+- ``Bu kullanıcıyla son aktivite: 12 gün önce`` satırı, mevcut
+  oturum verisinden çıkar.
+
+### Tests
+
+- ``tests/test_temporal_awareness.py`` — 11 test (humanize_age /
+  humanize_gap / parse_iso / inline tag / gap marker / pass-through
+  / relative_age / session_meta).
+- 434 → **445** total. Mevcut suite'lerin hiçbiri kırılmadı.
+
+### Known limitations
+
+- Implicit temporal expressions ("2 hafta sonra") henüz ISO 8601'e
+  çevrilmiyor; extraction prompt kısmen yapıyor.
+- Cognee'nin sparse timeline graph yapısı (event-as-node) kapsam
+  dışı — gbot'un mevcut memory_relations yeterli sinyal taşıyor.
+
+---
+
 ## [1.23.0] - 2026-05-09 — Faz 22G: Memory roadmap (5 features)
 
 Five memory features ship together: explicit lifecycle states,

@@ -59,8 +59,11 @@ def make_nodes(config: Config, db: MemoryStore, tools: list | None = None, embed
         system_msg = _build_system_message(state["system_prompt"], config)
 
         messages: list[dict[str, Any]] = [system_msg]
-        for msg in state["messages"]:
-            messages.append(_langchain_to_dict(msg))
+        # Faz 22H — inline temporal tags + gap markers so the LLM sees
+        # how old each turn is and where long silences fell. Read by
+        # ``state["messages"]`` carrying ``additional_kwargs.timestamp``
+        # populated in runner.process and runner._load_history.
+        messages.extend(_with_temporal_markers(state["messages"]))
 
         # RBAC: filter tool definitions by allowed_tools
         allowed = state.get("allowed_tools")
@@ -300,6 +303,123 @@ def _langchain_to_dict(msg: Any) -> dict[str, Any]:
         return {"role": "system", "content": msg.content}
     else:
         return {"role": "user", "content": str(msg.content)}
+
+
+# ── Faz 22H: temporal awareness ────────────────────────────────
+
+
+def _parse_iso(ts: str | None):
+    """Tolerant ISO-8601 parser; returns ``None`` on bad input."""
+    from datetime import datetime as _dt
+
+    if not ts:
+        return None
+    try:
+        parsed = _dt.fromisoformat(str(ts).replace("Z", "+00:00"))
+        if parsed.tzinfo:
+            parsed = parsed.replace(tzinfo=None)
+        return parsed
+    except (ValueError, TypeError):
+        return None
+
+
+def _humanize_age(seconds: float) -> str:
+    """Turkish relative-age tag — 'şimdi', '3 dakika önce', '12 gün önce'.
+
+    'gün' is the more natural unit up to ~2 weeks; only beyond 14 days
+    does 'hafta' / 'ay' / 'yıl' kick in.
+    """
+    if seconds < 60:
+        return "şimdi"
+    minutes = seconds / 60
+    if minutes < 60:
+        return f"{int(minutes)} dakika önce"
+    hours = minutes / 60
+    if hours < 24:
+        return f"{int(hours)} saat önce"
+    days = hours / 24
+    if days < 1:
+        return "bugün"
+    if days < 14:
+        return f"{int(days)} gün önce"
+    if days < 60:
+        return f"{int(days // 7)} hafta önce"
+    if days < 365:
+        return f"{int(days // 30)} ay önce"
+    return f"{int(days // 365)} yıl önce"
+
+
+def _humanize_gap(seconds: float) -> str:
+    """Phrase used inside gap markers — '12 gün geçti', '3 saat geçti'.
+
+    Same threshold as ``_humanize_age``: keeps 'gün' through 13 days.
+    """
+    if seconds < 60:
+        return f"{int(seconds)} saniye geçti"
+    minutes = seconds / 60
+    if minutes < 60:
+        return f"{int(minutes)} dakika geçti"
+    hours = minutes / 60
+    if hours < 24:
+        return f"{int(hours)} saat geçti"
+    days = hours / 24
+    if days < 14:
+        return f"{int(days)} gün geçti"
+    if days < 60:
+        return f"{int(days // 7)} hafta geçti"
+    if days < 365:
+        return f"{int(days // 30)} ay geçti"
+    return f"{int(days // 365)} yıl geçti"
+
+
+def _with_temporal_markers(
+    state_messages: list,
+    gap_threshold_seconds: int = 20 * 60,
+) -> list[dict[str, Any]]:
+    """Convert LangChain messages to chat dicts with inline temporal
+    tags and gap markers.
+
+    Each message gets a ``[HH:MM (RELATIVE_AGE)]`` prefix on its
+    content. When the gap between consecutive timestamped messages
+    exceeds ``gap_threshold_seconds`` (default 20 min, matching the
+    common conversational-agents session-boundary heuristic), a
+    synthetic ``system`` message is inserted with a
+    ``--- N geçti ---`` marker so the LLM sees the silence.
+
+    Messages that lack ``additional_kwargs.timestamp`` (legacy DB
+    rows, tests) pass through with an empty tag — never raises.
+    """
+    from datetime import datetime as _dt
+
+    out: list[dict[str, Any]] = []
+    prev_ts = None
+    now = _dt.now()
+    for msg in state_messages:
+        ts_raw = (
+            msg.additional_kwargs.get("timestamp")
+            if hasattr(msg, "additional_kwargs") and msg.additional_kwargs
+            else None
+        )
+        ts = _parse_iso(ts_raw)
+
+        # Gap marker before this message
+        if prev_ts is not None and ts is not None:
+            gap = (ts - prev_ts).total_seconds()
+            if gap >= gap_threshold_seconds:
+                out.append({
+                    "role": "system",
+                    "content": f"--- {_humanize_gap(gap)} ---",
+                })
+
+        d = _langchain_to_dict(msg)
+        if ts is not None and d.get("content"):
+            age_seconds = max(0.0, (now - ts).total_seconds())
+            tag = f"[{ts.strftime('%H:%M')} ({_humanize_age(age_seconds)})]"
+            d["content"] = f"{tag} {d['content']}"
+        out.append(d)
+        if ts is not None:
+            prev_ts = ts
+    return out
 
 
 def _build_tool_definitions(tools: list) -> list[dict[str, Any]]:

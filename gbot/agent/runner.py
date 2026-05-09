@@ -119,6 +119,15 @@ class GraphRunner:
         # 2. Load history → LangChain messages
         history = self._load_history(session_id)
 
+        # Faz 22H — tag the incoming user message with its arrival
+        # timestamp so the reason node can render gap markers and
+        # inline temporal tags relative to history.
+        from datetime import datetime
+        new_user_msg = HumanMessage(
+            content=message,
+            additional_kwargs={"timestamp": datetime.now().isoformat()},
+        )
+
         # 3. Run graph
         state = await self._graph.ainvoke(
             {
@@ -128,7 +137,7 @@ class GraphRunner:
                 "role": role,
                 "allowed_tools": allowed_tools,
                 "context_layers": context_layers,
-                "messages": history + [HumanMessage(content=message)],
+                "messages": history + [new_user_msg],
                 "iteration": 0,
                 "token_count": 0,
                 "skip_context": skip_context,
@@ -156,14 +165,24 @@ class GraphRunner:
         return response, session_id
 
     def _load_history(self, session_id: str) -> list:
-        """SQLite messages → LangChain messages."""
+        """SQLite messages → LangChain messages.
+
+        Faz 22H — preserves the per-message ``created_at`` in
+        ``additional_kwargs['timestamp']`` so ``reason`` can inject
+        inline temporal tags + gap markers when the chat dict list is
+        built.
+        """
         rows = self.db.get_session_messages(session_id)
         messages = []
         for row in rows:
             role = row["role"]
             content = row["content"] or ""
+            ts = row.get("created_at") or ""
+            extras = {"timestamp": ts} if ts else {}
             if role == "user":
-                messages.append(HumanMessage(content=content))
+                messages.append(
+                    HumanMessage(content=content, additional_kwargs=extras)
+                )
             elif role == "assistant":
                 tc = None
                 if row.get("tool_calls"):
@@ -171,12 +190,24 @@ class GraphRunner:
                         tc = json.loads(row["tool_calls"])
                     except json.JSONDecodeError:
                         tc = None
-                messages.append(AIMessage(content=content, tool_calls=tc or []))
+                messages.append(
+                    AIMessage(
+                        content=content, tool_calls=tc or [],
+                        additional_kwargs=extras,
+                    )
+                )
             elif role == "tool":
                 tc_id = row.get("tool_call_id") or ""
-                messages.append(ToolMessage(content=content, tool_call_id=tc_id))
+                messages.append(
+                    ToolMessage(
+                        content=content, tool_call_id=tc_id,
+                        additional_kwargs=extras,
+                    )
+                )
             elif role == "system":
-                messages.append(SystemMessage(content=content))
+                messages.append(
+                    SystemMessage(content=content, additional_kwargs=extras)
+                )
         return messages
 
     def _extract_response(self, state: dict) -> str:

@@ -908,6 +908,20 @@ class MemoryStore:
             ).fetchone()
         return row["summary"] if row else None
 
+    def get_last_session_meta(self, user_id: str) -> dict | None:
+        """Faz 22H — last closed session's summary + timestamps so the
+        ContextBuilder can render '(12 gün önce)' on the Previous
+        Conversation header.
+        """
+        with self._get_conn() as conn:
+            row = conn.execute(
+                """SELECT summary, started_at, ended_at FROM sessions
+                   WHERE user_id = ? AND ended_at IS NOT NULL AND summary IS NOT NULL
+                   ORDER BY ended_at DESC LIMIT 1""",
+                (user_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
     # ════════════════════════════════════════════════════════════
     # MESSAGES
     # ════════════════════════════════════════════════════════════

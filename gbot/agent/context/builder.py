@@ -124,7 +124,42 @@ class ContextBuilder:
 
         # 2. Runtime info
         if _allowed("runtime"):
-            now = datetime.now().strftime("%Y-%m-%d %H:%M")
+            now_dt = datetime.now()
+            now = now_dt.strftime("%Y-%m-%d %H:%M")
+            # Faz 22H — Turkish day-of-week + last-activity gap so the LLM
+            # has a sharper "şu an" than just an ISO timestamp.
+            day_names = [
+                "Pazartesi", "Salı", "Çarşamba", "Perşembe",
+                "Cuma", "Cumartesi", "Pazar",
+            ]
+            month_names = [
+                "Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
+                "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık",
+            ]
+            today_human = (
+                f"{day_names[now_dt.weekday()]}, "
+                f"{now_dt.day} {month_names[now_dt.month - 1]} "
+                f"{now_dt.year}, {now_dt.strftime('%H:%M')}"
+            )
+
+            # Last activity hint — use the most recent closed session's
+            # ended_at when available; falls back to silent omission.
+            last_activity_line = ""
+            try:
+                meta = (
+                    self.db.get_last_session_meta(user_id)
+                    if hasattr(self.db, "get_last_session_meta")
+                    else None
+                )
+                ended = (meta or {}).get("ended_at")
+                if ended:
+                    last_activity_line = (
+                        f"- Bu kullanıcıyla son aktivite: "
+                        f"{self._relative_age(ended)}\n"
+                    )
+            except Exception:  # pragma: no cover — defensive
+                last_activity_line = ""
+
             user = self.db.get_user(user_id)
             user_name = user["name"] if user and user.get("name") else user_id
             _add("runtime", (
@@ -132,6 +167,8 @@ class ContextBuilder:
                 f"- Current user_id: {user_id}\n"
                 f"- Current user_name: {user_name}\n"
                 f"- Current time: {now}\n"
+                f"- Bugün: {today_human}\n"
+                f"{last_activity_line}"
                 f"- Use this user_id when calling tools that require it."
             ))
 
@@ -193,7 +230,14 @@ class ContextBuilder:
                 else:
                     facts = self.db.get_facts(user_id, valid_only=True, limit=15)
                 if facts:
-                    lines = "\n".join(f"- {f['content']}" for f in facts)
+                    # Faz 22H — every fact carries its age so the LLM can
+                    # judge whether a 12-day-old intent ("X yapacağım")
+                    # is still in play.
+                    lines = "\n".join(
+                        f"- ({self._relative_age(f.get('created_at'))}) "
+                        f"{f['content']}"
+                        for f in facts
+                    )
                     learned = f"LEARNED FACTS:\n{lines}"
                     # Access tracking — batch update
                     fact_ids = [f["fact_id"] for f in facts]
@@ -265,11 +309,24 @@ class ContextBuilder:
 
         # 6. Previous session summary
         if _allowed("session_summary"):
-            summary = self.db.get_last_session_summary(user_id)
+            # Faz 22H — header carries the gap so the LLM knows whether
+            # the last conversation was minutes or months ago.
+            meta = None
+            if hasattr(self.db, "get_last_session_meta"):
+                try:
+                    meta = self.db.get_last_session_meta(user_id)
+                except Exception:  # pragma: no cover — defensive
+                    meta = None
+            summary = (meta or {}).get("summary") if meta else (
+                self.db.get_last_session_summary(user_id)
+            )
             if summary:
+                age_tag = ""
+                if meta and meta.get("ended_at"):
+                    age_tag = f" ({self._relative_age(meta['ended_at'])})"
                 _add(
                     "session_summary",
-                    f"# Previous Conversation\n\n{summary}",
+                    f"# Previous Conversation{age_tag}\n\n{summary}",
                     priorities.session_summary,
                 )
             else:
@@ -448,6 +505,43 @@ class ContextBuilder:
         return None
 
     # ── Helpers ───────────────────────────────────────────────
+
+    @staticmethod
+    def _relative_age(timestamp: str | None) -> str:
+        """Human-readable Turkish age tag for fact / summary rendering.
+
+        ``"2 gün önce"``, ``"3 hafta önce"``, ``"5 ay önce"``. Falls back
+        to ``"yakın zaman"`` on parse error so the LLM never sees an
+        empty tag.
+        """
+        if not timestamp:
+            return "yakın zaman"
+        try:
+            then = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
+            if then.tzinfo:
+                then = then.replace(tzinfo=None)
+            delta_seconds = (datetime.now() - then).total_seconds()
+        except (ValueError, TypeError):
+            return "yakın zaman"
+
+        if delta_seconds < 60:
+            return "az önce"
+        minutes = delta_seconds / 60
+        if minutes < 60:
+            return f"{int(minutes)} dakika önce"
+        hours = minutes / 60
+        if hours < 24:
+            return f"{int(hours)} saat önce"
+        days = hours / 24
+        if days < 1:
+            return "bugün"
+        if days < 14:
+            return f"{int(days)} gün önce"
+        if days < 60:
+            return f"{int(days // 7)} hafta önce"
+        if days < 365:
+            return f"{int(days // 30)} ay önce"
+        return f"{int(days // 365)} yıl önce"
 
     @staticmethod
     def _rerank_facts(
