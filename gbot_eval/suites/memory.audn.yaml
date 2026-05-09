@@ -1,0 +1,133 @@
+name: memory.audn
+description: AUDN decision quality (ADD / UPDATE / DELETE / NOOP exact match).
+runner: memory_audn
+requires_gbot: true
+cases:
+- _intent: brand new info → ADD
+  existing_facts:
+  - fact_id: f001
+    content: User Python kullanıyor
+  - fact_id: f002
+    content: User HangiKredi'de çalışıyor
+  new_fact: User Go dilini de öğreniyor
+  expected_action: add
+  target_fact_id: null
+  id: au01
+- _intent: exact duplicate → NOOP
+  existing_facts:
+  - fact_id: f010
+    content: User İstanbul'da yaşıyor
+  new_fact: User İstanbul'da yaşıyor
+  expected_action: noop
+  target_fact_id: f010
+  id: au02
+- _intent: value change for same attribute → UPDATE
+  existing_facts:
+  - fact_id: f020
+    content: User Ankara'da yaşıyor
+  new_fact: User artık İstanbul'da yaşıyor
+  expected_action: update
+  target_fact_id: f020
+  id: au03
+- _intent: negation/cancellation → DELETE
+  existing_facts:
+  - fact_id: f030
+    content: User vejetaryen
+  new_fact: User artık vejetaryen değil, et yiyor
+  expected_action: delete
+  target_fact_id: f030
+  id: au04
+- _intent: paraphrase of existing → NOOP
+  existing_facts:
+  - fact_id: f040
+    content: User'ın eşinin adı Ayşe
+  new_fact: User Ayşe ile evli
+  expected_action: noop
+  target_fact_id: f040
+  id: au05
+- _intent: new attribute, related but distinct → ADD
+  existing_facts:
+  - fact_id: f050
+    content: User backend developer
+  new_fact: User 8 yıllık deneyime sahip
+  expected_action: add
+  target_fact_id: null
+  id: au06
+- _intent: job change → UPDATE
+  existing_facts:
+  - fact_id: f060
+    content: User HangiKredi'de backend developer
+  new_fact: User Trendyol'a transfer oldu, oraya geçti
+  expected_action: update
+  target_fact_id: f060
+  id: au07
+- _intent: pet died/removed → DELETE
+  existing_facts:
+  - fact_id: f070
+    content: User'ın Pamuk adında bir kedisi var
+  new_fact: Pamuk geçen ay vefat etti, artık kedimiz yok
+  expected_action: delete
+  target_fact_id: f070
+  id: au08
+- _intent: completely unrelated topic → ADD
+  existing_facts:
+  - fact_id: f080
+    content: User Python kullanıyor
+  - fact_id: f081
+    content: User İstanbul'da yaşıyor
+  new_fact: User'ın hobisi dağ tırmanışı
+  expected_action: add
+  target_fact_id: null
+  id: au09
+- _intent: preference flip → UPDATE
+  existing_facts:
+  - fact_id: f090
+    content: User çay tercih ediyor, kahve içmiyor
+  new_fact: User son zamanlarda kahveye geçti, artık kahve içiyor
+  expected_action: update
+  target_fact_id: f090
+  id: au10
+- _intent: rephrasing with extra context → NOOP (substantively same)
+  existing_facts:
+  - fact_id: f100
+    content: User Python kullanıyor
+  new_fact: User Python ile kod yazıyor
+  expected_action: noop
+  target_fact_id: f100
+  id: au11
+- _intent: marriage ended → DELETE
+  existing_facts:
+  - fact_id: f110
+    content: User Ayşe ile evli
+  new_fact: User boşandı, artık bekar
+  expected_action: delete
+  target_fact_id: f110
+  id: au12
+- _intent: tool addition (not replacement) → ADD
+  existing_facts:
+  - fact_id: f120
+    content: User VS Code kullanıyor
+  new_fact: User Neovim de kullanmaya başladı
+  expected_action: add
+  target_fact_id: null
+  id: au13
+- _intent: location refinement → UPDATE
+  existing_facts:
+  - fact_id: f130
+    content: User İstanbul'da yaşıyor
+  new_fact: User İstanbul Kadıköy'de yaşıyor
+  expected_action: update
+  target_fact_id: f130
+  id: au14
+- _intent: no similar existing fact → ADD
+  existing_facts:
+  - fact_id: f140
+    content: User Python kullanıyor
+  - fact_id: f141
+    content: User backend developer
+  new_fact: User'ın Murat adında bir iş arkadaşı var
+  expected_action: add
+  target_fact_id: null
+  id: au15
+default_max_tokens: 2000
+default_temperature: 0.1
