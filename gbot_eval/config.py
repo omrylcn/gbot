@@ -15,16 +15,18 @@ from gbot.core.providers.litellm import setup_provider
 
 
 def has_api_key() -> bool:
-    """True iff at least one supported LLM-provider API key is set."""
-    return any(
-        os.environ.get(k)
-        for k in (
-            "OPENROUTER_API_KEY",
-            "ANTHROPIC_API_KEY",
-            "OPENAI_API_KEY",
-            "GEMINI_API_KEY",
-        )
-    )
+    """True iff an OpenRouter API key is reachable (env or config/.env).
+
+    ``load_config()`` triggers Pydantic-Settings' .env merge so this
+    works in CLI shells that don't have the env var exported globally.
+    """
+    if os.environ.get("OPENROUTER_API_KEY"):
+        return True
+    try:
+        cfg = load_config()
+        return bool(getattr(cfg.providers.openrouter, "api_key", "") or "")
+    except Exception:
+        return False
 
 
 def resolve_model(explicit: str | None = None) -> str:

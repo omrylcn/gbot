@@ -21,8 +21,7 @@ dependencies = [
     # LangGraph & LangChain
     "langgraph>=0.2.0",
     "langchain-core>=0.3.0",
-    # LLM Providers
-    "litellm>=1.0.0",
+    # LLM Provider — OpenRouter SDK exclusive (Faz 22E Step 5K, 2026-05-09)
     "openrouter>=0.7.0",
     # API
     "fastapi>=0.109.0",

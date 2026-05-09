@@ -6,6 +6,58 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.21.1] - 2026-05-09 — Faz 22E Step 5K: LiteLLM removed
+
+The empirical bench in v1.21.0's `gbot-eval bench-providers` showed
+LiteLLM and OpenRouter SDK tied on quality and cost; OpenRouter SDK
+was equal or faster on latency, and production already routed 100% of
+traffic through OpenRouter. This release drops the dead-code path:
+
+### Changed
+
+- `gbot/core/providers/litellm.py` — facade rewritten to use
+  OpenRouter SDK exclusively. Module name kept (so every existing
+  `from gbot.core.providers import litellm as llm_provider` callsite
+  works unchanged), but the implementation no longer imports the
+  ``litellm`` package. Tolerant init: if ``OPENROUTER_API_KEY`` is
+  missing, ``setup_provider`` warns rather than crashing — the
+  ``RuntimeError`` surfaces on the first ``achat`` call.
+- `gbot/core/config/loader.py` — explicit ``load_dotenv()`` call
+  preserves the .env auto-load behaviour LiteLLM provided
+  transitively.
+- LiteLLM-related comments cleaned up across `nodes.py`, `runner.py`,
+  `schema.py`, `openrouter_llm.py`.
+
+### Removed
+
+- `gbot/core/providers/litellm_llm.py` — the LiteLLM-backed provider.
+  Test coverage migrated to `tests/test_provider.py` (now
+  OpenRouter-only).
+- `gbot_eval/bench_providers.py` + `gbot_eval/fixtures/bench_providers.json`
+  + `gbot-eval bench-providers` CLI command — provider race is over,
+  archived run dirs still hold the historical matrix data for
+  reference.
+- `litellm>=1.0.0` from `pyproject.toml` dependencies. Wheel size
+  drops by ~50MB.
+
+### Tests
+
+- 410 passing (was 409); +1 new test for the no-key behaviour. All
+  unchanged test suites stay green.
+- `tests/test_provider.py` rewritten — strategy-pattern tests
+  replaced with OpenRouter-only setup / forwarding / error-handling tests.
+
+### Migration notes
+
+If you have custom code that imports LiteLLM internals from gbot, the
+facade import path is unchanged (`from gbot.core.providers import
+litellm as llm_provider`). If you were relying on LiteLLM's
+provider-agnostic abstraction with Anthropic / OpenAI keys directly,
+set ``OPENROUTER_API_KEY`` instead — OpenRouter routes upstream
+transparently.
+
+---
+
 ## [1.21.0] - 2026-05-09 — Faz 22E: Hardening + gbot-eval framework
 
 Five steps land together. Operational hardening on the memory layer

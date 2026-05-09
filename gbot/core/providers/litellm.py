@@ -1,11 +1,20 @@
-"""LLM provider facade — module-level functions delegating to strategy providers.
+"""LLM provider facade — historical name kept for import-path stability.
 
-Preserves backward compatibility so callers can do:
+The module name is ``litellm`` for backward compatibility — every caller
+already does:
+
     from gbot.core.providers import litellm as llm_provider
     await llm_provider.achat(...)
 
-Internally routes openrouter/* models to OpenRouter SDK (direct),
-other models to LiteLLM.
+Internally, OpenRouter SDK is the sole provider (decided 2026-05-09 via
+``gbot-eval bench-providers`` head-to-head). The previous LiteLLM
+fallback was dead code: production routes 100% through OpenRouter
+because all configured ``model`` ids carry the ``openrouter/`` prefix.
+
+To rename this module to ``llm.py`` later, update every
+``from gbot.core.providers import litellm as llm_provider`` callsite in
+one go — all callers already use the ``as llm_provider`` alias so the
+rename is mechanical.
 """
 
 from __future__ import annotations
@@ -17,35 +26,31 @@ from langchain_core.messages import AIMessage
 from loguru import logger
 
 from gbot.core.config.schema import Config
-from gbot.core.providers.base import BaseLLMProvider
-from gbot.core.providers.litellm_llm import LiteLLMLLM
 from gbot.core.providers.openrouter_llm import OpenRouterLLM
 
-# Global provider instances — set once by setup_provider()
-_main_provider: BaseLLMProvider | None = None
-_fallback_provider: LiteLLMLLM | None = None
+_provider: OpenRouterLLM | None = None
 
 
 def setup_provider(config: Config) -> None:
-    """Initialize global provider instances based on config. Call once at startup."""
-    global _main_provider, _fallback_provider
+    """Initialise the OpenRouter SDK provider. Call once at startup.
 
-    _fallback_provider = LiteLLMLLM(config)
-
-    if config.assistant.model.startswith("openrouter/"):
-        api_key = (
-            config.providers.openrouter.api_key
-            or os.environ.get("OPENROUTER_API_KEY", "")
+    Tolerant of missing keys at init time so unit tests / dev shells can
+    import gbot without an API key in scope. The actual error surfaces
+    when ``achat`` is called without a working provider.
+    """
+    global _provider
+    api_key = (
+        config.providers.openrouter.api_key
+        or os.environ.get("OPENROUTER_API_KEY", "")
+    )
+    if not api_key:
+        _provider = None
+        logger.warning(
+            "OPENROUTER_API_KEY missing — gbot LLM calls will fail until set."
         )
-        if api_key:
-            _main_provider = OpenRouterLLM(api_key=api_key)
-            logger.info("LLM provider: OpenRouter SDK (direct)")
-        else:
-            _main_provider = _fallback_provider
-            logger.warning("OpenRouter API key missing, falling back to LiteLLM")
-    else:
-        _main_provider = _fallback_provider
-        logger.info("LLM provider: LiteLLM")
+        return
+    _provider = OpenRouterLLM(api_key=api_key)
+    logger.info("LLM provider: OpenRouter SDK (direct)")
 
 
 async def achat(
@@ -58,35 +63,19 @@ async def achat(
     thinking: bool = False,
     response_format: dict[str, Any] | None = None,
 ) -> AIMessage:
-    """Route to the correct provider based on model prefix."""
-    assert _main_provider is not None, "Call setup_provider() first"
-    if model.startswith("openrouter/") and isinstance(_main_provider, OpenRouterLLM):
-        return await _main_provider.achat(
-            messages, model, tools, temperature, max_tokens,
-            api_base, thinking, response_format,
+    """Forward a chat completion request to the OpenRouter SDK provider."""
+    if _provider is None:
+        raise RuntimeError(
+            "OpenRouter provider not initialised. Set OPENROUTER_API_KEY "
+            "and call setup_provider(config) before issuing LLM calls."
         )
-    assert _fallback_provider is not None
-    return await _fallback_provider.achat(
-        messages, model, tools, temperature, max_tokens,
-        api_base, thinking, response_format,
+    return await _provider.achat(
+        messages,
+        model,
+        tools,
+        temperature,
+        max_tokens,
+        api_base,
+        thinking,
+        response_format,
     )
-
-
-async def asummarize(
-    messages: list[dict[str, Any]],
-    model: str = "openai/gpt-4o-mini",
-    max_tokens: int = 500,
-) -> str:
-    """Delegate summarization to LiteLLM provider."""
-    assert _fallback_provider is not None, "Call setup_provider() first"
-    return await _fallback_provider.asummarize(messages, model, max_tokens)
-
-
-async def aextract_facts(
-    messages: list[dict[str, Any]],
-    model: str = "openai/gpt-4o-mini",
-    max_tokens: int = 300,
-) -> dict[str, Any]:
-    """Delegate fact extraction to LiteLLM provider."""
-    assert _fallback_provider is not None, "Call setup_provider() first"
-    return await _fallback_provider.aextract_facts(messages, model, max_tokens)

@@ -21,7 +21,10 @@ class ProviderConfig(BaseModel):
 
 
 class ProvidersConfig(BaseModel):
-    """LLM providers (LiteLLM multi-provider)."""
+    """LLM provider credentials. ``openrouter`` is the primary provider;
+    other API keys are kept here for forward compatibility with future
+    provider integrations.
+    """
 
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -188,22 +191,20 @@ class MemoryRetrievalConfig(BaseModel):
 
 
 class PromptCacheConfig(BaseModel):
-    """Faz 22E — Anthropic / Gemini prompt caching via LiteLLM.
+    """Faz 22E — Anthropic / Gemini prompt caching.
 
-    LiteLLM PR #15345 transforms message-level ``cache_control`` into the
-    provider-specific content-block format automatically. We just need to
-    mark which part of the system prompt is cacheable.
-
-    The static layers (identity, role, skills, agent_memory) are usually
-    repeatable across turns — good cache candidates. The dynamic layer
-    (user_context with retrieved memory facts) changes every turn — must
-    stay outside the cache breakpoint.
+    The static system layers (identity, role, skills, agent_memory) are
+    repeatable across turns — good cache candidates. We mark them with
+    ``cache_control: {"type": "ephemeral"}`` and OpenRouter forwards
+    that to Anthropic / Gemini in the right content-block shape. The
+    dynamic layer (user_context with retrieved memory facts) changes
+    every turn — must stay outside the cache breakpoint.
     """
 
     enabled: bool = True
 
-    # Provider prefixes that support cache_control. LiteLLM auto-injects
-    # the right format for these. Anything else is a silent no-op.
+    # Provider prefixes that support ``cache_control``. Anything else
+    # is a silent no-op.
     supported_prefixes: list[str] = [
         "anthropic/", "claude",
         "openrouter/anthropic/", "openrouter/claude",

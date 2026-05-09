@@ -22,18 +22,12 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from gbot_eval import bench_providers as bench_providers_module
 from gbot_eval import config as eval_config
 from gbot_eval import pricing
 from gbot_eval import runner as eval_runner
 from gbot_eval.__version__ import __version__
 from gbot_eval.pricing import list_models
-from gbot_eval.reporting import (
-    compare_runs,
-    format_matrix_table,
-    format_provider_bench,
-    format_provider_winners,
-)
+from gbot_eval.reporting import compare_runs, format_matrix_table
 from gbot_eval.suites import list_names
 
 BASELINE_PATH = eval_runner.OUTPUT_ROOT.parent / "baseline.json"
@@ -367,46 +361,6 @@ def baseline_diff_cmd(
     console.print(f"[dim]    run:  {target.name}[/dim]")
     console.print(compare_runs(matrix_a, matrix_b))
 
-
-# ── bench-providers ────────────────────────────────────────────
-
-
-@app.command("bench-providers")
-def bench_providers_cmd(
-    models: str = typer.Option(
-        "openrouter/google/gemini-3-flash-preview,"
-        "openrouter/moonshotai/kimi-k2.6,"
-        "openrouter/minimax/minimax-m2.7,"
-        "openrouter/openai/gpt-4o-mini",
-        "--models",
-        help="Comma-separated model ids to benchmark.",
-    ),
-):
-    """Head-to-head LiteLLM vs OpenRouter SDK bench (4 areas × 3 cases)."""
-    if not eval_config.has_api_key():
-        console.print(
-            "[red]No LLM provider API key found.[/red] "
-            "Set OPENROUTER_API_KEY."
-        )
-        raise typer.Exit(1)
-
-    model_list = [m.strip() for m in models.split(",") if m.strip()]
-    console.print(
-        f"[cyan]bench-providers[/cyan] — {len(model_list)} model × 2 provider × 12 case"
-    )
-    matrix = asyncio.run(bench_providers_module.run_bench(model_list))
-    run_dir = bench_providers_module.write_bench_run(matrix)
-    console.print(f"\n[green]Run complete:[/green] {run_dir}")
-    console.print(format_provider_bench(matrix))
-    console.print()
-    console.print(format_provider_winners(matrix))
-    totals = matrix["totals"]
-    console.print(
-        f"\n[dim]Totals: {totals['calls']} calls, "
-        f"{totals['tokens']:,} tokens, "
-        f"${totals['cost_usd']:.4f}, "
-        f"failures={totals['failures']}[/dim]"
-    )
 
 
 # ── list ────────────────────────────────────────────────────────

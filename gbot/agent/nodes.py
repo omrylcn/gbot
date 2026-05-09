@@ -55,7 +55,7 @@ def make_nodes(config: Config, db: MemoryStore, tools: list | None = None, embed
     async def reason(state: AgentState) -> dict[str, Any]:
         """Call LLM with messages + tools (filtered by role)."""
         # Build the system message — Faz 22E adds prompt-caching support
-        # for Anthropic/Gemini via LiteLLM's auto-inject (PR #15345).
+        # for Anthropic/Gemini via OpenRouter's content-block forwarding.
         system_msg = _build_system_message(state["system_prompt"], config)
 
         messages: list[dict[str, Any]] = [system_msg]
@@ -206,9 +206,10 @@ def _build_system_message(system_prompt: str, config: Config) -> dict[str, Any]:
              "cache_control": {"type": "ephemeral"}}
         ]}
 
-    LiteLLM PR #15345 transforms this into the right format per provider
-    transparently. For unsupported providers (or when the prompt is too
-    short to benefit), we fall back to the plain string format.
+    OpenRouter forwards the content block to the upstream provider
+    (Anthropic / Gemini) in the right shape. For unsupported providers
+    (or when the prompt is too short to benefit), we fall back to the
+    plain string format.
 
     Sticking the breakpoint at the END of the system prompt means
     everything before it is cached — which works for us because the
@@ -249,9 +250,9 @@ def _model_supports_caching(model: str, cache_cfg: Any) -> bool:
 def _log_cache_telemetry(ai_message: AIMessage) -> None:
     """Log cache_creation_tokens / cache_read_tokens when present.
 
-    Anthropic returns these in usage; LiteLLM normalises the shape.
-    Surfacing them on every turn lets us measure the actual savings
-    once Step 3 (benchmark suite) is in place.
+    Anthropic returns these in usage; OpenRouter forwards them on
+    cached requests. Surfacing them on every turn lets us measure the
+    actual savings.
     """
     try:
         usage = (ai_message.response_metadata or {}).get("usage", {}) or {}
@@ -268,7 +269,7 @@ def _log_cache_telemetry(ai_message: AIMessage) -> None:
 
 
 def _langchain_to_dict(msg: Any) -> dict[str, Any]:
-    """Convert LangChain message to dict for litellm."""
+    """Convert LangChain message to OpenAI-compatible chat dict."""
     from langchain_core.messages import HumanMessage, ToolMessage
 
     if isinstance(msg, HumanMessage):

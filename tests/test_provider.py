@@ -1,11 +1,10 @@
-"""Tests for LLM provider strategy pattern."""
+"""Tests for the LLM provider — OpenRouter SDK only (Faz 22E Step 5K)."""
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from gbot.core.providers.litellm_llm import LiteLLMLLM
 from gbot.core.providers.openrouter_llm import OpenRouterLLM
 
 
@@ -42,36 +41,50 @@ def _make_openrouter_response(content="hello", tool_calls=None, reasoning=None):
     return SimpleNamespace(choices=[choice], usage=usage)
 
 
-# ── Factory routing ───────────────────────────────────────
+# ── setup_provider ────────────────────────────────────────
 
 
-def test_setup_provider_openrouter(cfg):
-    """openrouter/ model creates OpenRouterLLM as main provider."""
+def test_setup_provider_creates_openrouter(cfg):
+    """setup_provider initialises OpenRouterLLM with the configured key."""
     from gbot.core.providers import litellm as facade
 
     facade.setup_provider(cfg)
-    assert isinstance(facade._main_provider, OpenRouterLLM)
-    assert isinstance(facade._fallback_provider, LiteLLMLLM)
+    assert isinstance(facade._provider, OpenRouterLLM)
 
 
-def test_setup_provider_non_openrouter(cfg):
-    """Non-openrouter model creates LiteLLMLLM as main provider."""
+def test_setup_provider_falls_back_to_env_var(cfg, monkeypatch):
+    """If config api_key is empty, OPENROUTER_API_KEY env var is used."""
     from gbot.core.providers import litellm as facade
 
-    cfg.assistant.model = "openai/gpt-4o"
+    cfg.providers.openrouter.api_key = ""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-from-env")
     facade.setup_provider(cfg)
-    assert isinstance(facade._main_provider, LiteLLMLLM)
-    assert isinstance(facade._fallback_provider, LiteLLMLLM)
+    assert isinstance(facade._provider, OpenRouterLLM)
 
 
-def test_setup_provider_no_api_key(cfg, monkeypatch):
-    """Missing OpenRouter API key falls back to LiteLLM."""
+def test_setup_provider_no_api_key_tolerant(cfg, monkeypatch):
+    """Missing key leaves provider unset; achat() raises later, init doesn't."""
     from gbot.core.providers import litellm as facade
 
     cfg.providers.openrouter.api_key = ""
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     facade.setup_provider(cfg)
-    assert isinstance(facade._main_provider, LiteLLMLLM)
+    assert facade._provider is None
+
+
+@pytest.mark.asyncio
+async def test_achat_without_provider_raises(cfg, monkeypatch):
+    """achat() without setup_provider (or with no key) surfaces a clear error."""
+    from gbot.core.providers import litellm as facade
+
+    cfg.providers.openrouter.api_key = ""
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    facade.setup_provider(cfg)
+    with pytest.raises(RuntimeError, match="OpenRouter provider not initialised"):
+        await facade.achat(
+            messages=[{"role": "user", "content": "hi"}],
+            model="openrouter/test",
+        )
 
 
 # ── OpenRouterLLM._to_ai_message ─────────────────────────
@@ -156,7 +169,6 @@ async def test_openrouter_achat_passes_response_format():
             model="openrouter/moonshotai/kimi-k2.5",
             response_format=schema,
         )
-        # Verify response_format was passed
         call_kwargs = mock_send.call_args
         assert call_kwargs.kwargs.get("response_format") == schema
         # Verify model prefix stripped
@@ -203,15 +215,15 @@ async def test_openrouter_achat_error_handling():
 
 
 @pytest.mark.asyncio
-async def test_facade_routes_openrouter_to_main(cfg):
-    """Facade routes openrouter/* models to OpenRouterLLM."""
+async def test_facade_forwards_to_provider(cfg):
+    """facade.achat delegates to the OpenRouter provider."""
     from gbot.core.providers import litellm as facade
 
     facade.setup_provider(cfg)
 
     mock_response = _make_openrouter_response(content="routed!")
     with patch.object(
-        facade._main_provider._client.chat, "send_async",
+        facade._provider._client.chat, "send_async",
         new_callable=AsyncMock, return_value=mock_response,
     ):
         result = await facade.achat(
@@ -222,31 +234,19 @@ async def test_facade_routes_openrouter_to_main(cfg):
 
 
 @pytest.mark.asyncio
-async def test_facade_routes_openai_to_fallback(cfg):
-    """Facade routes non-openrouter models to LiteLLMLLM."""
+async def test_facade_works_with_non_openrouter_prefix(cfg):
+    """Even openai/* model strings get forwarded — OpenRouter routes them upstream."""
     from gbot.core.providers import litellm as facade
 
     facade.setup_provider(cfg)
 
-    with patch("gbot.core.providers.litellm_llm.litellm.acompletion",
-               new_callable=AsyncMock) as mock_llm:
-        # Build a litellm-style response
-        msg = MagicMock()
-        msg.content = "from litellm"
-        msg.tool_calls = None
-        msg.reasoning_content = None
-        choice = MagicMock()
-        choice.message = msg
-        choice.finish_reason = "stop"
-        usage = MagicMock()
-        usage.prompt_tokens = 5
-        usage.completion_tokens = 3
-        usage.total_tokens = 8
-        mock_llm.return_value = MagicMock(choices=[choice], usage=usage)
-
+    mock_response = _make_openrouter_response(content="ok")
+    with patch.object(
+        facade._provider._client.chat, "send_async",
+        new_callable=AsyncMock, return_value=mock_response,
+    ):
         result = await facade.achat(
             messages=[{"role": "user", "content": "test"}],
             model="openai/gpt-4o-mini",
         )
-        assert result.content == "from litellm"
-        mock_llm.assert_called_once()
+        assert result.content == "ok"

@@ -1,4 +1,4 @@
-"""OpenRouter provider — direct SDK, no LiteLLM adapter."""
+"""OpenRouter provider — direct SDK call, no adapter layer."""
 
 from __future__ import annotations
 
@@ -15,8 +15,9 @@ from gbot.core.providers.base import BaseLLMProvider
 class OpenRouterLLM(BaseLLMProvider):
     """Direct OpenRouter SDK provider.
 
-    Bypasses LiteLLM entirely — response_format, tools, and thinking
-    parameters pass through without adapter interference.
+    Sole gbot LLM backend (Faz 22E Step 5K). Response format, tools,
+    and thinking parameters pass straight through to OpenRouter's
+    chat completions endpoint without an adapter layer.
     """
 
     def __init__(self, api_key: str) -> None:

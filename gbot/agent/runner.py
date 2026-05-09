@@ -256,9 +256,9 @@ class GraphRunner:
     def _prepare_summary_messages(
         db_messages: list[dict],
     ) -> list[dict[str, str]]:
-        """Convert DB messages to LiteLLM format for summarization.
-
-        Filters out tool messages and empty content for cleaner summaries.
+        """Convert DB messages to OpenAI-compatible chat format for
+        summarization. Filters out tool messages and empty content
+        for cleaner summaries.
         """
         result = []
         for msg in db_messages:

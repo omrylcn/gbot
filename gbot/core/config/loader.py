@@ -7,8 +7,16 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from dotenv import load_dotenv
 
 from gbot.core.config.schema import Config
+
+# Eagerly populate process env from a top-level ``.env`` so plain keys
+# (e.g. ``OPENROUTER_API_KEY``) reach the OpenRouter SDK and any other
+# component that reads ``os.environ`` directly. ``python-dotenv`` was
+# already a transitive dependency via LiteLLM; after Faz 22E Step 5K
+# (LiteLLM removal) we wire it explicitly so this behaviour is preserved.
+load_dotenv()
 
 
 def load_config(config_path: str | Path | None = None) -> Config:
