@@ -243,6 +243,23 @@ class MemoryMaintenanceConfig(BaseModel):
     weekly_cron: str = "30 4 * * 0"    # Pazar 04:30 — relations dedup catch-up
 
 
+class ObsidianSyncConfig(BaseModel):
+    """Faz 22G Aşama 4 — entity pages → Obsidian vault markdown.
+
+    Off by default. When enabled, a recurring task per user dumps every
+    fresh ``memory_entity_pages.content_md`` row into a markdown file
+    under ``vault_path/gbot/<user_id>/<entity>.md`` with a frontmatter
+    block. Stale pages are skipped so Obsidian never sees half-baked
+    output.
+    """
+
+    enabled: bool = False
+    vault_path: str = "~/Obsidian/Memories"
+    sync_cron: str = "0 * * * *"        # her saat
+    include_archived: bool = False
+    include_stale: bool = False
+
+
 class MemoryEntityPagesConfig(BaseModel):
     """Faz 22D — LLM-compiled entity pages (Karpathy LLM-Wiki pattern).
 
@@ -274,6 +291,7 @@ class MemoryConfig(BaseModel):
     retrieval: MemoryRetrievalConfig = Field(default_factory=MemoryRetrievalConfig)
     relations: MemoryRelationsConfig = Field(default_factory=MemoryRelationsConfig)
     maintenance: MemoryMaintenanceConfig = Field(default_factory=MemoryMaintenanceConfig)
+    obsidian_sync: ObsidianSyncConfig = Field(default_factory=ObsidianSyncConfig)
     entity_pages: MemoryEntityPagesConfig = Field(default_factory=MemoryEntityPagesConfig)
 
 

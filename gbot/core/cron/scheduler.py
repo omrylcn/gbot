@@ -362,6 +362,22 @@ class CronScheduler:
             logger.info(text)
             return text, False  # internal: no user delivery
 
+        if processor == "memory_obsidian_sync":
+            # Faz 22G Aşama 4 — entity pages → Obsidian vault export.
+            # No LLM call, just disk I/O.
+            from gbot.memory.obsidian_sync import ObsidianSyncer
+
+            mem_cfg = self.config.memory if self.config else None
+            syncer = ObsidianSyncer(self.db, mem_cfg)
+            try:
+                stats = syncer.run(user_id)
+            except Exception as e:
+                logger.warning(f"obsidian_sync failed for {user_id}: {e}")
+                stats = {"error": str(e)}
+            text = f"memory_obsidian_sync: {stats}"
+            logger.info(text)
+            return text, False
+
         # processor == "agent" (default)
         from gbot.agent.light import LightAgent
 

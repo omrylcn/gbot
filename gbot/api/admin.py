@@ -507,6 +507,24 @@ async def admin_inhibit_fact(
     return {"ok": ok, "fact_id": fact_id, "hold_days": hold_days}
 
 
+@router.post("/memory/{user_id}/obsidian-sync/run")
+async def admin_run_obsidian_sync(
+    user_id: str,
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    db: MemoryStore = Depends(get_db),
+):
+    """Faz 22G Aşama 4 — manually trigger an Obsidian vault sync for
+    the user. No-op + reports `enabled: false` when the feature is
+    disabled in config.
+    """
+    _require_owner(current_user, config)
+    from gbot.memory.obsidian_sync import ObsidianSyncer
+
+    syncer = ObsidianSyncer(db, config.memory)
+    return syncer.run(user_id)
+
+
 @router.post("/memory/{user_id}/facts/{fact_id}/restore")
 async def admin_restore_fact(
     user_id: str,

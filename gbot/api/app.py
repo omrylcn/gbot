@@ -166,6 +166,48 @@ def _ensure_maintenance_jobs(config, db) -> None:
         )
 
 
+def _ensure_obsidian_jobs(config, db) -> None:
+    """Faz 22G Aşama 4 — register an hourly obsidian-sync task per user.
+
+    Off by default (``memory.obsidian_sync.enabled``); when enabled,
+    every existing user gets an idempotent recurring task whose
+    processor is ``memory_obsidian_sync``.
+    """
+    if not config.memory.enabled:
+        return
+    cfg = config.memory.obsidian_sync
+    if not cfg.enabled:
+        logger.debug("memory.obsidian_sync.enabled=false — skipping bootstrap")
+        return
+
+    sync_cron = cfg.sync_cron
+    registered = 0
+    skipped = 0
+    for user in db.list_users():
+        user_id = user["user_id"] if isinstance(user, dict) else user
+        task_id = f"obsidian-sync-{user_id}"
+        if not db.get_task(task_id):
+            db.create_task(
+                task_id,
+                user_id,
+                message="entity pages → obsidian vault",
+                execution_type="recurring",
+                processor="memory_obsidian_sync",
+                channel="api",
+                cron_expr=sync_cron,
+                plan_json="{}",
+            )
+            registered += 1
+        else:
+            skipped += 1
+
+    if registered or skipped:
+        logger.info(
+            f"Obsidian sync jobs: registered={registered}, "
+            f"skipped(existing)={skipped}, cron='{sync_cron}'"
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: init Config → MemoryStore → GraphRunner → Background Services. Shutdown: cleanup."""
@@ -260,6 +302,12 @@ async def lifespan(app: FastAPI):
         _ensure_maintenance_jobs(config, db)
     except Exception as e:
         logger.warning(f"Memory maintenance bootstrap skipped: {e}")
+
+    # Faz 22G Aşama 4 — register obsidian-sync cron jobs (opt-in).
+    try:
+        _ensure_obsidian_jobs(config, db)
+    except Exception as e:
+        logger.warning(f"Obsidian sync bootstrap skipped: {e}")
 
     await cron_scheduler.start()
     heartbeat_task = asyncio.create_task(heartbeat.start())
