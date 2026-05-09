@@ -1,0 +1,155 @@
+{
+  "_comment": "LOCOMO-mini query suite. Tip dağılımı: 12 single-hop + 8 multi-hop + 5 adversarial = 25 query. expected_fact_ids retrieval'ın getirmesi beklenen fact'ler. v1 — 2026-05-08 sabit.",
+  "queries": [
+    {
+      "qid": "q01",
+      "type": "single-hop",
+      "query": "Ömer nerede yaşıyor?",
+      "expected_fact_ids": ["f01"]
+    },
+    {
+      "qid": "q02",
+      "type": "single-hop",
+      "query": "Ömer nerede çalışıyor?",
+      "expected_fact_ids": ["f02", "f04"]
+    },
+    {
+      "qid": "q03",
+      "type": "single-hop",
+      "query": "Ömer hangi programlama dillerini kullanıyor?",
+      "expected_fact_ids": ["f03"]
+    },
+    {
+      "qid": "q04",
+      "type": "single-hop",
+      "query": "Ömer'in kedisi var mı?",
+      "expected_fact_ids": ["f05"]
+    },
+    {
+      "qid": "q05",
+      "type": "single-hop",
+      "query": "Ömer evli mi?",
+      "expected_fact_ids": ["f06", "f22"]
+    },
+    {
+      "qid": "q06",
+      "type": "single-hop",
+      "query": "Ömer kahve sever mi?",
+      "expected_fact_ids": ["f08"]
+    },
+    {
+      "qid": "q07",
+      "type": "single-hop",
+      "query": "Ömer ne yer ne yemez?",
+      "expected_fact_ids": ["f09", "f28"]
+    },
+    {
+      "qid": "q08",
+      "type": "single-hop",
+      "query": "Ömer borsa takip ediyor mu?",
+      "expected_fact_ids": ["f10"]
+    },
+    {
+      "qid": "q09",
+      "type": "single-hop",
+      "query": "Murat nerede yaşıyor?",
+      "expected_fact_ids": ["f13"]
+    },
+    {
+      "qid": "q10",
+      "type": "single-hop",
+      "query": "Zeynep ne öğreniyor?",
+      "expected_fact_ids": ["f17"]
+    },
+    {
+      "qid": "q11",
+      "type": "single-hop",
+      "query": "Ayşe ne iş yapıyor?",
+      "expected_fact_ids": ["f20"]
+    },
+    {
+      "qid": "q12",
+      "type": "single-hop",
+      "query": "Ömer İngilizce biliyor mu?",
+      "expected_fact_ids": ["f30"]
+    },
+    {
+      "qid": "q13",
+      "type": "multi-hop",
+      "query": "Ömer kimlerle çalışıyor?",
+      "expected_fact_ids": ["f02", "f11", "f12", "f15"]
+    },
+    {
+      "qid": "q14",
+      "type": "multi-hop",
+      "query": "Ömer kimlerle takip ediyor / arkadaş?",
+      "expected_fact_ids": ["f11", "f16", "f06"]
+    },
+    {
+      "qid": "q15",
+      "type": "multi-hop",
+      "query": "Ömer ve eşi nasıl bir ilişkiye sahip?",
+      "expected_fact_ids": ["f06", "f21", "f22", "f28"]
+    },
+    {
+      "qid": "q16",
+      "type": "multi-hop",
+      "query": "Ömer önceden ne yapıyordu, nereden geldi?",
+      "expected_fact_ids": ["f23", "f24", "f25"]
+    },
+    {
+      "qid": "q17",
+      "type": "multi-hop",
+      "query": "Ömer ve Murat'ın iş ilişkisi nasıl?",
+      "expected_fact_ids": ["f11", "f12", "f14", "f15"]
+    },
+    {
+      "qid": "q18",
+      "type": "multi-hop",
+      "query": "Zeynep neden Akasya AVM'ye gitti?",
+      "expected_fact_ids": ["f18"]
+    },
+    {
+      "qid": "q19",
+      "type": "multi-hop",
+      "query": "Ömer'in günlük rutinleri nelerdir?",
+      "expected_fact_ids": ["f07", "f10", "f27", "f29"]
+    },
+    {
+      "qid": "q20",
+      "type": "multi-hop",
+      "query": "Ömer'in tercihleri ve hobileri",
+      "expected_fact_ids": ["f08", "f09", "f26", "f27", "f28", "f29"]
+    },
+    {
+      "qid": "q21",
+      "type": "adversarial",
+      "query": "Ömer'in ablası kim?",
+      "expected_fact_ids": []
+    },
+    {
+      "qid": "q22",
+      "type": "adversarial",
+      "query": "Ömer hangi futbol takımını tutuyor?",
+      "expected_fact_ids": []
+    },
+    {
+      "qid": "q23",
+      "type": "adversarial",
+      "query": "Ömer'in arabası ne marka?",
+      "expected_fact_ids": []
+    },
+    {
+      "qid": "q24",
+      "type": "adversarial",
+      "query": "Ömer kaç yaşında?",
+      "expected_fact_ids": []
+    },
+    {
+      "qid": "q25",
+      "type": "adversarial",
+      "query": "Ömer Almanca biliyor mu?",
+      "expected_fact_ids": []
+    }
+  ]
+}

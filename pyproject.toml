@@ -90,9 +90,10 @@ target-version = "py311"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-addopts = "-m 'not integration'"
+addopts = "-m 'not integration and not benchmark'"
 markers = [
     "integration: Integration tests (require running server on localhost:8000)",
+    "benchmark: LOCOMO-mini memory benchmark suite (Faz 22E Step 3 — opt-in, may make live API calls)",
 ]
 
 [dependency-groups]

@@ -1,0 +1,55 @@
+{
+  "_comment": "Ground-truth facts for LOCOMO-mini benchmark. v1 — 30 facts about owner Ömer and 3 surrounding people. Curated by hand on 2026-05-08; sabit kalmalı, model değişiminde regression detection için.",
+  "user_id": "owner",
+  "facts": [
+    {"fact_id": "f01", "content": "Ömer İstanbul'da yaşıyor", "fact_type": "semantic", "category": "location"},
+    {"fact_id": "f02", "content": "Ömer HangiKredi'de backend developer olarak çalışıyor", "fact_type": "semantic", "category": "work"},
+    {"fact_id": "f03", "content": "Ömer Python ve Go programlama dillerini kullanıyor", "fact_type": "semantic", "category": "tech"},
+    {"fact_id": "f04", "content": "Ömer fintech sektöründe çalışıyor", "fact_type": "semantic", "category": "work"},
+    {"fact_id": "f05", "content": "Ömer'in kedisi var, adı Pamuk", "fact_type": "semantic", "category": "personal"},
+    {"fact_id": "f06", "content": "Ömer evli, eşinin adı Ayşe", "fact_type": "semantic", "category": "personal"},
+    {"fact_id": "f07", "content": "Ömer sabahları hava durumunu kontrol ediyor", "fact_type": "procedural", "category": "habit"},
+    {"fact_id": "f08", "content": "Ömer kahve sevmiyor, çay tercih ediyor", "fact_type": "preference", "category": "preference"},
+    {"fact_id": "f09", "content": "Ömer vejetaryen", "fact_type": "preference", "category": "preference"},
+    {"fact_id": "f10", "content": "Ömer borsa takip ediyor, Bitcoin yatırımı var", "fact_type": "procedural", "category": "finance"},
+
+    {"fact_id": "f11", "content": "Murat Ömer'in iş arkadaşı, aynı takımda çalışıyorlar", "fact_type": "semantic", "category": "relationship"},
+    {"fact_id": "f12", "content": "Murat backend developer, Ömer ile aynı projede", "fact_type": "semantic", "category": "work"},
+    {"fact_id": "f13", "content": "Murat Ankara'da yaşıyor, hibrit çalışıyor", "fact_type": "semantic", "category": "location"},
+    {"fact_id": "f14", "content": "Murat geçen hafta toplantı için İstanbul'a geldi", "fact_type": "episodic", "category": "work"},
+    {"fact_id": "f15", "content": "Ömer ve Murat birlikte Trendyol projesine taşındı", "fact_type": "episodic", "category": "work"},
+
+    {"fact_id": "f16", "content": "Zeynep Ömer'in arkadaşı, ortak hobileri var", "fact_type": "semantic", "category": "relationship"},
+    {"fact_id": "f17", "content": "Zeynep yazılım geliştirme öğreniyor", "fact_type": "semantic", "category": "tech"},
+    {"fact_id": "f18", "content": "Zeynep Akasya AVM'de geçen Cumartesi alışveriş yaptı", "fact_type": "episodic", "category": "personal"},
+    {"fact_id": "f19", "content": "Zeynep kahve içmeyi seviyor, espresso tercih ediyor", "fact_type": "preference", "category": "preference"},
+
+    {"fact_id": "f20", "content": "Ayşe öğretmen, ilkokulda çalışıyor", "fact_type": "semantic", "category": "work"},
+    {"fact_id": "f21", "content": "Ayşe ve Ömer geçen yaz tatile gitti", "fact_type": "episodic", "category": "personal"},
+    {"fact_id": "f22", "content": "Ayşe Ömer ile 3 yıldır evli", "fact_type": "semantic", "category": "personal"},
+
+    {"fact_id": "f23", "content": "Ömer önceden Ankara'da yaşıyordu, 2 yıl önce İstanbul'a taşındı", "fact_type": "episodic", "category": "location"},
+    {"fact_id": "f24", "content": "Ömer önceden Java kullanıyordu, sonradan Python'a geçti", "fact_type": "episodic", "category": "tech"},
+    {"fact_id": "f25", "content": "Ömer önceden HangiKredi'den önce başka bir fintech şirketinde çalışıyordu", "fact_type": "episodic", "category": "work"},
+
+    {"fact_id": "f26", "content": "Ömer açık kaynak projelere katkı veriyor, özellikle developer tools", "fact_type": "procedural", "category": "interest"},
+    {"fact_id": "f27", "content": "Ömer akşamları kitap okumayı seviyor, daha çok teknik kitaplar", "fact_type": "preference", "category": "habit"},
+    {"fact_id": "f28", "content": "Ömer'in en sevdiği yemek mantı, eşi Ayşe yapıyor", "fact_type": "preference", "category": "preference"},
+    {"fact_id": "f29", "content": "Ömer hafta sonları yürüyüş yapmayı tercih ediyor", "fact_type": "procedural", "category": "habit"},
+    {"fact_id": "f30", "content": "Ömer İngilizce konuşabiliyor, ileri seviyede teknik İngilizce", "fact_type": "semantic", "category": "personal"}
+  ],
+  "relations": [
+    {"source": "Ömer", "relation": "lives_in", "target": "İstanbul"},
+    {"source": "Ömer", "relation": "works_at", "target": "HangiKredi"},
+    {"source": "Ömer", "relation": "works_with", "target": "Murat"},
+    {"source": "Ömer", "relation": "married_to", "target": "Ayşe"},
+    {"source": "Ömer", "relation": "owns", "target": "Pamuk"},
+    {"source": "Ömer", "relation": "knows", "target": "Zeynep"},
+    {"source": "Ömer", "relation": "uses", "target": "Python"},
+    {"source": "Ömer", "relation": "uses", "target": "Go"},
+    {"source": "Murat", "relation": "lives_in", "target": "Ankara"},
+    {"source": "Murat", "relation": "works_at", "target": "HangiKredi"},
+    {"source": "Ayşe", "relation": "works_at", "target": "ilkokul"},
+    {"source": "Zeynep", "relation": "studies", "target": "yazılım geliştirme"}
+  ]
+}

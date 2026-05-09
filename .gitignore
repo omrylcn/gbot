@@ -52,3 +52,6 @@ workspace.ipynb
 config/config.yaml
 !config/config.example.yaml
 gbot-philosophy.md
+
+# Benchmark output (regenerated each run; CI artifacts only)
+tests/memory_benchmark/last_run.json
