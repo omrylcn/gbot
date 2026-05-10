@@ -21,7 +21,7 @@ from loguru import logger
 
 from gbot.agent.profiles import get_agent_md
 from gbot.core.config.schema import MemoryConfig
-from gbot.core.providers import litellm as llm_provider
+from gbot.core.providers import llm as llm_provider
 from gbot.memory.embedder import MemoryEmbedder
 from gbot.memory.store import MemoryStore
 

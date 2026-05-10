@@ -65,7 +65,7 @@ def test_llm_rerank_uses_llm_order(builder):
     response = AIMessage(content='{"ranked": [3, 1, 4]}', additional_kwargs={})
 
     with patch(
-        "gbot.core.providers.litellm.achat", new=AsyncMock(return_value=response)
+        "gbot.core.providers.llm.achat", new=AsyncMock(return_value=response)
     ):
         out = builder._llm_rerank(
             cands, query="test query", top_k=3,
@@ -80,7 +80,7 @@ def test_llm_rerank_fills_missing_with_static(builder):
     response = AIMessage(content='{"ranked": [2]}', additional_kwargs={})
 
     with patch(
-        "gbot.core.providers.litellm.achat", new=AsyncMock(return_value=response)
+        "gbot.core.providers.llm.achat", new=AsyncMock(return_value=response)
     ):
         out = builder._llm_rerank(
             cands, query="q", top_k=3, llm_cfg=_llm_cfg(),
@@ -97,7 +97,7 @@ def test_llm_rerank_falls_back_on_invalid_json(builder):
     response = AIMessage(content="not json", additional_kwargs={})
 
     with patch(
-        "gbot.core.providers.litellm.achat", new=AsyncMock(return_value=response)
+        "gbot.core.providers.llm.achat", new=AsyncMock(return_value=response)
     ):
         out = builder._llm_rerank(
             cands, query="q", top_k=3, llm_cfg=_llm_cfg(),
@@ -109,7 +109,7 @@ def test_llm_rerank_falls_back_on_invalid_json(builder):
 def test_llm_rerank_falls_back_on_exception(builder):
     cands = _candidates(4)
     with patch(
-        "gbot.core.providers.litellm.achat",
+        "gbot.core.providers.llm.achat",
         new=AsyncMock(side_effect=RuntimeError("boom")),
     ):
         out = builder._llm_rerank(

@@ -191,8 +191,8 @@ async def test_extract_and_save_basic(store):
         ]
     }))
 
-    with patch("gbot.core.providers.litellm.achat", return_value=mock_response):
-        with patch("gbot.core.providers.litellm.setup_provider"):
+    with patch("gbot.core.providers.llm.achat", return_value=mock_response):
+        with patch("gbot.core.providers.llm.setup_provider"):
             mem = MemoryService(store)
             stats = await mem.extract_and_save("u1", [
                 {"role": "user", "content": "I live in Istanbul"},
@@ -213,8 +213,8 @@ async def test_extract_empty(store):
 
     mock_response = AIMessage(content='{"facts": []}')
 
-    with patch("gbot.core.providers.litellm.achat", return_value=mock_response):
-        with patch("gbot.core.providers.litellm.setup_provider"):
+    with patch("gbot.core.providers.llm.achat", return_value=mock_response):
+        with patch("gbot.core.providers.llm.setup_provider"):
             mem = MemoryService(store)
             stats = await mem.extract_and_save("u1", [
                 {"role": "user", "content": "hello"},

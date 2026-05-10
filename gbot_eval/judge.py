@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from gbot.core.providers import litellm as llm_provider
+from gbot.core.providers import llm as llm_provider
 from gbot_eval.capture import track_call
 
 _JUDGE_PROMPT_VERSION = "v1"

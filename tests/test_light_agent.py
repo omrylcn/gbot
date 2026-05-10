@@ -163,8 +163,8 @@ async def test_light_agent_run(cfg):
 
     mock_response = AIMessage(content="Gold is $1950, all normal. [SKIP]")
 
-    with patch("gbot.core.providers.litellm.achat", return_value=mock_response):
-        with patch("gbot.core.providers.litellm.setup_provider"):
+    with patch("gbot.core.providers.llm.achat", return_value=mock_response):
+        with patch("gbot.core.providers.llm.setup_provider"):
             agent = LightAgent(config=cfg, prompt="You are a monitor.")
             response, tokens = await agent.run("Check gold price")
 
@@ -179,8 +179,8 @@ async def test_light_agent_isolated(cfg):
 
     mock_response = AIMessage(content="Done")
 
-    with patch("gbot.core.providers.litellm.achat", return_value=mock_response):
-        with patch("gbot.core.providers.litellm.setup_provider"):
+    with patch("gbot.core.providers.llm.achat", return_value=mock_response):
+        with patch("gbot.core.providers.llm.setup_provider"):
             agent = LightAgent(config=cfg, prompt="Test", tools=[])
             assert agent.tools == []
             response, _ = await agent.run("test")
@@ -200,8 +200,8 @@ async def test_cron_job_with_agent_config(store, mock_runner, cfg):
         message="check gold", agent_prompt="You are a monitor.",
     )
 
-    with patch("gbot.core.providers.litellm.achat", return_value=mock_response):
-        with patch("gbot.core.providers.litellm.setup_provider"):
+    with patch("gbot.core.providers.llm.achat", return_value=mock_response):
+        with patch("gbot.core.providers.llm.setup_provider"):
             with patch.object(sched, "_send_to_channel", new_callable=AsyncMock):
                 await sched._execute_job(job)
 

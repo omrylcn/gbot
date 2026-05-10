@@ -19,7 +19,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from gbot.core.providers import litellm as llm_provider
+from gbot.core.providers import llm as llm_provider
 from gbot_eval.capture import reasoning_off_kwargs, track_call
 from gbot_eval.runners import register
 from gbot_eval.runners.base import Runner

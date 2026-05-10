@@ -110,6 +110,27 @@ Relations are stored bidirectionally where it makes semantic sense
 (`married_to`), but the source/target ordering should reflect what was
 **explicitly stated** in the conversation.
 
+### When to extract a relation (vs episodic-only)
+
+Relations express **persistent, habitual, or structural** bonds. A
+one-off event becomes an episodic fact, not a relation:
+
+| Statement | Episodic fact? | Relation? |
+|-----------|----------------|-----------|
+| "Ömer HangiKredi'de çalışıyor" | — | `(Ömer, works_at, HangiKredi)` |
+| "Zeynep İstanbul'da yaşıyor" | — | `(Zeynep, lives_in, İstanbul)` |
+| "Ömer her gün Python yazıyor" | — | `(Ömer, uses, Python)` |
+| "Zeynep dün Akasya AVM'ye gitti" | episodic only | NO relation (tek-seferlik) |
+| "Murat sabah toplantı yaptı" | episodic only | NO relation (tek-seferlik) |
+| "Bugün Ekrem'i aradım" | episodic only | NO relation (tek-seferlik) |
+
+Decision rule: "Will this still be true tomorrow / next week?"
+- **Yes** → emit a relation (habit, structural property, role).
+- **No** → episodic fact only, skip the relation.
+
+When in doubt, skip the relation. False relations pollute the graph;
+missing one-off relations are recoverable from episodic facts.
+
 ---
 
 ## Confidence

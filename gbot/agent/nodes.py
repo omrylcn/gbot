@@ -9,7 +9,7 @@ from loguru import logger
 
 from gbot.agent.state import AgentState
 from gbot.core.config.schema import Config
-from gbot.core.providers import litellm as llm_provider
+from gbot.core.providers import llm as llm_provider
 from gbot.agent.context import ContextBuilder
 from gbot.memory.store import MemoryStore
 

@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from gbot.core.providers import litellm as llm_provider
+from gbot.core.providers import llm as llm_provider
 
 if TYPE_CHECKING:
     from gbot.core.config.schema import MemoryConfig

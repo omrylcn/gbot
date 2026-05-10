@@ -1,6 +1,6 @@
 """Bootstrap helpers — model resolution + provider setup.
 
-Wraps ``gbot.core.config`` and ``gbot.core.providers.litellm`` so suites
+Wraps ``gbot.core.config`` and ``gbot.core.providers.llm`` so suites
 don't have to know about gbot's internals.
 """
 
@@ -11,7 +11,7 @@ import os
 from loguru import logger
 
 from gbot.core.config.loader import load_config
-from gbot.core.providers.litellm import setup_provider
+from gbot.core.providers.llm import setup_provider
 
 
 def has_api_key() -> bool:

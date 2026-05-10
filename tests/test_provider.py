@@ -46,7 +46,7 @@ def _make_openrouter_response(content="hello", tool_calls=None, reasoning=None):
 
 def test_setup_provider_creates_openrouter(cfg):
     """setup_provider initialises OpenRouterLLM with the configured key."""
-    from gbot.core.providers import litellm as facade
+    from gbot.core.providers import llm as facade
 
     facade.setup_provider(cfg)
     assert isinstance(facade._provider, OpenRouterLLM)
@@ -54,7 +54,7 @@ def test_setup_provider_creates_openrouter(cfg):
 
 def test_setup_provider_falls_back_to_env_var(cfg, monkeypatch):
     """If config api_key is empty, OPENROUTER_API_KEY env var is used."""
-    from gbot.core.providers import litellm as facade
+    from gbot.core.providers import llm as facade
 
     cfg.providers.openrouter.api_key = ""
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-from-env")
@@ -64,7 +64,7 @@ def test_setup_provider_falls_back_to_env_var(cfg, monkeypatch):
 
 def test_setup_provider_no_api_key_tolerant(cfg, monkeypatch):
     """Missing key leaves provider unset; achat() raises later, init doesn't."""
-    from gbot.core.providers import litellm as facade
+    from gbot.core.providers import llm as facade
 
     cfg.providers.openrouter.api_key = ""
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
@@ -75,7 +75,7 @@ def test_setup_provider_no_api_key_tolerant(cfg, monkeypatch):
 @pytest.mark.asyncio
 async def test_achat_without_provider_raises(cfg, monkeypatch):
     """achat() without setup_provider (or with no key) surfaces a clear error."""
-    from gbot.core.providers import litellm as facade
+    from gbot.core.providers import llm as facade
 
     cfg.providers.openrouter.api_key = ""
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
@@ -217,7 +217,7 @@ async def test_openrouter_achat_error_handling():
 @pytest.mark.asyncio
 async def test_facade_forwards_to_provider(cfg):
     """facade.achat delegates to the OpenRouter provider."""
-    from gbot.core.providers import litellm as facade
+    from gbot.core.providers import llm as facade
 
     facade.setup_provider(cfg)
 
@@ -236,7 +236,7 @@ async def test_facade_forwards_to_provider(cfg):
 @pytest.mark.asyncio
 async def test_facade_works_with_non_openrouter_prefix(cfg):
     """Even openai/* model strings get forwarded — OpenRouter routes them upstream."""
-    from gbot.core.providers import litellm as facade
+    from gbot.core.providers import llm as facade
 
     facade.setup_provider(cfg)
 

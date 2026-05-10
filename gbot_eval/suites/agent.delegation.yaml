@@ -2,6 +2,8 @@ name: agent.delegation
 description: 'DelegationPlanner: execution / processor / tool keyword / cron / delay scoring.'
 runner: delegation
 requires_gbot: true
+default_max_tokens: 500
+default_temperature: 0.3
 cases:
 - _intent: immediate web search → web tool
   task: İstanbul'un bugünkü hava durumunu öğrenmek istiyorum.

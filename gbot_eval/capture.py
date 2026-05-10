@@ -35,22 +35,16 @@ def is_reasoning_model(model: str) -> bool:
 def reasoning_off_kwargs(
     model: str, mode: str | bool | None = "auto"
 ) -> dict[str, Any]:
-    """Return achat() kwargs that disable reasoning for reasoning models.
+    """No-op since v1.24.3 — the ``models.yaml`` registry now declares
+    per-model thinking/reasoning defaults; ``OpenRouterLLM.achat``
+    forwards them based on the looked-up profile rather than a runner-
+    side override. Kept as a stub so existing runner imports keep
+    working without a coordinated rename.
 
-    ``mode`` semantics:
-    - ``"auto"`` (default): inject for known reasoning models only
-    - ``True``:  inject regardless of model (force-off)
-    - ``False`` / ``None``: never inject (keep production parity)
-
-    The right OpenRouter parameter is ``reasoning={"effort": "none"}``
-    — ``{"enabled": false}`` is silently dismissed by the API
-    (verified empirically in the v1.21.0 bench).
+    ``mode`` is accepted for backward compatibility but ignored.
     """
-    if mode is False or mode is None:
-        return {}
-    if mode == "auto" and not is_reasoning_model(model):
-        return {}
-    return {"reasoning": {"effort": "none"}}
+    del model, mode  # unused — handled by the model registry now
+    return {}
 
 
 @dataclass

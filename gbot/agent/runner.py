@@ -12,7 +12,7 @@ from gbot.agent.graph import create_graph
 from gbot.agent.permissions import get_allowed_tools, get_context_layers, get_max_sessions
 from gbot.agent.tools import ToolRegistry, make_tools
 from gbot.core.config.schema import Config
-from gbot.core.providers.litellm import setup_provider
+from gbot.core.providers.llm import setup_provider
 from gbot.memory.store import MemoryStore
 
 

@@ -125,6 +125,9 @@ export interface MemoryFact {
   category: string | null;
   created_at: string;
   updated_at: string;
+  // Faz 22G lifecycle
+  state?: "active" | "weak" | "inhibited" | "archived";
+  inhibited_until?: string | null;
 }
 
 export interface MemoryResponse {
@@ -259,6 +262,21 @@ export const adminApi = {
   runMemoryMaintenance: (userId: string) =>
     api.post<{ daily: Record<string, unknown>; weekly: Record<string, unknown> }>(
       `/admin/memory/${userId}/maintenance/run`,
+      {},
+    ),
+  inhibitFact: (userId: string, factId: string, holdDays = 7) =>
+    api.post<{ ok: boolean; fact_id: string; state: string; inhibited_until: string }>(
+      `/admin/memory/${userId}/facts/${factId}/inhibit?hold_days=${holdDays}`,
+      {},
+    ),
+  restoreFact: (userId: string, factId: string) =>
+    api.post<{ ok: boolean; fact_id: string; state: string }>(
+      `/admin/memory/${userId}/facts/${factId}/restore`,
+      {},
+    ),
+  runObsidianSync: (userId: string) =>
+    api.post<{ written: number; skipped: number; deleted: number; enabled: boolean; vault_dir?: string }>(
+      `/admin/memory/${userId}/obsidian-sync/run`,
       {},
     ),
   retrievalDebug: (userId: string, query: string, topK = 10) =>

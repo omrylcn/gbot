@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from gbot.agent.profiles import get_agent_md
-from gbot.core.providers import litellm as llm_provider
+from gbot.core.providers import llm as llm_provider
 
 if TYPE_CHECKING:
     from gbot.core.config.schema import Config
@@ -176,6 +176,11 @@ class DelegationPlanner:
         self._extra_examples = self._build_extra_examples(deleg.examples)
         # Try to load prompt from profile AGENT.md, fallback to _PLANNER_PROMPT
         self._prompt_template = get_agent_md("planner") or _PLANNER_PROMPT
+        # Last LLM response — exposed so observability layers (gbot-eval
+        # delegation runner) can read token usage / cost without
+        # threading a callback all the way down. Populated on every
+        # ``plan()`` call.
+        self.last_response = None
 
     @staticmethod
     def _build_extra_examples(examples: list[str]) -> str:
@@ -208,9 +213,11 @@ class DelegationPlanner:
             messages=messages,
             model=self.model,
             temperature=self.temperature,
+            max_tokens=getattr(self, "max_tokens", None) or 500,
             api_base=self.config.get_api_base(self.model),
             response_format=_RESPONSE_SCHEMA,
         )
+        self.last_response = response
         content = response.content
         # Fallback: some thinking models put output in reasoning_content
         if not content or not content.strip():
@@ -241,7 +248,7 @@ class DelegationPlanner:
                     raise
 
             raw_model = data.get("model")
-            # Accept only valid litellm model strings (e.g. "openai/gpt-4o-mini")
+            # Accept only valid OpenRouter model strings (e.g. "openai/gpt-4o-mini")
             # Reject short/placeholder values like "main", "null", "default"
             model = None
             if isinstance(raw_model, str) and "/" in raw_model and len(raw_model) > 5:

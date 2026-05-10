@@ -16,7 +16,7 @@ except ImportError:
     get_agent_md = None  # type: ignore
     _GBOT_AVAILABLE = False
 
-from gbot.core.providers import litellm as llm_provider
+from gbot.core.providers import llm as llm_provider
 from gbot_eval.capture import track_call
 from gbot_eval.runners import register
 from gbot_eval.runners.base import Runner

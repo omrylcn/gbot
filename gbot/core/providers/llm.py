@@ -1,20 +1,15 @@
-"""LLM provider facade — historical name kept for import-path stability.
+"""LLM provider facade.
 
-The module name is ``litellm`` for backward compatibility — every caller
-already does:
+Every caller imports as::
 
-    from gbot.core.providers import litellm as llm_provider
+    from gbot.core.providers import llm as llm_provider
     await llm_provider.achat(...)
 
-Internally, OpenRouter SDK is the sole provider (decided 2026-05-09 via
-``gbot-eval bench-providers`` head-to-head). The previous LiteLLM
-fallback was dead code: production routes 100% through OpenRouter
-because all configured ``model`` ids carry the ``openrouter/`` prefix.
-
-To rename this module to ``llm.py`` later, update every
-``from gbot.core.providers import litellm as llm_provider`` callsite in
-one go — all callers already use the ``as llm_provider`` alias so the
-rename is mechanical.
+Internally OpenRouter SDK is the sole provider (decided 2026-05-09).
+Per-model defaults (``thinking``, ``max_tokens``, ``temperature``,
+OpenRouter ``reasoning.effort``) come from ``config/models.yaml`` via
+``gbot.core.config.model_registry``. Explicit non-None caller arguments
+override the registry defaults.
 """
 
 from __future__ import annotations
@@ -57,13 +52,18 @@ async def achat(
     messages: list[dict[str, Any]],
     model: str,
     tools: list[dict[str, Any]] | None = None,
-    temperature: float = 0.7,
-    max_tokens: int = 4096,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
     api_base: str | None = None,
-    thinking: bool = False,
+    thinking: bool | None = None,
     response_format: dict[str, Any] | None = None,
 ) -> AIMessage:
-    """Forward a chat completion request to the OpenRouter SDK provider."""
+    """Forward a chat completion request to the OpenRouter SDK provider.
+
+    Per-model defaults (``thinking``, ``max_tokens``, ``temperature`` and
+    OpenRouter ``reasoning.effort``) come from ``config/models.yaml`` via
+    the model registry. Explicit non-None caller arguments override them.
+    """
     if _provider is None:
         raise RuntimeError(
             "OpenRouter provider not initialised. Set OPENROUTER_API_KEY "

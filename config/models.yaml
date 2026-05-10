@@ -1,0 +1,150 @@
+# Model registry — per-model defaults for both production gbot and
+# gbot-eval. Single source of truth for thinking mode, max_tokens,
+# pricing, and OpenRouter reasoning param.
+#
+# Lookup priority at call time:
+#   caller arg  >  models[<id>]  >  defaults  >  hard-coded fallback
+#
+# Pricing is USD per 1M tokens. Updated via `gbot-eval models add` or
+# `gbot-eval models refresh`. Stay tidy here; user-only overrides land in
+# `gbot_eval/output/pricing_overrides.json` (gitignored).
+
+last_updated: "2026-05-10"
+
+defaults:
+  thinking: false              # false → no `reasoning` parameter sent
+  reasoning_effort: null       # null = unset; "none" = explicitly disable
+  max_tokens: 4096
+  temperature: 0.7
+  pricing:
+    prompt: 0.0                # $/1M tokens — 0 reports cost=0 with warning
+    completion: 0.0
+
+models:
+  # ── Google ─────────────────────────────────────────────
+  openrouter/google/gemini-3-flash-preview:
+    thinking: false
+    pricing: { prompt: 0.075, completion: 0.30 }
+    notes: "Production default — fast, cheap, non-reasoning"
+
+  openrouter/google/gemini-3.1-flash-lite:
+    thinking: false
+    pricing: { prompt: 0.05, completion: 0.20 }
+
+  openrouter/google/gemini-2.5-flash:
+    thinking: false
+    pricing: { prompt: 0.075, completion: 0.30 }
+
+  openrouter/google/gemini-2.5-pro:
+    thinking: false
+    pricing: { prompt: 1.25, completion: 10.00 }
+
+  # ── Anthropic ──────────────────────────────────────────
+  openrouter/anthropic/claude-haiku-4.5:
+    thinking: false
+    pricing: { prompt: 1.00, completion: 5.00 }
+
+  openrouter/anthropic/claude-sonnet-4.5:
+    thinking: false
+    pricing: { prompt: 3.00, completion: 15.00 }
+
+  openrouter/anthropic/claude-opus-4:
+    thinking: false
+    pricing: { prompt: 15.00, completion: 75.00 }
+
+  # ── OpenAI ─────────────────────────────────────────────
+  openrouter/openai/gpt-4o-mini:
+    thinking: false
+    pricing: { prompt: 0.15, completion: 0.60 }
+
+  openrouter/openai/gpt-4o:
+    thinking: false
+    pricing: { prompt: 2.50, completion: 10.00 }
+
+  openrouter/openai/gpt-5-mini:
+    thinking: false
+    pricing: { prompt: 0.25, completion: 2.00 }
+
+  # ── Moonshot — default-thinking, force off via reasoning_effort ──
+  openrouter/moonshotai/kimi-k2.5:
+    thinking: false
+    reasoning_effort: none     # explicit disable for this default-think model
+    pricing: { prompt: 0.14, completion: 2.49 }
+    notes: "Default-thinking; needs reasoning.effort=none"
+
+  openrouter/moonshotai/kimi-k2.6:
+    thinking: false
+    reasoning_effort: none
+    pricing: { prompt: 0.12, completion: 0.24 }
+    notes: "Default-thinking; needs reasoning.effort=none"
+
+  # ── DeepSeek — all v3.2+ are pure-reasoning per OpenRouter ──
+  openrouter/deepseek/deepseek-v4-pro:
+    thinking: true             # mandatory reasoning
+    reasoning_effort: medium
+    max_tokens: 8000
+    temperature: 1.0
+    pricing: { prompt: 0.43, completion: 0.87 }
+    notes: "DeepSeek V4 Pro; reasoning mandatory; 1M ctx"
+
+  openrouter/deepseek/deepseek-v4-flash:
+    thinking: true
+    reasoning_effort: medium
+    max_tokens: 8000
+    temperature: 1.0
+    pricing: { prompt: 0.14, completion: 0.28 }
+    notes: "DeepSeek V4 Flash; reasoning mandatory; 1M ctx; cheap"
+
+  openrouter/deepseek/deepseek-v3.2:
+    thinking: true             # corrected — reasoning mandatory on this endpoint
+    reasoning_effort: medium
+    max_tokens: 8000
+    temperature: 1.0
+    pricing: { prompt: 0.27, completion: 0.41 }
+    notes: "Pure reasoning; thinking required"
+
+  openrouter/deepseek/deepseek-r1:
+    thinking: true             # pure-reasoning model — needed for output
+    reasoning_effort: medium
+    max_tokens: 8000           # leave room for thinking budget
+    temperature: 1.0
+    pricing: { prompt: 0.55, completion: 2.19 }
+    notes: "Pure reasoning; thinking ZORUNLU"
+
+  # ── MiniMax — m2.x are pure-reasoning per OpenRouter ────
+  openrouter/minimax/minimax-m2.5:
+    thinking: true             # corrected — reasoning mandatory
+    reasoning_effort: medium
+    max_tokens: 8000
+    temperature: 1.0
+    pricing: { prompt: 0.15, completion: 1.15 }
+    notes: "Pure reasoning; thinking required"
+
+  openrouter/minimax/minimax-m2.7:
+    thinking: true             # corrected — reasoning mandatory
+    reasoning_effort: medium
+    max_tokens: 8000
+    temperature: 1.0
+    pricing: { prompt: 0.30, completion: 1.20 }
+    notes: "Pure reasoning; thinking required"
+
+  # ── Qwen ──────────────────────────────────────────────
+  openrouter/qwen/qwen-3-235b-instruct:
+    thinking: false
+    pricing: { prompt: 0.20, completion: 0.60 }
+
+  # ── GLM (z-ai / zhipuai) — default-thinking ───────────
+  openrouter/zhipuai/glm-4.7-flash:
+    thinking: false
+    reasoning_effort: none
+    pricing: { prompt: 0.10, completion: 0.30 }
+
+  openrouter/zhipuai/glm-5:
+    thinking: false
+    reasoning_effort: none
+    pricing: { prompt: 0.50, completion: 1.50 }
+
+  openrouter/z-ai/glm-5.1:
+    thinking: false
+    reasoning_effort: none
+    pricing: { prompt: 0.50, completion: 1.50 }

@@ -38,10 +38,29 @@ Format ve kurallar `memory_schema.md`'de — ona uy. Özet:
 - Her fact için: `content`, `type`, `confidence`, `category` (zorunlu),
   `keywords`
 - Her fact bir kategoriye atanmalı — "uncategorized" kabul edilmez
-- Relations zorunlu — konuşmada geçen entity ilişkilerini mutlaka çıkar
 - Selamlama, dolgu, tool detayları çıkarılmaz
 - Bilgi yoksa `{"facts": [], "relations": []}`
 - Kullanıcının dili korunur
+
+### Relations çıkarma kuralı (kritik)
+
+Relations **kalıcı / yapısal / habitual** ilişkilerden çıkarılır. Tek
+seferlik bir olay (episodic event) relation oluşturmaz.
+
+**ÇIKAR (kalıcı bağ):**
+- "Ömer HangiKredi'de çalışıyor" → `(Ömer, works_at, HangiKredi)`
+- "Ömer Pamuk adında bir köpeği var" → `(Ömer, owns, Pamuk)`
+- "Zeynep her hafta sonu AVM'ye gider" → `(Zeynep, visits, Akasya AVM)` (habitual)
+- "Ömer Python kullanıyor" → `(Ömer, uses, Python)`
+- "Zeynep İstanbul'da yaşıyor" → `(Zeynep, lives_in, İstanbul)`
+
+**ÇIKARMA (tek-seferlik event):**
+- "Zeynep dün AVM'ye gitti" → fact: episodic, **relation YOK**
+- "Murat sabah aradı" → fact: episodic, **relation YOK**
+- "Bugün öğlen toplantı yapıldı" → fact: episodic, **relation YOK**
+
+Karar kriteri: "Yarın da/her zaman da geçerli mi?" → **Evet** ise relation,
+**Hayır** ise sadece episodic fact. Şüpheli durumda relation çıkarma.
 
 ---
 

@@ -6,6 +6,126 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.24.3] - 2026-05-10 — Faz 22I-A: Model registry + reasoning routing + memory ops dashboard
+
+Two-front bug-fix-and-foundation release. Front 1 closes the
+"Owner / Kullanıcı / Ömer" canonical fragmentation that left graph
+nodes for the same person scattered across three labels. Front 2
+introduces a per-model defaults registry — ``config/models.yaml`` —
+so each LLM call site picks up the right ``thinking`` flag,
+``max_tokens`` and OpenRouter ``reasoning.effort`` without hard-coding.
+The memory ops sub-tab plus several Obsidian-export and entity-page
+fixes round it out.
+
+### Added — Model registry (Faz 22I-A)
+
+- ``config/models.yaml`` with 22 entries (Google, Anthropic, OpenAI,
+  Moonshot, DeepSeek, MiniMax, Qwen, GLM). Per-model fields: ``thinking``,
+  ``reasoning_effort``, ``max_tokens``, ``temperature``, ``pricing``,
+  ``notes``. Pure-reasoning models (DeepSeek V4 family, MiniMax M2.x,
+  Kimi K2.x) are flagged so the provider routes the right OpenRouter
+  ``reasoning`` parameter automatically.
+- ``gbot/core/config/model_registry.py`` — loader, ``ModelProfile``
+  dataclass, lookup priority `caller arg > yaml > defaults > fallback`.
+  ``calc_cost`` falls through to ``pricing_overrides.json`` for models
+  that only exist in the live OpenRouter dump.
+- ``OpenRouterLLM.achat`` now resolves ``thinking`` / ``max_tokens`` /
+  ``temperature`` from the registry when the caller passes ``None``,
+  and emits ``reasoning={"effort": …}`` only when the YAML asks for it
+  (no more blanket "always disable" flag that broke pure-reasoning
+  models).
+- ``gbot_eval/pricing.py`` is now a thin shim — every pricing lookup
+  routes through the same registry. The legacy ``PRICES`` dict still
+  exists as a read view of YAML + overrides, but mutations write back
+  to the overrides file via the registry's API.
+
+### Renamed — `gbot.core.providers.litellm` → `gbot.core.providers.llm`
+
+LiteLLM was removed in v1.21.1 (Faz 22E Step 5K). The module name
+``litellm`` lingered as a facade for import-path stability — that
+debt is paid off now. 19 caller files updated (gbot, gbot_cli, gbot_eval,
+tests). The module just delegates to ``OpenRouterLLM``; renaming it
+makes the architecture honest.
+
+### Fixed — Owner canonical fragmentation
+
+``config/config.yaml`` had ``assistant.owner.name: "Owner"`` while the
+real user is "Ömer". The entity resolver's tier-1 anchors only
+included "owner" / "Owner" — every "Ömer" surface form fell through
+to identity fallback, producing a separate graph node. Backfilled 14
+``canonical_source`` + 3 ``canonical_target`` rows on
+``memory_relations``, registered ``Ömer → owner`` in the alias table,
+flipped the YAML name, restarted the container. Graph now collapses
+all owner mentions into a single node (41 relations).
+
+### Fixed — Delegation token capture
+
+``gbot-eval`` reported ``Tokens 0/0 / Cost $0`` for the
+``agent.delegation`` suite because the runner hard-coded zero. The
+planner now exposes ``last_response`` and the runner reads
+``response_metadata['usage']`` for accurate accounting. Same path
+also feeds ``calc_cost`` so delegation runs no longer report free.
+
+### Added — Memory ops dashboard sub-tab
+
+[dashboard/src/pages/Memory.tsx](dashboard/src/pages/Memory.tsx) gained a fifth
+sub-tab "Ops" exposing:
+
+- ``POST /admin/memory/{user}/maintenance/run`` (decay + stale-page
+  recompile + orphan cleanup) with the JSON output rendered inline
+- ``POST /admin/memory/{user}/obsidian-sync/run`` with
+  written/skipped/vault_dir summary
+- A live table of the user's scheduled memory tasks
+  (``daily-maintenance-*``, ``weekly-maintenance-*``,
+  ``obsidian-sync-*``) with cron expressions and status
+
+The Facts sub-tab also gained a ``state`` column (active/weak/inhibited
+with colour badges) and per-row inhibit/restore action buttons backed
+by the Faz 22G lifecycle endpoints.
+
+### Added — Obsidian wikilinks for graph view
+
+``ObsidianSyncer`` now wraps every canonical entity mention in the
+exported markdown with ``[[]]`` wikilinks, including surface forms
+(``Ömer``, ``Kullanıcı``, ``User`` → ``[[owner]]``). Case-insensitive
+matching, longest-first replacement, exclusion of the page's own
+canonical to avoid self-loops. Result: opening the vault folder in
+Obsidian and hitting Graph View now shows a connected network instead
+of isolated notes.
+
+### Added — Relations extraction rule (memory agent prompt)
+
+[workspace/agents/memory/AGENT.md](workspace/agents/memory/AGENT.md) and
+[workspace/memory_schema.md](workspace/memory_schema.md) gained an explicit rule:
+relations are emitted only for **persistent / habitual / structural**
+bonds, never for one-off events. "Zeynep dün AVM'ye gitti" produces
+an episodic fact but no relation; "Zeynep her hafta AVM'ye gider"
+produces both. Reduces graph pollution from one-shot mentions.
+
+### Fixed — Dashboard cache busting
+
+``dashboard/nginx.conf`` now sends ``Cache-Control: no-store, no-cache,
+must-revalidate`` for ``/index.html`` while keeping the 1-year
+immutable cache on hashed asset bundles. New rebuilds reach the
+browser on the next request without manual hard-refresh.
+
+### Tests
+
+446 total (was 445), all green. The legacy ``test_provider.py`` had
+six imports of ``gbot.core.providers.litellm`` that the rename pass
+caught. Added bump for ``test_delete_user_cascades_through_memory``
+(carried over from v1.24.2). Manual smoke: full eval matrix on
+Gemini Flash, Kimi K2.6, DeepSeek V4 Pro/Flash, MiniMax M2.7 — all
+execute end-to-end with correct reasoning routing.
+
+### Migrations
+
+None. ``config/models.yaml`` is read at import time; missing config
+falls through to a hard-coded fallback profile so older deploys keep
+working.
+
+---
+
 ## [1.24.2] - 2026-05-09 — User CRUD: cascade fix + admin panel + CLI confirm
 
 `gbot user remove me` failed with `IntegrityError: FOREIGN KEY

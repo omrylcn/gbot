@@ -121,3 +121,9 @@ memory:
     max_input_tokens: 1000
     max_output_tokens: 200
     max_pages_in_context: 3
+  obsidian_sync:                     # Faz 22G Aşama 4 — entity pages → markdown export
+    enabled: false                   # opt-in; needs entity_pages.enabled=true to be useful
+    vault_path: "/app/data/obsidian" # written under this directory as <user>/<entity>.md
+    sync_cron: "0 * * * *"           # every hour
+    include_archived: false
+    include_stale: false

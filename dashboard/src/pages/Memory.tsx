@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { EyeOff, RotateCcw, Play, FileDown } from "lucide-react";
 
 import { adminApi, type MemoryFact } from "@/api/admin";
 import { PageHeader } from "@/components/shared/PageHeader";
@@ -13,7 +14,7 @@ const FACT_TYPES = [
 ] as const;
 type FactFilter = (typeof FACT_TYPES)[number];
 
-const TABS = ["facts", "relations", "pages", "debug"] as const;
+const TABS = ["facts", "relations", "pages", "debug", "ops"] as const;
 type Tab = (typeof TABS)[number];
 
 const TAB_LABEL: Record<Tab, string> = {
@@ -21,6 +22,7 @@ const TAB_LABEL: Record<Tab, string> = {
   relations: "Relations",
   pages: "Entity Pages",
   debug: "Retrieval Debug",
+  ops: "Ops",
 };
 
 export default function MemoryPage() {
@@ -89,11 +91,12 @@ export default function MemoryPage() {
             </div>
 
             {tab === "facts" && (
-              <FactsTab memory={memory} filter={filter} setFilter={setFilter} />
+              <FactsTab userId={userId} memory={memory} filter={filter} setFilter={setFilter} />
             )}
             {tab === "relations" && <RelationsTab userId={userId} />}
             {tab === "pages" && <EntityPagesTab userId={userId} />}
             {tab === "debug" && <RetrievalDebugTab userId={userId} />}
+            {tab === "ops" && <OpsTab userId={userId} />}
           </div>
         </div>
       )}
@@ -166,24 +169,60 @@ function ExplicitPanel({ memory }: { memory: NonNullable<ReturnType<typeof admin
 
 // ── Facts tab ──────────────────────────────────────────────────
 
+const STATE_FILTERS = ["all", "active", "weak", "inhibited"] as const;
+type StateFilter = (typeof STATE_FILTERS)[number];
+
+const STATE_COLORS: Record<string, string> = {
+  active: "bg-green-500/15 text-green-500 border-green-500/30",
+  weak: "bg-yellow-500/15 text-yellow-500 border-yellow-500/30",
+  inhibited: "bg-orange-500/15 text-orange-500 border-orange-500/30",
+  archived: "bg-muted/15 text-muted border-border",
+};
+
 function FactsTab({
+  userId,
   memory,
   filter,
   setFilter,
 }: {
+  userId: string;
   memory: { facts: MemoryFact[]; fact_stats: { by_type: Record<string, { count: number }> } };
   filter: FactFilter;
   setFilter: (f: FactFilter) => void;
 }) {
-  const filteredFacts = memory.facts?.filter(
-    (f) => filter === "all" || f.fact_type === filter,
-  ) ?? [];
+  const queryClient = useQueryClient();
+  const [stateFilter, setStateFilter] = useState<StateFilter>("all");
+  const [error, setError] = useState<string | null>(null);
+
+  const inhibitMut = useMutation({
+    mutationFn: (factId: string) => adminApi.inhibitFact(userId, factId, 7),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["memory", userId] }),
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const restoreMut = useMutation({
+    mutationFn: (factId: string) => adminApi.restoreFact(userId, factId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["memory", userId] }),
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const filteredFacts = memory.facts?.filter((f) => {
+    if (filter !== "all" && f.fact_type !== filter) return false;
+    if (stateFilter !== "all" && f.state !== stateFilter) return false;
+    return true;
+  }) ?? [];
   const validFacts = filteredFacts.filter((f) => !f.valid_until);
   const invalidFacts = filteredFacts.filter((f) => f.valid_until);
 
   return (
     <div>
-      <div className="flex gap-2 mb-4">
+      {error && (
+        <div className="mb-3 px-3 py-2 bg-red-500/10 border border-red-500/30 text-red-500 rounded-lg text-xs">
+          {error}
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2 mb-3">
         {FACT_TYPES.map((type) => (
           <button
             key={type}
@@ -194,10 +233,26 @@ function FactsTab({
                 : "bg-background text-muted border-border hover:text-foreground"
             }`}
           >
-            {type === "all" ? "All" : type}
+            {type === "all" ? "All types" : type}
             {type !== "all" && memory.fact_stats?.by_type[type] && (
               <span className="ml-1 opacity-70">({memory.fact_stats.by_type[type].count})</span>
             )}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap gap-2 mb-4">
+        {STATE_FILTERS.map((s) => (
+          <button
+            key={s}
+            onClick={() => setStateFilter(s)}
+            className={`px-3 py-1 text-xs rounded-lg border transition-colors ${
+              stateFilter === s
+                ? "bg-foreground text-background border-foreground"
+                : "bg-background text-muted border-border hover:text-foreground"
+            }`}
+          >
+            {s === "all" ? "Any state" : s}
           </button>
         ))}
       </div>
@@ -207,26 +262,65 @@ function FactsTab({
           <thead>
             <tr className="border-b border-border bg-background/50">
               <th className="px-4 py-2.5 text-left text-xs font-medium text-muted uppercase">Fact</th>
-              <th className="px-4 py-2.5 text-left text-xs font-medium text-muted uppercase w-24">Type</th>
-              <th className="px-4 py-2.5 text-left text-xs font-medium text-muted uppercase w-20">Conf.</th>
-              <th className="px-4 py-2.5 text-left text-xs font-medium text-muted uppercase w-24">Category</th>
-              <th className="px-4 py-2.5 text-left text-xs font-medium text-muted uppercase w-28">Date</th>
+              <th className="px-4 py-2.5 text-left text-xs font-medium text-muted uppercase w-20">Type</th>
+              <th className="px-4 py-2.5 text-left text-xs font-medium text-muted uppercase w-24">State</th>
+              <th className="px-4 py-2.5 text-left text-xs font-medium text-muted uppercase w-16">Conf.</th>
+              <th className="px-4 py-2.5 text-left text-xs font-medium text-muted uppercase w-24">Date</th>
+              <th className="px-4 py-2.5 text-right text-xs font-medium text-muted uppercase w-24">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {validFacts.map((f) => (
-              <tr key={f.fact_id} className="border-b border-border last:border-0 hover:bg-sidebar-active transition-colors">
-                <td className="px-4 py-2.5 text-sm text-foreground">{f.content}</td>
-                <td className="px-4 py-2.5"><Badge>{f.fact_type}</Badge></td>
-                <td className="px-4 py-2.5 text-xs text-muted">{(f.confidence * 100).toFixed(0)}%</td>
-                <td className="px-4 py-2.5 text-xs text-muted">{f.category || "—"}</td>
-                <td className="px-4 py-2.5 text-xs text-muted">{formatDate(f.created_at)}</td>
-              </tr>
-            ))}
+            {validFacts.map((f) => {
+              const state = f.state || "active";
+              const isInhibited = state === "inhibited";
+              return (
+                <tr key={f.fact_id} className="border-b border-border last:border-0 hover:bg-sidebar-active transition-colors">
+                  <td className="px-4 py-2.5 text-sm text-foreground">
+                    {f.content}
+                    {f.category && <span className="ml-2 text-xs text-muted">[{f.category}]</span>}
+                  </td>
+                  <td className="px-4 py-2.5"><Badge>{f.fact_type}</Badge></td>
+                  <td className="px-4 py-2.5">
+                    <span className={`px-2 py-0.5 text-[10px] uppercase rounded border ${STATE_COLORS[state] || STATE_COLORS.archived}`}>
+                      {state}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2.5 text-xs text-muted">{(f.confidence * 100).toFixed(0)}%</td>
+                  <td className="px-4 py-2.5 text-xs text-muted">{formatDate(f.created_at)}</td>
+                  <td className="px-4 py-2.5">
+                    <div className="flex justify-end gap-1">
+                      {isInhibited ? (
+                        <button
+                          onClick={() => restoreMut.mutate(f.fact_id)}
+                          disabled={restoreMut.isPending}
+                          className="p-1.5 text-muted hover:text-green-500 hover:bg-sidebar-active rounded transition-colors"
+                          title="Restore (INHIBITED → ACTIVE)"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            if (confirm(`Inhibit this fact for 7 days?\n\n"${f.content}"`)) {
+                              inhibitMut.mutate(f.fact_id);
+                            }
+                          }}
+                          disabled={inhibitMut.isPending}
+                          className="p-1.5 text-muted hover:text-orange-500 hover:bg-sidebar-active rounded transition-colors"
+                          title="Inhibit for 7 days"
+                        >
+                          <EyeOff className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
             {!validFacts.length && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-sm text-muted italic">
-                  No facts yet
+                <td colSpan={6} className="px-4 py-8 text-center text-sm text-muted italic">
+                  No facts match these filters
                 </td>
               </tr>
             )}
@@ -236,7 +330,7 @@ function FactsTab({
 
       {invalidFacts.length > 0 && (
         <div className="mt-4">
-          <h4 className="text-xs font-medium text-muted mb-2">Superseded ({invalidFacts.length})</h4>
+          <h4 className="text-xs font-medium text-muted mb-2">Superseded / Archived ({invalidFacts.length})</h4>
           <div className="bg-card border border-border rounded-xl overflow-hidden opacity-60">
             <table className="w-full">
               <tbody>
@@ -558,6 +652,146 @@ function RetrievalDebugTab({ userId }: { userId: string }) {
           Tip: try a query that's been giving the agent trouble — you'll see exactly which facts are within the gate and which got filtered.
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Ops tab ────────────────────────────────────────────────────
+
+function OpsTab({ userId }: { userId: string }) {
+  const queryClient = useQueryClient();
+  const [maintResult, setMaintResult] = useState<unknown>(null);
+  const [syncResult, setSyncResult] = useState<unknown>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const maintMut = useMutation({
+    mutationFn: () => adminApi.runMemoryMaintenance(userId),
+    onSuccess: (r) => {
+      setMaintResult(r);
+      setError(null);
+      queryClient.invalidateQueries({ queryKey: ["memory", userId] });
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const syncMut = useMutation({
+    mutationFn: () => adminApi.runObsidianSync(userId),
+    onSuccess: (r) => {
+      setSyncResult(r);
+      setError(null);
+    },
+    onError: (e: Error) => setError(e.message),
+  });
+
+  const { data: tasks } = useQuery({
+    queryKey: ["tasks"],
+    queryFn: adminApi.getTasks,
+  });
+
+  const userTasks = tasks?.filter(
+    (t) =>
+      t.user_id === userId &&
+      (t.processor === "memory_maintenance" || t.processor === "memory_obsidian_sync"),
+  ) ?? [];
+
+  return (
+    <div className="space-y-5">
+      {error && (
+        <div className="px-3 py-2 bg-red-500/10 border border-red-500/30 text-red-500 rounded-lg text-sm">
+          {error}
+        </div>
+      )}
+
+      {/* Maintenance */}
+      <section className="bg-card border border-border rounded-xl p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h3 className="text-sm font-medium text-foreground">Memory Maintenance</h3>
+            <p className="text-xs text-muted mt-1">
+              Type-aware decay, stale-page recompile, orphan cleanup.
+              Cron: daily 04:00, weekly Sunday 04:30.
+            </p>
+          </div>
+          <button
+            onClick={() => maintMut.mutate()}
+            disabled={maintMut.isPending}
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50"
+          >
+            <Play className="w-4 h-4" />
+            {maintMut.isPending ? "Running…" : "Run Now"}
+          </button>
+        </div>
+
+        {maintResult ? (
+          <pre className="text-xs text-foreground bg-background border border-border rounded-lg p-3 overflow-x-auto">
+            {JSON.stringify(maintResult, null, 2)}
+          </pre>
+        ) : (
+          <p className="text-xs text-muted italic">Last run output will appear here.</p>
+        )}
+      </section>
+
+      {/* Obsidian sync */}
+      <section className="bg-card border border-border rounded-xl p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h3 className="text-sm font-medium text-foreground">Obsidian Sync</h3>
+            <p className="text-xs text-muted mt-1">
+              Exports entity pages to <code className="text-foreground">vault_path/&lt;user&gt;/&lt;entity&gt;.md</code>.
+              Cron: hourly. Disabled syncs report enabled=false.
+            </p>
+          </div>
+          <button
+            onClick={() => syncMut.mutate()}
+            disabled={syncMut.isPending}
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50"
+          >
+            <FileDown className="w-4 h-4" />
+            {syncMut.isPending ? "Syncing…" : "Sync Now"}
+          </button>
+        </div>
+
+        {syncResult ? (
+          <pre className="text-xs text-foreground bg-background border border-border rounded-lg p-3 overflow-x-auto">
+            {JSON.stringify(syncResult, null, 2)}
+          </pre>
+        ) : (
+          <p className="text-xs text-muted italic">Last sync output will appear here.</p>
+        )}
+      </section>
+
+      {/* Scheduled tasks */}
+      <section className="bg-card border border-border rounded-xl p-5">
+        <h3 className="text-sm font-medium text-foreground mb-3">Scheduled Memory Tasks</h3>
+        {userTasks.length ? (
+          <div className="overflow-hidden border border-border rounded-lg">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-border bg-background/50">
+                  <th className="px-3 py-2 text-left text-xs font-medium text-muted uppercase">Task</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-muted uppercase">Cron</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-muted uppercase">Processor</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-muted uppercase">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {userTasks.map((t) => (
+                  <tr key={t.task_id} className="border-b border-border last:border-0">
+                    <td className="px-3 py-2 text-xs font-mono text-foreground">{t.task_id}</td>
+                    <td className="px-3 py-2 text-xs font-mono text-muted">{t.cron_expr || "—"}</td>
+                    <td className="px-3 py-2 text-xs text-muted">{t.processor}</td>
+                    <td className="px-3 py-2 text-xs"><Badge>{t.status}</Badge></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-xs text-muted italic">
+            No memory tasks scheduled for @{userId}. They register on first server start with the user.
+          </p>
+        )}
+      </section>
     </div>
   );
 }

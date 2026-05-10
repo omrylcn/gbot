@@ -611,7 +611,7 @@ class ContextBuilder:
             "CANDIDATES:\n{listing}"
         ).format(n=n, query=query, listing=listing)
 
-        from gbot.core.providers import litellm as llm_provider
+        from gbot.core.providers import llm as llm_provider
 
         model = llm_cfg.model or self.config.memory.model
 

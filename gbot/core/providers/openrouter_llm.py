@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage
 from loguru import logger
 from openrouter import OpenRouter
 
+from gbot.core.config.model_registry import get_profile
 from gbot.core.providers.base import BaseLLMProvider
 
 
@@ -17,7 +18,10 @@ class OpenRouterLLM(BaseLLMProvider):
 
     Sole gbot LLM backend (Faz 22E Step 5K). Response format, tools,
     and thinking parameters pass straight through to OpenRouter's
-    chat completions endpoint without an adapter layer.
+    chat completions endpoint without an adapter layer. Per-model
+    defaults (thinking, max_tokens, temperature, reasoning effort) come
+    from ``config/models.yaml`` via the model registry — explicit caller
+    arguments still take priority.
     """
 
     def __init__(self, api_key: str) -> None:
@@ -28,20 +32,26 @@ class OpenRouterLLM(BaseLLMProvider):
         messages: list[dict[str, Any]],
         model: str,
         tools: list[dict[str, Any]] | None = None,
-        temperature: float = 0.7,
-        max_tokens: int = 4096,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
         api_base: str | None = None,
-        thinking: bool = False,
+        thinking: bool | None = None,
         response_format: dict[str, Any] | None = None,
     ) -> AIMessage:
         """Send chat completion via OpenRouter SDK."""
         sdk_model = model.removeprefix("openrouter/")
+        profile = get_profile(model)
+
+        # Caller arg → registry → hard fallback
+        final_temperature = temperature if temperature is not None else profile.temperature
+        final_max_tokens = max_tokens if max_tokens is not None else profile.max_tokens
+        final_thinking = thinking if thinking is not None else profile.thinking
 
         kwargs: dict[str, Any] = {
             "model": sdk_model,
             "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
+            "temperature": final_temperature,
+            "max_tokens": final_max_tokens,
         }
         if tools:
             kwargs["tools"] = tools
@@ -50,9 +60,15 @@ class OpenRouterLLM(BaseLLMProvider):
             kwargs["response_format"] = response_format
 
         # Thinking mode: OpenRouter uses 'reasoning' parameter
-        if thinking:
+        if final_thinking:
             kwargs["temperature"] = 1.0
             kwargs["reasoning"] = {"effort": "medium"}
+        elif profile.reasoning_effort:
+            # Default-thinking models (Kimi K2.x, GLM-5, MiniMax-M2…) need
+            # an explicit ``effort: none`` to stop them from burning the
+            # output budget on hidden thinking. YAML opt-in only — silent
+            # for non-reasoning models.
+            kwargs["reasoning"] = {"effort": profile.reasoning_effort}
 
         try:
             response = await self._client.chat.send_async(**kwargs)

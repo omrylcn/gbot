@@ -12,8 +12,8 @@ from gbot.agent.nodes import should_continue, _langchain_to_dict, _build_tool_de
 from gbot.agent.profiles import get_agent_md
 from gbot.agent.state import AgentState
 from gbot.core.config.schema import Config
-from gbot.core.providers import litellm as llm_provider
-from gbot.core.providers.litellm import setup_provider
+from gbot.core.providers import llm as llm_provider
+from gbot.core.providers.llm import setup_provider
 
 
 class LightAgent:

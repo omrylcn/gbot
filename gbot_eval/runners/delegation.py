@@ -25,6 +25,7 @@ except ImportError:
 
 from loguru import logger
 
+from gbot_eval import pricing
 from gbot_eval.runners import register
 from gbot_eval.runners.base import Runner
 from gbot_eval.suites.base import CaseResult
@@ -79,6 +80,9 @@ class DelegationRunner(Runner):
             raise RuntimeError("delegation runner needs gbot installed")
 
         planner = self._get_planner(model)
+        # Suite-level cap respected per case if not overridden
+        cap = case.get("max_tokens") or suite_config.get("default_max_tokens") or 500
+        planner.max_tokens = cap
 
         start = time.monotonic()
         try:
@@ -92,14 +96,24 @@ class DelegationRunner(Runner):
             error = str(e)
         latency_ms = int((time.monotonic() - start) * 1000)
 
+        # Token + cost telemetry — read from the response the planner
+        # exposed via ``last_response`` (Faz 22I model registry hookup).
+        usage = {}
+        last = getattr(planner, "last_response", None)
+        if last is not None:
+            usage = (last.response_metadata or {}).get("usage", {}) or {}
+        prompt_tokens = int(usage.get("prompt_tokens") or 0)
+        completion_tokens = int(usage.get("completion_tokens") or 0)
+        cost_usd = pricing.calc_cost(model, prompt_tokens, completion_tokens)
+
         quality, detail = _score(case, plan)
         return CaseResult(
             case_id=case["id"],
             quality=quality,
-            tokens_in=0,
-            tokens_out=0,
+            tokens_in=prompt_tokens,
+            tokens_out=completion_tokens,
             latency_ms=latency_ms,
-            cost_usd=0.0,
+            cost_usd=cost_usd,
             error=error,
             detail={**detail, "plan": plan},
         )
