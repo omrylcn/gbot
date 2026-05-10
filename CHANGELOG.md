@@ -6,6 +6,70 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.25.1] - 2026-05-10 — Faz 22I-C: Sigma migration + memory docs refresh
+
+Hotfix release tightening Faz 22I-C. The xyflow + dagre layout that
+shipped in v1.25.0 looked like a vertical staircase on hub-and-spoke
+data (one entity with 41 relations forced everything into a single
+rank). User pointed at sigma.js examples — that's the right tool for
+knowledge graphs. Switched.
+
+### Changed — Graph viz: @xyflow/react + dagre → sigma.js + forceAtlas2
+
+- Removed: ``@xyflow/react``, ``dagre``, ``@types/dagre`` (3 packages)
+- Added: ``sigma`` (WebGL canvas, GPU-accelerated), ``graphology`` +
+  ``graphology-types`` (graph data structure), ``@react-sigma/core``
+  (React bindings), ``graphology-layout-forceatlas2`` (Gephi-port,
+  knowledge-graph standard layout)
+- ``RelationsGraph.tsx`` rewritten for ``SigmaContainer`` +
+  ``MultiDirectedGraph`` (multi-edge support — A married_to B + B
+  partner_of A become two distinct edges instead of one collapsed
+  line)
+- Hover-fade neighbour highlight: when hovering a node, only its
+  direct neighbours stay full-colour, everything else dims to ~20%
+  opacity. Massively easier to explore.
+- Node size by degree (log scale, 6→28px) — hubs visually dominate
+- Default edge type = "arrow" (sigma built-in), curve type would have
+  needed an extra ~50KB package
+- Bundle: 184KB / 45KB gz for the graph chunk (was 266KB / 85KB gz
+  with xyflow + dagre). Net code-split chunk shrank.
+
+### Fixed
+
+- ``Graph.addDirectedEdgeWithKey`` "edge already exists" error —
+  passed ``MultiDirectedGraph`` constructor to ``SigmaContainer``
+  via ``graph={MultiDirectedGraph}`` so sigma's internal graph
+  accepts multi-edges between the same pair (e.g. Zeynep↔owner with
+  multiple relation verbs).
+- ``Sigma: could not find a suitable program for edge type "curve"``
+  — switched ``defaultEdgeType`` and per-edge ``type`` from "curve"
+  to "arrow"; sigma ships only "line" and "arrow" by default.
+
+### Layout — Memory page
+
+- Relations / Entity Pages / Retrieval Debug / Ops sub-tabs now use
+  full container width (the explicit-data side panel only renders on
+  the Facts sub-tab where it belongs)
+- Graph container height: ``78vh, min-height 560px`` (was fixed
+  600px) — bigger screens get more graph
+
+### Docs
+
+- ``docs/memory-architecture.md`` — Faz roadmap table extended with
+  v1.24.0/.1/.2/.3 + v1.25.0/.1 entries; new section 11.5 covers
+  the model registry (``config/models.yaml``); section 12 baseline
+  bumped to v1.25.1; section 13 file pointers add the registry
+  loader path and the ``relations/`` graph component path.
+- ``docs/memory-usage.md`` — Memory page sub-tabs widened from 4 to
+  5 (Ops added); Facts sub-tab gained state column + per-row
+  inhibit/restore documentation; new section 2.5 documents the
+  ``gbot memory stats/facts/inhibit/restore/decay/archive-old/forget``
+  CLI commands; section 9 CLI reference expanded; new section 9.5
+  on the model registry pattern; Obsidian sync section gained the
+  wikilink-injection sub-section.
+
+---
+
 ## [1.25.0] - 2026-05-10 — Faz 22I-C: Modern Relations Graph (cytoscape → @xyflow/react)
 
 Dashboard'daki ilişki grafiği komple yeniden yazıldı. Cytoscape 3 +

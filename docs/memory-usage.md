@@ -46,20 +46,61 @@ Hiç müdahaleye gerek yok — bot çalışıyorsa hafıza da çalışıyor.
 
 `http://localhost:8000` → **Memory** tab → kullanıcı seç (örn `owner`).
 
-### 4 alt-tab
+### 5 alt-tab (Faz 22I-A genişletti)
 
 | Tab | Ne gösteriyor |
 |---|---|
-| **Facts** | Tüm fact'ler. Filter: `all / semantic / episodic / preference / procedural / style`. Her satırda content, importance, confidence, access_count, valid range, fact_type badge. |
-| **Relations** | Üst sağda **Table / Graph** toggle. Table: kanonik source → relation → target liste. Graph (Faz 22G): cytoscape force-directed view, drag/zoom, click-to-inspect side panel. |
-| **Entity Pages** | LLM-derlenmiş kompakt sayfalar (markdown). Her page için Recompile / Forget butonu. |
-| **Retrieval Debug** | Bir sorgu yaz, `/admin/memory/{user}/retrieval-debug` çağırılır. Distance histogramı + `above_gate` flag. Distance threshold tuning için. |
+| **Facts** | Tüm fact'ler. **Type filter** chip'leri (semantic / episodic / preference / procedural / style) + **State filter** chip'leri (active / weak / inhibited). Her satırda: content, **state badge** (yeşil active / sarı weak / turuncu inhibited), confidence, kategori, tarih, ve her satırın sağında **EyeOff icon** (7 gün inhibit, confirm prompt'lu) veya **RotateCcw icon** (inhibited fact'leri restore). |
+| **Relations** | Sağ üstte **Table / Graph** toggle. Table: kanonik source → relation → target liste. **Graph (Faz 22I-C)**: sigma.js + forceAtlas2 layout, 6 entity-type renkli circle node (size by degree — hub'lar büyük, satellite'ler küçük), 5 relation-category renkli edge, hover'da **fade dim** (sadece komşular parlak), FilterBar (type chip + category chip + name search + min-degree slider), click → side panel (top relations + yön ok'u). |
+| **Entity Pages** | LLM-derlenmiş kompakt sayfalar (markdown, 80 kelime + bullet liste + `[fact_id:xxx]` citation). Her page için **Recompile** + **Forget** butonu. |
+| **Retrieval Debug** | Bir sorgu yaz, `/admin/memory/{user}/retrieval-debug` çağırılır. Distance + final_score + `above_gate` flag her candidate için. Distance threshold tuning için. |
+| **Ops (Faz 22I-A)** | **Memory Maintenance** "Run Now" → `apply_decay` + stale page recompile + orphan cleanup; JSON çıktı inline gösterilir. **Obsidian Sync** "Sync Now" → entity pages → markdown export tetikler, written/skipped/vault_dir döndürür. **Scheduled Memory Tasks** tablosu: bu user için `daily-maintenance-*`, `weekly-maintenance-*`, `obsidian-sync-*` cron'larının task_id + cron_expr + processor + status. |
 
-### Memory page'in soltarafı
+### Memory page'in sol tarafı (sadece Facts tab'ında)
 
-Hangi tab'da olursan ol, sol tarafta `notes / preferences / favorites`
-(unified `user_notes` tablosu) ve `processing_log` (son 10 extraction
-özet) görünür.
+**Faz 22I-A sonrası:** sol panel sadece Facts tab'ında görünür —
+Relations / Entity Pages / Retrieval Debug / Ops sub-tab'lar **tam
+genişlik** kullanır (graph viz gibi yatay alana ihtiyaç duyanlar
+sıkışmasın diye).
+
+Sol panel içeriği: `notes / preferences / favorites` (unified
+`user_notes` tablosu) ve `processing_log` (son 10 extraction özet —
+trigger + facts_extracted/added + duration_ms).
+
+---
+
+## 2.5 CLI — `gbot memory` (Faz 22H+, v1.24.1)
+
+Admin token wall'a takılmadan DB üzerinden direkt sorgu/yönetim.
+Production audit'lerde token problemi çıkmasın diye eklendi.
+
+```bash
+# Genel istatistik — fact_type × state matrisi + relation/page sayıları
+gbot memory stats owner
+
+# Filtreli fact listesi
+gbot memory facts owner --state active --type semantic --limit 20
+gbot memory facts owner --contains "Zeynep"
+
+# Lifecycle (Faz 22G endpoints'in CLI karşılığı, 8-char prefix kabul)
+gbot memory inhibit a1b2c3d4 --days 7
+gbot memory restore a1b2c3d4
+
+# Decay'i elle tetikle (cron beklemeden)
+gbot memory decay owner
+
+# Yaş bazlı toplu arşiv — apply_decay'in access_count guard'ını bypass eder
+gbot memory archive-old owner --days 14 --type episodic --dry-run
+gbot memory archive-old owner --days 14 --type episodic        # gerçek
+
+# Forget cascade — entity'nin tüm izini arşivler
+gbot memory forget Zeynep owner
+```
+
+Bu komutlar `MemoryStore`'a doğrudan bağlanır — admin auth gerektirmez,
+**CLI'yı çalıştıran user'ın izniyle** koşar.
+
+---
 
 ---
 
@@ -304,6 +345,30 @@ frontmatter `synced_at` değiştiği için pratikte her run'da bir
 satır farkı oluşur — Obsidian git plugin kullanıyorsan minimal
 diff.
 
+### Wikilink injection (Faz 22I-A, v1.24.3)
+
+ObsidianSyncer markdown body'deki canonical entity mention'larını
+otomatik olarak `[[]]` wikilink'e dönüştürür. Surface form'lar
+(`memory_entity_pages.entity_surface_forms`) da haritalanır:
+`Ömer / Kullanıcı / User → [[owner]]`. Case-insensitive match,
+longest-first replacement, self-loop koruması.
+
+```markdown
+# owner.md (önce)
+Kullanıcı, Ömer olarak bilinen bir bireydir ve Zeynep ile evlidir.
+HangiKredi'de Financial Asistan üzerinde çalışıyor, Murat ile
+işbirliği yapıyor.
+
+# owner.md (Wikilink injection sonrası)
+[[owner]], Ömer olarak bilinen bir bireydir ve [[Zeynep]] ile
+evlidir. HangiKredi'de Financial Asistan üzerinde çalışıyor,
+[[Murat]] ile işbirliği yapıyor.
+```
+
+**Sonuç:** Vault klasörünü Obsidian'da açtığında **Graph view**
+node'ları otomatik bağlar. Wikilink olmadan her dosya izole node
+olarak görünüyordu.
+
 ---
 
 ## 7. LLM rerank (Faz 22G Aşama 5)
@@ -399,18 +464,76 @@ gbot run
 
 # Kullanıcılar
 gbot user list
+gbot user remove <id>           # blast-radius prompt + typer.confirm (--yes ile bypass)
 
 # Cron job'ları (maintenance + obsidian-sync görmeli)
 gbot cron list
 
-# Belirli bir kullanıcı için memory dump
-gbot memory dump owner          # opsiyonel — komut yoksa admin API kullan
+# Memory CLI (Faz 22H+, v1.24.1) — admin token gerektirmez
+gbot memory stats owner
+gbot memory facts owner --state active --type semantic --limit 20
+gbot memory facts owner --contains "Zeynep"
+gbot memory inhibit a1b2c3d4 --days 7
+gbot memory restore a1b2c3d4
+gbot memory decay owner
+gbot memory archive-old owner --days 14 --type episodic --dry-run
+gbot memory forget Zeynep owner
 
 # Eval CLI
 gbot-eval list                  # 10 suite
-gbot-eval models                # pricing tablosu
+gbot-eval models                # pricing tablosu (config/models.yaml)
 gbot-eval models refresh        # OpenRouter'dan canlı çek
+gbot-eval models add openrouter/foo/bar --prompt=0.5 --completion=2.0
 ```
+
+---
+
+## 9.5 Model registry — extraction / AUDN modeli seçme (Faz 22I-A)
+
+`config/models.yaml` her LLM call site için defaults'u tek dosyada
+tutar. Memory pipeline'ı için relevant olanlar:
+
+```yaml
+# config/config.yaml — memory'nin hangi modeli kullanacağını seç
+memory:
+  model: ""                                    # boş = assistant.model'i kullan
+  update:
+    model: ""                                  # boş = memory.model'i kullan (AUDN)
+  entity_pages:
+    model: "openrouter/openai/gpt-4o-mini"     # entity-page derleme
+```
+
+```yaml
+# config/models.yaml — modelin nasıl davranacağını tanımla
+models:
+  openrouter/google/gemini-3-flash-preview:
+    thinking: false
+    pricing: { prompt: 0.075, completion: 0.30 }
+
+  openrouter/moonshotai/kimi-k2.6:
+    thinking: false
+    reasoning_effort: none      # default-thinking model — explicit kapat
+    pricing: { prompt: 0.12, completion: 0.24 }
+
+  openrouter/deepseek/deepseek-r1:
+    thinking: true              # pure-reasoning — required
+    reasoning_effort: medium
+    max_tokens: 8000
+```
+
+Yeni model ekledikten sonra `gbot-eval` ile kalite kontrol:
+
+```bash
+gbot-eval run --model=openrouter/moonshotai/kimi-k2.6 --suite=memory --sample=30
+gbot-eval matrix
+gbot-eval baseline diff         # production model'e göre fark
+```
+
+**Pratik öneri:** Production memory pipeline'ı için Gemini 3 Flash
+baskın seçim (1.00 quality, 1.5 sn p95, $0.075 in / $0.30 out per 1M
+tokens). Pure-reasoning modeller (DeepSeek R1, V4 Pro/Flash) hot
+path'te 10-30x daha yavaş — sadece batch / offline maintenance için
+aday.
 
 ---
 

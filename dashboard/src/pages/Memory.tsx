@@ -74,12 +74,20 @@ export default function MemoryPage() {
       {isLoading && <LoadingSpinner />}
 
       {memory && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left: explicit data + processing log (same on every tab) */}
-          <ExplicitPanel memory={memory} />
+        <div
+          className={
+            // Relations / Entity Pages / Retrieval Debug / Ops benefit from
+            // full width — the graph and JSON outputs need horizontal room.
+            // The Facts tab still pairs nicely with the explicit panel.
+            tab === "facts"
+              ? "grid grid-cols-1 lg:grid-cols-3 gap-6"
+              : "flex flex-col gap-6"
+          }
+        >
+          {tab === "facts" && <ExplicitPanel memory={memory} />}
 
           {/* Right: tab content */}
-          <div className="lg:col-span-2">
+          <div className={tab === "facts" ? "lg:col-span-2" : ""}>
             <div className="flex gap-2 mb-4 border-b border-border">
               {TABS.map((t) => (
                 <button

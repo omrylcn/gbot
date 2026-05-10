@@ -18,6 +18,8 @@ interface FilterBarProps {
   setEnabledCategories: (s: Set<RelationCategory>) => void;
   search: string;
   setSearch: (s: string) => void;
+  minDegree: number;
+  setMinDegree: (n: number) => void;
   nodeCount: number;
   totalNodes: number;
   edgeCount: number;
@@ -38,6 +40,8 @@ export function FilterBar({
   setEnabledCategories,
   search,
   setSearch,
+  minDegree,
+  setMinDegree,
   nodeCount,
   totalNodes,
   edgeCount,
@@ -124,7 +128,7 @@ export function FilterBar({
         })}
       </div>
 
-      {/* Search + counter + reset */}
+      {/* Search + min-degree slider + counter + reset */}
       <div className="flex flex-wrap items-center gap-3 pt-1">
         <div className="relative flex-1 min-w-[180px]">
           <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
@@ -144,6 +148,21 @@ export function FilterBar({
             </button>
           )}
         </div>
+
+        <label className="inline-flex items-center gap-2 text-xs text-muted">
+          Min ilişki
+          <input
+            type="range"
+            min={1}
+            max={5}
+            value={minDegree}
+            onChange={(e) => setMinDegree(Number(e.target.value))}
+            className="w-20 accent-primary"
+          />
+          <span className="w-3 text-center font-mono text-foreground">
+            {minDegree}
+          </span>
+        </label>
 
         <div className="text-xs text-muted">
           {nodeCount} / {totalNodes} node · {edgeCount} / {totalEdges} ilişki

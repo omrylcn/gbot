@@ -1,5 +1,4 @@
 import { X } from "lucide-react";
-import type { Edge } from "@xyflow/react";
 
 import type { MemoryRelation } from "@/api/admin";
 import {
@@ -12,10 +11,26 @@ import {
   type RelationCategory,
 } from "./entityType";
 
+/** Lightweight edge shape used by the panel — independent of the graph
+ *  rendering library so the panel doesn't have to import sigma/xyflow
+ *  types. The graph just needs to massage its native edge data into
+ *  this view-model. */
+export interface PanelEdge {
+  id: string;
+  source: string;
+  target: string;
+  label?: string;
+  data?: {
+    relation?: string;
+    confidence?: number;
+    category?: RelationCategory;
+  };
+}
+
 interface NodeDetailPanelProps {
   relations: readonly MemoryRelation[];
   entityTypeMap: Map<string, EntityType>;
-  edges: readonly Edge[];
+  edges: readonly PanelEdge[];
   selectedNodeId: string | null;
   selectedEdgeId: string | null;
   onClose: () => void;
@@ -158,7 +173,7 @@ function NodeDetail({
   );
 }
 
-function EdgeDetail({ edge }: { edge: Edge | undefined }) {
+function EdgeDetail({ edge }: { edge: PanelEdge | undefined }) {
   if (!edge) return <div className="text-xs text-muted">Edge bulunamadı.</div>;
   const data = (edge.data ?? {}) as {
     category?: RelationCategory;

@@ -16,7 +16,12 @@ export default defineConfig({
         // Faz 22I-C — split the relations graph deps into their own chunk
         // so they only load when the user opens the Memory page Graph view.
         manualChunks: (id) => {
-          if (id.includes("@xyflow/react") || id.includes("/dagre/")) {
+          if (
+            id.includes("/sigma/") ||
+            id.includes("@react-sigma") ||
+            id.includes("/graphology") ||
+            id.includes("/obliterator/")
+          ) {
             return "graph";
           }
         },

@@ -1,9 +1,11 @@
 # Memory Architecture
 
 GBot'un hafıza katmanı — şu an nasıl çalışıyor, planda ne var, araştırmaya
-göre ne eklenebilir. Faz 22A→22G (v1.16.0–v1.23.0) ile inşa edilen bu
+göre ne eklenebilir. Faz 22A→22I (v1.16.0–v1.25.1) ile inşa edilen bu
 katman, A-Mem akademik temeli ve Engram open-source çizgisiyle %95
 hizalı; Karpathy LLM-Wiki paterninden entity-page kavramını alıyor.
+v1.25.x dashboard tarafında ise Gephi-türevi `sigma.js` + `forceAtlas2`
+ile knowledge-graph standardına geçiş yapıldı.
 
 > **Pratik kullanım için** → `docs/memory-usage.md`. Bu dosya iç
 > mimari ve tasarım kararları odaklı; günlük operasyon ve config
@@ -473,25 +475,43 @@ extraction kontratını paylaşır. Per-user kişisel prompt'lama yok (Faz
 | 22E — Hardening + gbot-eval (Step 5) | v1.21.0 | Anthropic/Gemini prompt caching (cache_control breakpoint), otomatik daily/weekly maintenance cron schedule, LOCOMO-mini retrieval benchmark (`tests/memory_benchmark/`), session summary'lerine ARTIFACTS section, gbot-eval LLM evaluation framework (3 memory + 4 agent + 1 stress suite) |
 | 22E Step 5K — LiteLLM removal | v1.21.1 | OpenRouter SDK provider'a kesin geçiş; LiteLLM dead code silindi, `litellm` dep çıkarıldı (~50MB) |
 | 22F — gbot-eval YAML refactor | v1.22.0 | Suite definitions YAML'a taşındı (Python yerine), 22 scoring kind'lık DSL + restricted Python escape hatch, multi_turn coherence suite, OpenRouter `/api/v1/models` live pricing refresh, soft-dep import-guards, reasoning model auto-handling |
-| 22G — Memory roadmap (5 features) | v1.23.0 | 4-state lifecycle (ACTIVE/WEAK/INHIBITED/ARCHIVED) on memory_facts + auto state transitions in apply_decay + inhibit/restore admin endpoints, persona/style memory (`fact_type='style'` slow decay + USER STYLE block), D3/cytoscape relations graph viz in dashboard, Obsidian vault sync (entity pages → markdown export, opt-in cron), Engram-style LLM rerank (opt-in retrieval-time deep scoring with static fallback) |
+| 22G — Memory roadmap (5 features) | v1.23.0 | 4-state lifecycle (ACTIVE/WEAK/INHIBITED/ARCHIVED) on memory_facts + auto state transitions in apply_decay + inhibit/restore admin endpoints, persona/style memory (`fact_type='style'` slow decay + USER STYLE block), cytoscape relations graph viz in dashboard, Obsidian vault sync (entity pages → markdown export, opt-in cron), Engram-style LLM rerank (opt-in retrieval-time deep scoring with static fallback) |
+| 22H — Temporal awareness | v1.24.0 | Conversation history per-message timestamps + gap markers (>20min silence → `--- 12 gün geçti ---` system message), fact rendering `(12 gün önce)` relative age tags, session summary date header, runtime layer Turkish day-of-week + last activity gap. Result: agent no longer says "Zeynep mesaj attım" 12 days after the fact. |
+| 22H+ — gbot memory CLI | v1.24.1 | Direct DB-side CLI: `gbot memory stats/facts/inhibit/restore/decay/archive-old/forget`. Bypass admin token wall — same permission as the user running the CLI. `archive-old` invalidates facts older than N days regardless of access_count (fixes the "frequently-accessed stays forever" gap). |
+| 22H+ — User CRUD + cascade fix | v1.24.2 | `MemoryStore.delete_user` cascades through every per-user table (vec_memory_facts → memory_facts → 11 tables); was failing with FOREIGN KEY constraint after Faz 22A-G added new tables. Admin dashboard gains user create/edit/delete UI with type-to-confirm; CLI `gbot user remove` adds blast-radius prompt + `--yes` flag. |
+| 22I-A — Model registry + memory ops + canonical fix | v1.24.3 | `config/models.yaml` (22 models with per-model `thinking`/`max_tokens`/`pricing`/`reasoning_effort`); `gbot/core/config/model_registry.py` loader + `OpenRouterLLM.achat` resolves defaults from registry. `litellm.py` → `llm.py` rename (LiteLLM gone in v1.21.1, the facade name lingered as dead debt). Memory page **Ops** sub-tab: Maintenance Run Now / Obsidian Sync Now / scheduled-tasks table. Facts sub-tab: `state` column with active/weak/inhibited badges + per-row inhibit/restore icons. Owner canonical fix: `assistant.owner.name: "Owner" → "Ömer"`; backfilled 17 `memory_relations` rows; registered alias; graph collapses owner mentions into a single 41-relation node (was 3). Obsidian export gained surface-form `[[wikilink]]` injection (`Ömer/Kullanıcı/User → [[owner]]`) so Obsidian's graph view connects notes. AGENT.md gained explicit relations rule: emit only for persistent / habitual / structural bonds, never for one-off events. |
+| 22I-C — Modern relations graph | v1.25.0 → v1.25.1 | Dashboard relations viz fully rewritten. cytoscape 3 + cose-bilkent (looked dated, all nodes same color) → `@xyflow/react` v12 + dagre (looked like a staircase on hub-and-spoke data) → `@react-sigma/core` + sigma + graphology + **forceAtlas2** (Gephi-port, knowledge-graph standardı). 6 entity-type colours (rule-based derive from relation verb→role table), 5 relation-category edge colours, hover-fade neighbour highlight, FilterBar with type/category chips + name search + min-degree slider. Code-split into a 45 KB gz `graph` chunk loaded only when the user hits "Graph" view. |
 
-**Şu an: 434 unit test geçiyor. Memory layer canlı dogfood'da; PRAGMA
+**Şu an: 446 unit test geçiyor. Memory layer canlı dogfood'da; PRAGMA
 user_version=23.**
 
 ### Bekleyen / sonraki adımlar
 
-Faz 22A→22G ile memory roadmap'in TBD listesi tamamlandı. İleri adımlar:
+Faz 22A→22I ile memory roadmap'in TBD listesi büyük oranda kapandı.
+Geriye kalan başlıklar:
 
 1. **GDPR hard-delete + audit log** — `forget_entity(hard=True)` ile
    gerçek satır silimi + `memory_audit_log` separate file. Personal
-   asistan için non-blocker, multi-tenant SaaS için zorunlu.
+   asistan için non-blocker, multi-tenant SaaS için zorunlu. CLI
+   tarafı `gbot memory forget` zaten var; bu task hard-flag ekler.
 2. **GDPR data export endpoint** — `GET /admin/memory/{user}/export`
    ZIP olarak (Art. 20 portability).
 3. **Manual alias editing UI** — dashboard'da
    `memory_entity_aliases` düzenleme. Yanlış canonical eşleşmelerini
-   düzeltmek için.
+   düzeltmek için. v1.24.3'te owner canonical'ı elle SQL'le
+   düzeltildi; UI gelecekte tekrar düşmesin diye.
 4. **Dashboard user-facing vs internal split** — `min_confidence`
-   slider, "Senin hakkında ne biliyoruz" sade view.
+   slider, "Senin hakkında ne biliyoruz" sade view. Memory page'in
+   Ops sub-tab'ı operatör/admin için; user-facing sade view ayrı.
+5. **Source-fact provenance for relations** — `memory_relations.source_fact`
+   şu anda extraction yazımında doldurulmuyor (v1.24.3 audit'inde
+   tespit edildi). LLM'in çıkardığı her relation hangi fact'ten
+   türediğini bilmeli — bu olmadan retroactive cleanup ve "neden bu
+   relation?" sorgusu mümkün değil.
+6. **Episodic-source relation auto-archive** — AGENT.md prompt
+   kuralı v1.24.3'te eklendi ama mevcut DB'deki "tek-seferlik"
+   relation'ları geriye dönük temizleyen bir LLM pass yok. (Faz 22I-B
+   olarak parked.)
 
 ---
 
@@ -746,6 +766,67 @@ GBot'un memory layer kararları şu kaynaklardan beslenir:
 
 ---
 
+## 11.5 Model registry — per-call defaults (Faz 22I-A, v1.24.3)
+
+`config/models.yaml` her LLM call site için defaults taşır. Çağrı
+sırasında `gbot/core/config/model_registry.py:get_profile(model)`
+döndürür; `OpenRouterLLM.achat` arg yoksa registry'den çeker.
+
+```yaml
+# config/models.yaml — kısaltılmış
+defaults:
+  thinking: false
+  max_tokens: 4096
+  temperature: 0.7
+
+models:
+  openrouter/google/gemini-3-flash-preview:
+    thinking: false
+    pricing: { prompt: 0.075, completion: 0.30 }
+
+  openrouter/moonshotai/kimi-k2.6:
+    thinking: false
+    reasoning_effort: none      # default-thinking model — explicit off
+    pricing: { prompt: 0.12, completion: 0.24 }
+    notes: "Default-thinking; needs reasoning.effort=none"
+
+  openrouter/deepseek/deepseek-r1:
+    thinking: true              # pure-reasoning — required
+    reasoning_effort: medium
+    max_tokens: 8000
+    temperature: 1.0
+```
+
+**Lookup priority:** `caller arg > yaml models[id] > yaml defaults >
+hard-coded fallback`.
+
+**Niye var:** Faz 22I-A öncesinde her LLM call site kendi `max_tokens`
++ `thinking` defaults'ını hard-code'luyordu; yeni model eklemek 7
+yerde edit gerektiriyordu. Şimdi:
+
+- `MemoryService.summarize` / `_extract_typed_facts` / `_audn_decide`
+- `EntityPageCompiler._compile`
+- `DelegationPlanner.plan`
+- `LightAgent` runner
+- `MainAgent` LangGraph reason node
+
+hepsi aynı registry'i okuyor. Yeni model registry'ye 5 satır ekle, her
+yerde otomatik düzgün davranıyor.
+
+`gbot_eval/pricing.py` da aynı registry üzerine ince shim — eval
+runner'ları için canlı OpenRouter pricing dump'ı `pricing_overrides.json`
+dosyası YAML'ı override ediyor (CLI: `gbot-eval models refresh`).
+
+CLI:
+
+```bash
+gbot-eval models                    # list YAML + override entries
+gbot-eval models refresh            # pull live OpenRouter prices
+gbot-eval models add openrouter/foo/bar --prompt=0.5 --completion=2.0
+```
+
+---
+
 ## 12. Kalite ölçümü — `gbot-eval` (Faz 22E + 22F)
 
 Memory layer'ın LLM-yoğun adımları (extraction, AUDN, entity-page
@@ -773,10 +854,28 @@ gbot-eval baseline diff
 Ek olarak `tests/memory_benchmark/` LOCOMO-mini retrieval benchmark
 (recall@K, MRR) `pytest -m benchmark` ile koşar.
 
-**Baseline (gemini-3-flash, v1.23.0):**
+**Baseline (gemini-3-flash, v1.25.1):**
 - memory.extraction quality 0.80
 - memory.audn quality 0.93
 - memory.page_compile composite ~0.85
+- agent.delegation 1.00 (sample=20, p95 1.5 sn, $0.0006 / 5 case)
+- agent.instruction 1.00 (sample=30, hardest standalone suite)
+
+Karşılaştırma — non-thinking modellerle (Faz 22I-A registry üzerinden
+``reasoning.effort=none`` otomatik enjekte):
+
+| Model | Suite | Quality | p95 | $/run |
+|---|---|---|---|---|
+| `gemini-3-flash` | agent.delegation | 1.00 | 1.5 sn | $0.0006 |
+| `kimi-k2.6` | agent.delegation | 1.00 | 2.2 sn | $0.0054 |
+| `deepseek-v4-pro` | agent.delegation | 1.00 | 18.3 sn | $0.0045 |
+| `gemini-3-flash` | agent.instruction | 1.00 | 1.5 sn | $0.0008 |
+| `kimi-k2.6` | agent.instruction | 0.80 | 3.2 sn | $0.0015 |
+
+Production planner için Gemini 3 Flash baskın seçim. Pure-reasoning
+modeller (DeepSeek R1, V4 Pro/Flash, MiniMax M2.x) thinking
+zorunluluğu yüzünden 10-30x daha yavaş — sıcak yolda kullanılamaz, ama
+batch / offline maintenance için aday.
 
 Detay: `gbot_eval/README.md`.
 
@@ -792,7 +891,9 @@ Detay: `gbot_eval/README.md`.
 | Manuel test rehberi | `notes/test.md` |
 | Bu dosya (memory iç mimari) | `docs/memory-architecture.md` |
 | Memory pratik kullanım rehberi | `docs/memory-usage.md` |
-| Kod | `gbot/memory/` |
+| Memory kod | `gbot/memory/` |
 | Schema kontratı | `workspace/memory_schema.md` |
 | Memory agent prompt | `workspace/agents/memory/AGENT.md` |
+| Model registry (Faz 22I-A) | `config/models.yaml` + `gbot/core/config/model_registry.py` |
+| Dashboard sigma graph (Faz 22I-C) | `dashboard/src/components/relations/` |
 | LLM kalite ölçümü | `gbot_eval/README.md` |

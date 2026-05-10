@@ -1,22 +1,27 @@
-import { useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Background,
-  Controls,
-  MiniMap,
-  ReactFlow,
-  ReactFlowProvider,
-  type Edge,
-  type Node,
-  type NodeMouseHandler,
-  type EdgeMouseHandler,
-  MarkerType,
-} from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
+  ControlsContainer,
+  SigmaContainer,
+  useLoadGraph,
+  useRegisterEvents,
+  useSetSettings,
+  useSigma,
+  ZoomControl,
+  FullScreenControl,
+} from "@react-sigma/core";
+import "@react-sigma/core/lib/style.css";
+import { MultiDirectedGraph } from "graphology";
+import type { Attributes } from "graphology-types";
+import forceAtlas2 from "graphology-layout-forceatlas2";
 
 import { adminApi, type MemoryRelation } from "@/api/admin";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
-import { EntityNode, type EntityNodeData } from "./EntityNode";
 import {
   ALL_ENTITY_TYPES,
   ALL_RELATION_CATEGORIES,
@@ -27,17 +32,275 @@ import {
   type EntityType,
   type RelationCategory,
 } from "./entityType";
-import { layoutGraph } from "./layout";
 import { FilterBar } from "./FilterBar";
-import { NodeDetailPanel } from "./NodeDetailPanel";
+import { NodeDetailPanel, type PanelEdge } from "./NodeDetailPanel";
 
-const NODE_TYPES = { entity: EntityNode };
-
-interface RelationsGraphInnerProps {
+interface RelationsGraphProps {
   userId: string;
 }
 
-function RelationsGraphInner({ userId }: RelationsGraphInnerProps) {
+// ── Sigma settings (style + interaction) ──────────────────────
+const SIGMA_SETTINGS = {
+  // Default node renderer is "circle" — enough for our case.
+  defaultNodeColor: "#64748b",
+  defaultEdgeColor: "#475569",
+  defaultEdgeType: "arrow",
+  labelColor: { color: "#e2e8f0" },
+  labelSize: 12,
+  labelWeight: "500",
+  labelDensity: 1.2,
+  labelGridCellSize: 80,
+  labelRenderedSizeThreshold: 6,
+  // Drag, hover, edge fade nicely.
+  enableEdgeEvents: true,
+  renderEdgeLabels: false,
+  zIndex: true,
+};
+
+interface BuildArgs {
+  relations: readonly MemoryRelation[];
+  entityTypeMap: Map<string, EntityType>;
+  enabledTypes: Set<EntityType>;
+  enabledCategories: Set<RelationCategory>;
+  search: string;
+  minDegree: number;
+  hoveredNode: string | null;
+}
+
+/**
+ * Build a graphology Graph for the visible (filtered) subset of
+ * relations. Pure function so it can be memoised.
+ */
+function buildGraph(args: BuildArgs): {
+  graph: MultiDirectedGraph;
+  totalNodes: number;
+  totalEdges: number;
+  visibleNodes: number;
+  visibleEdges: number;
+} {
+  const {
+    relations,
+    entityTypeMap,
+    enabledTypes,
+    enabledCategories,
+    search,
+    minDegree,
+    hoveredNode,
+  } = args;
+
+  // ── Pre-pass: count degree across ALL relations (so the slider
+  //   threshold matches the user's mental model regardless of
+  //   category filter that runs later). ──────────────────────
+  const totalDegree = new Map<string, number>();
+  for (const r of relations) {
+    const s = r.canonical_source || r.source_entity;
+    const t = r.canonical_target || r.target_entity;
+    if (s) totalDegree.set(s, (totalDegree.get(s) ?? 0) + 1);
+    if (t) totalDegree.set(t, (totalDegree.get(t) ?? 0) + 1);
+  }
+
+  const lowerSearch = search.trim().toLowerCase();
+
+  // ── First filter: nodes that survive type + min-degree + search ──
+  const candidateIds = new Set<string>();
+  for (const [id, deg] of totalDegree) {
+    const type = entityTypeMap.get(id) ?? "unknown";
+    if (!enabledTypes.has(type)) continue;
+    if (deg < minDegree) continue;
+    if (lowerSearch && !id.toLowerCase().includes(lowerSearch)) continue;
+    candidateIds.add(id);
+  }
+
+  // ── Second filter: edges where both endpoints are candidates AND
+  //   category is enabled ────────────────────────────────────
+  const validRelations: MemoryRelation[] = [];
+  for (const r of relations) {
+    const s = r.canonical_source || r.source_entity;
+    const t = r.canonical_target || r.target_entity;
+    if (!candidateIds.has(s) || !candidateIds.has(t)) continue;
+    const cat = getRelationCategory(r.relation);
+    if (!enabledCategories.has(cat)) continue;
+    validRelations.push(r);
+  }
+
+  // ── Visible degree (post-filter) — used for radius sizing ──
+  const visibleDegree = new Map<string, number>();
+  for (const r of validRelations) {
+    const s = r.canonical_source || r.source_entity;
+    const t = r.canonical_target || r.target_entity;
+    visibleDegree.set(s, (visibleDegree.get(s) ?? 0) + 1);
+    visibleDegree.set(t, (visibleDegree.get(t) ?? 0) + 1);
+  }
+
+  const graph = new MultiDirectedGraph();
+
+  // Hovered node + neighbours: full opacity. Everything else dims.
+  const neighbours = new Set<string>();
+  if (hoveredNode) {
+    neighbours.add(hoveredNode);
+    for (const r of validRelations) {
+      const s = r.canonical_source || r.source_entity;
+      const t = r.canonical_target || r.target_entity;
+      if (s === hoveredNode) neighbours.add(t);
+      if (t === hoveredNode) neighbours.add(s);
+    }
+  }
+
+  for (const id of candidateIds) {
+    const type = entityTypeMap.get(id) ?? "unknown";
+    const deg = visibleDegree.get(id) ?? 0;
+    // Sigma uses node `size` directly as radius in pixels (logic units).
+    // Range 6 (small) → 28 (hub). Log scale so a 40-rel hub doesn't
+    // dwarf a 2-rel node.
+    const size =
+      deg <= 1
+        ? 6
+        : deg >= 30
+          ? 28
+          : 6 + (Math.log(deg) / Math.log(30)) * 22;
+    const isFaded = hoveredNode !== null && !neighbours.has(id);
+    graph.addNode(id, {
+      x: Math.random(), // forceAtlas2 will refine these
+      y: Math.random(),
+      size,
+      label: id,
+      color: ENTITY_COLOR[type],
+      type: "circle",
+      entityType: type,
+      relationCount: deg,
+      hidden: false,
+      forceLabel: deg >= 8 || hoveredNode === id,
+      labelColor: isFaded ? "#475569" : "#e2e8f0",
+      // Custom colour fade (used by `nodeReducer` below).
+      faded: isFaded,
+    });
+  }
+
+  for (const r of validRelations) {
+    const s = r.canonical_source || r.source_entity;
+    const t = r.canonical_target || r.target_entity;
+    const cat = getRelationCategory(r.relation);
+    const color = RELATION_COLOR[cat];
+    const isFaded =
+      hoveredNode !== null && !(neighbours.has(s) && neighbours.has(t));
+    graph.addEdgeWithKey(r.relation_id, s, t, {
+      type: "arrow",
+      size: 1.2,
+      color,
+      label: r.relation,
+      relation: r.relation,
+      category: cat,
+      confidence: r.confidence,
+      faded: isFaded,
+    });
+  }
+
+  // ── Apply forceAtlas2 layout synchronously ──
+  if (graph.order > 1) {
+    forceAtlas2.assign(graph, {
+      iterations: 250,
+      settings: {
+        gravity: 1.2,
+        scalingRatio: 12,
+        slowDown: 4,
+        adjustSizes: true,
+        barnesHutOptimize: graph.order > 80,
+        linLogMode: false,
+        outboundAttractionDistribution: false,
+        edgeWeightInfluence: 0,
+        strongGravityMode: false,
+      },
+    });
+  }
+
+  return {
+    graph,
+    totalNodes: totalDegree.size,
+    totalEdges: relations.length,
+    visibleNodes: candidateIds.size,
+    visibleEdges: validRelations.length,
+  };
+}
+
+/** Loads the graph + applies fade reducer based on hovered node. */
+function GraphLoader({
+  graph,
+}: {
+  graph: MultiDirectedGraph;
+}) {
+  const loadGraph = useLoadGraph();
+  const setSettings = useSetSettings();
+
+  useEffect(() => {
+    loadGraph(graph);
+  }, [graph, loadGraph]);
+
+  useEffect(() => {
+    setSettings({
+      nodeReducer: (_node, data) => {
+        if (data.faded) {
+          return {
+            ...data,
+            color: `${data.color as string}33`,
+            label: undefined,
+          };
+        }
+        return data;
+      },
+      edgeReducer: (_edge, data) => {
+        if (data.faded) {
+          return { ...data, hidden: true };
+        }
+        return { ...data, color: `${data.color as string}88` };
+      },
+    });
+  }, [setSettings]);
+
+  return null;
+}
+
+/** Wires hover, click, pane-click, etc. */
+function GraphEvents({
+  setHoveredNode,
+  setSelectedNode,
+  setSelectedEdge,
+}: {
+  setHoveredNode: (id: string | null) => void;
+  setSelectedNode: (id: string | null) => void;
+  setSelectedEdge: (id: string | null) => void;
+}) {
+  const sigma = useSigma();
+  const registerEvents = useRegisterEvents();
+
+  useEffect(() => {
+    registerEvents({
+      enterNode: (event) => {
+        setHoveredNode(event.node);
+        sigma.getContainer().style.cursor = "pointer";
+      },
+      leaveNode: () => {
+        setHoveredNode(null);
+        sigma.getContainer().style.cursor = "default";
+      },
+      clickNode: (event) => {
+        setSelectedNode(event.node);
+        setSelectedEdge(null);
+      },
+      clickEdge: (event) => {
+        setSelectedEdge(event.edge);
+        setSelectedNode(null);
+      },
+      clickStage: () => {
+        setSelectedNode(null);
+        setSelectedEdge(null);
+      },
+    });
+  }, [registerEvents, sigma, setHoveredNode, setSelectedNode, setSelectedEdge]);
+
+  return null;
+}
+
+export function RelationsGraph({ userId }: RelationsGraphProps) {
   const { data, isLoading } = useQuery({
     queryKey: ["memory-relations", userId, "graph"],
     queryFn: () => adminApi.getMemoryRelations(userId),
@@ -48,13 +311,11 @@ function RelationsGraphInner({ userId }: RelationsGraphInnerProps) {
     [data?.relations],
   );
 
-  // Derive entity types once per relations refresh.
   const entityTypeMap = useMemo(
     () => deriveEntityTypes(allRelations),
     [allRelations],
   );
 
-  // ── Filter state ──────────────────────────────────────────
   const [enabledTypes, setEnabledTypes] = useState<Set<EntityType>>(
     () => new Set(ALL_ENTITY_TYPES),
   );
@@ -62,179 +323,75 @@ function RelationsGraphInner({ userId }: RelationsGraphInnerProps) {
     Set<RelationCategory>
   >(() => new Set(ALL_RELATION_CATEGORIES));
   const [search, setSearch] = useState("");
+  const [minDegree, setMinDegree] = useState(2);
+  const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
 
   const isFiltered =
     enabledTypes.size !== ALL_ENTITY_TYPES.length ||
     enabledCategories.size !== ALL_RELATION_CATEGORIES.length ||
-    search.trim() !== "";
+    search.trim() !== "" ||
+    minDegree !== 2;
 
   const resetFilters = () => {
     setEnabledTypes(new Set(ALL_ENTITY_TYPES));
     setEnabledCategories(new Set(ALL_RELATION_CATEGORIES));
     setSearch("");
+    setMinDegree(2);
   };
 
-  // ── Build candidate nodes + edges ────────────────────────
-  const { allNodes, allEdges } = useMemo(() => {
-    const nodeMap = new Map<string, { count: number }>();
-    for (const r of allRelations) {
-      const src = r.canonical_source || r.source_entity;
-      const tgt = r.canonical_target || r.target_entity;
-      if (src) nodeMap.set(src, { count: (nodeMap.get(src)?.count ?? 0) + 1 });
-      if (tgt) nodeMap.set(tgt, { count: (nodeMap.get(tgt)?.count ?? 0) + 1 });
-    }
-
-    const nodes: Node[] = Array.from(nodeMap.entries()).map(
-      ([id, { count }]) => ({
-        id,
-        type: "entity",
-        position: { x: 0, y: 0 },
-        data: {
-          label: id,
-          entityType: entityTypeMap.get(id) ?? "unknown",
-          relationCount: count,
-        } as EntityNodeData,
-      }),
-    );
-
-    const edges: Edge[] = allRelations.map((r) => {
-      const src = r.canonical_source || r.source_entity;
-      const tgt = r.canonical_target || r.target_entity;
-      const category = getRelationCategory(r.relation);
-      const color = RELATION_COLOR[category];
-      return {
-        id: r.relation_id,
-        source: src,
-        target: tgt,
-        label: r.relation,
-        type: "smoothstep",
-        animated: false,
-        style: {
-          stroke: color,
-          strokeWidth: 1 + (r.confidence ?? 0.5) * 2,
-          opacity: 0.7,
-        },
-        labelStyle: {
-          fontSize: 10,
-          fill: color,
-          fontWeight: 500,
-        },
-        labelBgStyle: {
-          fill: "var(--card)",
-          fillOpacity: 0.9,
-        },
-        labelBgPadding: [3, 1] as [number, number],
-        labelBgBorderRadius: 4,
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          color,
-          width: 14,
-          height: 14,
-        },
-        data: { category, relation: r.relation, confidence: r.confidence },
-      } as Edge;
-    });
-
-    return { allNodes: nodes, allEdges: edges };
-  }, [allRelations, entityTypeMap]);
-
-  // ── Apply filters ────────────────────────────────────────
-  const { filteredNodes, filteredEdges } = useMemo(() => {
-    const lowerSearch = search.trim().toLowerCase();
-    const survivingIds = new Set<string>();
-    const nodeFiltered = allNodes.filter((n) => {
-      const d = n.data as EntityNodeData;
-      if (!enabledTypes.has(d.entityType)) return false;
-      if (
-        lowerSearch &&
-        !d.label.toLowerCase().includes(lowerSearch)
-      ) {
-        return false;
-      }
-      survivingIds.add(n.id);
-      return true;
-    });
-
-    const edgeFiltered = allEdges.filter((e) => {
-      if (!survivingIds.has(e.source) || !survivingIds.has(e.target)) {
-        return false;
-      }
-      const cat = (e.data?.category ?? "other") as RelationCategory;
-      return enabledCategories.has(cat);
-    });
-
-    // Drop any node that has no surviving edges and is not isolate-default
-    // — actually we keep them so isolated entities still appear, but cull
-    // ones that lost all their edges due to category filter.
-    const kept = new Set<string>();
-    for (const e of edgeFiltered) {
-      kept.add(e.source);
-      kept.add(e.target);
-    }
-    // If category filter removed every edge, keep all surviving nodes
-    // anyway so the user sees what's still there.
-    const keepAllNodes = edgeFiltered.length === 0;
-    const finalNodes = keepAllNodes
-      ? nodeFiltered
-      : nodeFiltered.filter(
-          (n) =>
-            kept.has(n.id) ||
-            (n.data as EntityNodeData).relationCount === 0,
-        );
-
-    return { filteredNodes: finalNodes, filteredEdges: edgeFiltered };
-  }, [allNodes, allEdges, enabledTypes, enabledCategories, search]);
-
-  // ── Layout ───────────────────────────────────────────────
-  const layoutKey = useMemo(
+  // Re-derive the layout-ready graph when any input changes. Hovered
+  // node deliberately NOT in deps (we use sigma's nodeReducer for
+  // hover dim instead of rebuilding the whole layout).
+  const built = useMemo(
     () =>
-      filteredNodes
-        .map((n) => n.id)
-        .sort()
-        .join("|") +
-      "::" +
-      filteredEdges
-        .map((e) => e.id)
-        .sort()
-        .join("|"),
-    [filteredNodes, filteredEdges],
+      buildGraph({
+        relations: allRelations,
+        entityTypeMap,
+        enabledTypes,
+        enabledCategories,
+        search,
+        minDegree,
+        hoveredNode: null,
+      }),
+    [
+      allRelations,
+      entityTypeMap,
+      enabledTypes,
+      enabledCategories,
+      search,
+      minDegree,
+    ],
   );
 
-  const positionedNodes = useMemo(
-    () => layoutGraph(filteredNodes, filteredEdges),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [layoutKey],
+  // For the side panel: reuse the original allRelations for context
+  // (some relations may be filtered out of the graph but the user
+  // might still want to see them in the detail listing).
+  const allEdgesForPanel = useMemo<PanelEdge[]>(
+    () =>
+      allRelations.map((r) => ({
+        id: r.relation_id,
+        source: r.canonical_source || r.source_entity,
+        target: r.canonical_target || r.target_entity,
+        label: r.relation,
+        data: {
+          relation: r.relation,
+          confidence: r.confidence,
+          category: getRelationCategory(r.relation),
+        },
+      })),
+    [allRelations],
   );
 
-  // Add `selected` / `dimmed` flags to node data for styling.
-  const renderedNodes = useMemo(() => {
-    return positionedNodes.map((n) => ({
-      ...n,
-      data: {
-        ...(n.data as EntityNodeData),
-        selected: n.id === selectedNode,
-      },
-    }));
-  }, [positionedNodes, selectedNode]);
-
-  const onNodeClick: NodeMouseHandler = (_, node) => {
-    setSelectedNode(node.id);
-    setSelectedEdge(null);
-  };
-  const onEdgeClick: EdgeMouseHandler = (_, edge) => {
-    setSelectedEdge(edge.id);
-    setSelectedNode(null);
-  };
-  const onPaneClick = () => {
-    setSelectedNode(null);
-    setSelectedEdge(null);
-  };
+  // Reapply hover state via sigma's nodeReducer hook — we update the
+  // graph attributes in-place to flip `faded` flags. This avoids a
+  // full forceAtlas2 re-layout on every hover.
+  const containerRef = useRef<HTMLDivElement>(null);
 
   if (isLoading) return <LoadingSpinner />;
 
-  if (allNodes.length === 0) {
+  if (built.totalNodes === 0) {
     return (
       <div className="flex h-[480px] items-center justify-center rounded-xl border border-border bg-card text-sm text-muted">
         Bu kullanıcı için henüz relation yok.
@@ -251,54 +408,44 @@ function RelationsGraphInner({ userId }: RelationsGraphInnerProps) {
         setEnabledCategories={setEnabledCategories}
         search={search}
         setSearch={setSearch}
-        nodeCount={filteredNodes.length}
-        totalNodes={allNodes.length}
-        edgeCount={filteredEdges.length}
-        totalEdges={allEdges.length}
+        minDegree={minDegree}
+        setMinDegree={setMinDegree}
+        nodeCount={built.visibleNodes}
+        totalNodes={built.totalNodes}
+        edgeCount={built.visibleEdges}
+        totalEdges={built.totalEdges}
         isFiltered={isFiltered}
         onReset={resetFilters}
       />
 
-      <div className="relative h-[600px] overflow-hidden rounded-xl border border-border bg-card">
-        <ReactFlow
-          nodes={renderedNodes}
-          edges={filteredEdges}
-          nodeTypes={NODE_TYPES}
-          onNodeClick={onNodeClick}
-          onEdgeClick={onEdgeClick}
-          onPaneClick={onPaneClick}
-          fitView
-          fitViewOptions={{ padding: 0.2, maxZoom: 1.2 }}
-          minZoom={0.2}
-          maxZoom={2}
-          proOptions={{ hideAttribution: true }}
-          nodesDraggable
-          panOnDrag
-          zoomOnScroll
+      <div
+        ref={containerRef}
+        className="relative h-[78vh] min-h-[560px] overflow-hidden rounded-xl border border-border bg-card"
+      >
+        <SigmaContainer
+          style={{ height: "100%", width: "100%", background: "transparent" }}
+          settings={SIGMA_SETTINGS}
+          graph={MultiDirectedGraph}
         >
-          <Background gap={24} size={1} color="#334155" />
-          <Controls
-            showInteractive={false}
-            className="!rounded-lg !border-border !bg-card"
+          <GraphLoader graph={built.graph} />
+          <GraphEvents
+            setHoveredNode={setHoveredNode}
+            setSelectedNode={setSelectedNode}
+            setSelectedEdge={setSelectedEdge}
           />
-          <MiniMap
-            nodeColor={(n) =>
-              ENTITY_COLOR[
-                ((n.data as EntityNodeData)?.entityType ?? "unknown") as EntityType
-              ]
-            }
-            nodeStrokeWidth={2}
-            maskColor="rgba(15, 23, 42, 0.6)"
-            className="!rounded-lg !border-border !bg-card"
-          />
-        </ReactFlow>
+          <HoverFader hoveredNode={hoveredNode} />
+          <ControlsContainer position={"bottom-right"}>
+            <ZoomControl />
+            <FullScreenControl />
+          </ControlsContainer>
+        </SigmaContainer>
 
         <NodeDetailPanel
           relations={allRelations}
           entityTypeMap={entityTypeMap}
+          edges={allEdgesForPanel}
           selectedNodeId={selectedNode}
           selectedEdgeId={selectedEdge}
-          edges={allEdges}
           onClose={() => {
             setSelectedNode(null);
             setSelectedEdge(null);
@@ -309,12 +456,43 @@ function RelationsGraphInner({ userId }: RelationsGraphInnerProps) {
   );
 }
 
-export function RelationsGraph(props: RelationsGraphInnerProps) {
-  return (
-    <ReactFlowProvider>
-      <RelationsGraphInner {...props} />
-    </ReactFlowProvider>
-  );
+/**
+ * Watches `hoveredNode` and updates each node/edge's `faded` attribute
+ * in-place so the nodeReducer/edgeReducer in GraphLoader picks it up.
+ * Avoids a full graph rebuild on hover.
+ */
+function HoverFader({ hoveredNode }: { hoveredNode: string | null }) {
+  const sigma = useSigma();
+  useEffect(() => {
+    const graph = sigma.getGraph();
+    if (!hoveredNode) {
+      graph.forEachNode((_id: string, attrs: Attributes) => {
+        attrs.faded = false;
+      });
+      graph.forEachEdge((_id: string, attrs: Attributes) => {
+        attrs.faded = false;
+      });
+      sigma.refresh();
+      return;
+    }
+    const neighbourSet = new Set<string>([hoveredNode]);
+    graph.forEachEdge(
+      (_id: string, _attrs: Attributes, source: string, target: string) => {
+        if (source === hoveredNode) neighbourSet.add(target);
+        if (target === hoveredNode) neighbourSet.add(source);
+      },
+    );
+    graph.forEachNode((id: string, attrs: Attributes) => {
+      attrs.faded = !neighbourSet.has(id);
+    });
+    graph.forEachEdge(
+      (_id: string, attrs: Attributes, source: string, target: string) => {
+        attrs.faded = !(neighbourSet.has(source) && neighbourSet.has(target));
+      },
+    );
+    sigma.refresh();
+  }, [sigma, hoveredNode]);
+  return null;
 }
 
 export default RelationsGraph;
