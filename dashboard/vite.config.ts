@@ -10,6 +10,19 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Faz 22I-C — split the relations graph deps into their own chunk
+        // so they only load when the user opens the Memory page Graph view.
+        manualChunks: (id) => {
+          if (id.includes("@xyflow/react") || id.includes("/dagre/")) {
+            return "graph";
+          }
+        },
+      },
+    },
+  },
   server: {
     port: 3001,
     proxy: {

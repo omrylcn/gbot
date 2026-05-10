@@ -6,6 +6,77 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.25.0] - 2026-05-10 — Faz 22I-C: Modern Relations Graph (cytoscape → @xyflow/react)
+
+Dashboard'daki ilişki grafiği komple yeniden yazıldı. Cytoscape 3 +
+cose-bilkent yerine **@xyflow/react v12 + dagre** kullanılıyor; tüm
+node'lar aynı koyu renkti ve cluster'lar yığılıyordu — şimdi entity
+tiplerine göre 6 farklı renk, ilişki kategorilerine göre 5 edge rengi,
+deterministic LR-layered layout ve filtre çubuğu var.
+
+### Added — Custom node + entity type derivation
+
+- ``dashboard/src/components/relations/entityType.ts`` — verb→role
+  tablosundan rule-based ``deriveEntityTypes()``. Person /
+  organization / place / product / topic / unknown 6 tip; Tailwind-500
+  paleti dark-mode safe. ``getRelationCategory()`` ile professional /
+  social / spatial / ownership / other 5 kategori.
+- ``EntityNode.tsx`` — custom react-flow node: tip rengiyle üst bar +
+  canonical ad + tip etiketi + relation count pill. Hover/selected
+  ring + scale state. Truncate + native title for long labels.
+- LLM call yok, backend dependency yok. Memoize ``Map<canonical,
+  EntityType>`` data refresh başına bir kere.
+
+### Added — Layout + Filter UX
+
+- ``layout.ts`` — dagre LR layered layout. Isolated node'lar (relation
+  count 0) ana flow'a girmiyor, bottom-left 3-column grid'e gidiyor.
+  Connected subgraph dagre algoritmasından geçiyor (``ranksep: 80,
+  nodesep: 30``).
+- ``FilterBar.tsx`` — 6 entity-type chip + 5 relation-category chip +
+  isim arama (200ms debounce). Reset link aktif filtre varsa
+  görünür. Sağda ``X / Y node · A / B edge`` counter.
+- ``NodeDetailPanel.tsx`` — sağ-üst floating panel (288px), node/edge
+  click ile dolar. Node'da: tip badge + relation count + top 12
+  ilişki listesi (yön ok'u + kategori rengi). Edge'de: source →
+  target + verb + confidence + edge id.
+
+### Performance — code splitting
+
+@xyflow/react + dagre ayrı **graph** chunk'ında: 266KB (gz 85KB).
+``React.lazy`` ile ``RelationsGraph`` Memory tab'ı açılınca değil,
+sadece "Graph" toggle'ında yükleniyor. Vite ``manualChunks``
+fonksiyonu ile bundle ayrımı:
+
+```
+dist/assets/index-*.js          364KB / 107KB gz   (main)
+dist/assets/graph-*.js          266KB /  85KB gz   (xyflow + dagre)
+dist/assets/RelationsGraph-*.js  14KB /   5KB gz   (component)
+dist/assets/graph-*.css          15KB /   3KB gz   (xyflow theme)
+```
+
+### Removed
+
+- ``dashboard/package.json``: ``cytoscape``, ``cytoscape-cose-bilkent``,
+  ``react-cytoscapejs`` (3 paket)
+- ``dashboard/src/components/RelationsGraph.tsx`` (eski cytoscape
+  versiyonu — yeni dosya ``relations/RelationsGraph.tsx`` altında)
+
+### Tests
+
+Backend değişikliği yok, 446 pytest hâlâ geçer. Dashboard tarafı manuel
+smoke: 62-entity owner graph'ı LR layout'ta no-overlap render olur,
+type chip'leri filtreliyor, isim arama gerçek zamanlı, node tıklama
+sidebar'ı dolduruyor, edge'ler kategori rengiyle renklendi.
+
+### Migration
+
+Cytoscape kaldırıldı, otomatik geçiş. Browser hard-refresh gerekmiyor
+(v1.24.3'te eklenen ``no-cache`` index.html header'ı sayesinde yeni
+bundle anında geçiyor).
+
+---
+
 ## [1.24.3] - 2026-05-10 — Faz 22I-A: Model registry + reasoning routing + memory ops dashboard
 
 Two-front bug-fix-and-foundation release. Front 1 closes the

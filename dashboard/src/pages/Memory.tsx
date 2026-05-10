@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Suspense, lazy, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { EyeOff, RotateCcw, Play, FileDown } from "lucide-react";
 
@@ -6,7 +6,13 @@ import { adminApi, type MemoryFact } from "@/api/admin";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { Badge } from "@/components/shared/Badge";
-import { RelationsGraph } from "@/components/RelationsGraph";
+// Lazy-loaded — react-flow + dagre live in their own chunk so they
+// only download when the user opens Memory → Relations → Graph view.
+const RelationsGraph = lazy(() =>
+  import("@/components/relations/RelationsGraph").then((m) => ({
+    default: m.RelationsGraph,
+  })),
+);
 import { formatDate } from "@/lib/utils";
 
 const FACT_TYPES = [
@@ -384,7 +390,11 @@ function RelationsTab({ userId }: { userId: string }) {
         ))}
       </div>
 
-      {view === "graph" && <RelationsGraph userId={userId} />}
+      {view === "graph" && (
+        <Suspense fallback={<LoadingSpinner />}>
+          <RelationsGraph userId={userId} />
+        </Suspense>
+      )}
 
       {view === "table" && (
       <div className="space-y-4">
