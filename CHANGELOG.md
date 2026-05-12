@@ -6,6 +6,41 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.25.2] - 2026-05-12 — Memory bootstrap owner-only
+
+Hotfix: `_ensure_maintenance_jobs` and `_ensure_obsidian_jobs` were
+registering tasks for **every** user in the DB on startup. Non-owner
+users (testuser, ihsan, murat, zynp — placeholders or passive partner
+accounts) accumulated empty no-op sync runs that polluted the
+dashboard task log and gave the false impression of activity.
+
+Worse: deleting a non-owner task from the dashboard or DB was futile —
+the next `docker compose restart gbot` recreated it.
+
+### Changed — Bootstrap filter
+
+Both bootstrap functions now `continue` when `user.role != "owner"`.
+Personal-assistant mode rationale: only the owner runs the active
+extraction/dogfood loop; partner accounts are message-only endpoints
+without facts to maintain. If multi-tenant memory becomes a real
+requirement, the filter becomes a config flag.
+
+### Cleanup
+
+- 12 non-owner memory tasks deleted from `background_tasks`
+  (4 users × 3 tasks)
+- 300 orphaned rows purged from `task_executions`
+- `obsidian-sync-owner` resurrected from `cancelled` → `pending`
+
+### Verification
+
+After rebuild + force-recreate:
+- owner memory tasks: 3 (expected)
+- non-owner memory tasks: 0 (expected)
+- Container start log no longer reports the per-non-owner registrations
+
+---
+
 ## [1.25.1] - 2026-05-10 — Faz 22I-C: Sigma migration + memory docs refresh
 
 Hotfix release tightening Faz 22I-C. The xyflow + dagre layout that

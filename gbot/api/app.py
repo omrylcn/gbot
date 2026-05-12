@@ -124,6 +124,13 @@ def _ensure_maintenance_jobs(config, db) -> None:
     skipped = 0
     for user in db.list_users():
         user_id = user["user_id"] if isinstance(user, dict) else user
+        role = user.get("role") if isinstance(user, dict) else None
+        # Faz 22I+ — memory maintenance only for owner. Non-owner users
+        # tend not to be active dogfood targets (test accounts, partner
+        # users that only message via WhatsApp etc.), and the cron jobs
+        # accumulate empty no-op runs that pollute the dashboard.
+        if role != "owner":
+            continue
 
         # Daily
         daily_id = f"daily-maintenance-{user_id}"
@@ -185,6 +192,12 @@ def _ensure_obsidian_jobs(config, db) -> None:
     skipped = 0
     for user in db.list_users():
         user_id = user["user_id"] if isinstance(user, dict) else user
+        role = user.get("role") if isinstance(user, dict) else None
+        # Faz 22I+ — Obsidian export only for owner (same rationale as
+        # maintenance bootstrap above). Non-owner pages don't get
+        # synced to disk by default.
+        if role != "owner":
+            continue
         task_id = f"obsidian-sync-{user_id}"
         if not db.get_task(task_id):
             db.create_task(
