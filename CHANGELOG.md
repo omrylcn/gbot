@@ -6,6 +6,84 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.26.1] - 2026-05-13 — Faz 22J follow-ups (tiktoken, eval suite, dashboard versions)
+
+Four follow-ups landed in the same session as the v1.26.0 ship, kept
+under a patch release so the upgrade path stays linear.
+
+### Added — tiktoken default dep
+
+``tiktoken>=0.7.0`` moved from "optional fallback" to a real
+``dependencies`` entry. ``gbot.core.tokens`` already supports the
+char/4 fallback, so this is a no-op for anyone who can't install
+the wheel; for everyone else, page-budget enforcement now uses the
+``cl100k_base`` encoder and is within ~10% of the Anthropic / Gemini
+tokenisers. Live measurement on a Turkish sentence:
+  - Before: ``"Zeynep ile Akasya AVM'ye gittik"`` → 7 tokens (char/4)
+  - After: 15 tokens (BPE)
+
+### Added — ``gbot-eval memory.page_incremental`` suite
+
+The 22J-A incremental compile path now has a dedicated regression
+suite. 3 cases:
+  - ``inc01`` — append a new bullet without rewriting anything
+  - ``inc02`` — contradicting fact must move old claim to ``## History``
+  - ``inc03`` — episodic addition lands in ``## Interactions``
+
+Composite score: 40% verbatim_keep + 30% delta_cited + 15%
+history_move + 15% section_intact. ``gemini-3-flash`` scored **1.00**
+on the full suite (511/176 tokens avg, p95 2.9 s, $0.0024).
+
+### Added — Dashboard "Versions" drawer
+
+Memory → Entity Pages tab gained:
+  - **Versions** button per page → side-by-side history drawer
+    (version list + selected content_md). Compile kind colour-coded
+    (full=blue, incremental=emerald, lint=orange). Shows token
+    budget, output tokens, delta count, section_diff.
+  - **Reindex** top-bar button → calls ``POST /pages/reindex`` to
+    backfill missing embeddings (Faz 22J-B helper, was admin-only).
+  - **Lint** top-bar button → manual lint pass (stale citations +
+    orphan pages).
+  - **size_bucket** badge next to version on each page card so the
+    operator can spot which adaptive bucket the page is in (small /
+    medium / large / owner).
+  - **entity_weight** display next to fact/relation counts.
+
+``MemoryEntityPage`` + new ``MemoryEntityPageVersion`` types added to
+``dashboard/src/api/admin.ts``. ``getPageVersions`` / ``reindexPages``
+/ ``lintPages`` API wrappers.
+
+### Fixed — ``vec_entity_pages`` UNIQUE constraint on re-embed
+
+``MemoryStore.upsert_page_embedding`` was using ``INSERT OR REPLACE``
+against the sqlite-vec virtual table — not honoured uniformly across
+``sqlite-vec`` versions, so a re-embed after the first compile failed
+with ``UNIQUE constraint failed on primary key`` and silently kept
+the old embedding. Replaced with explicit DELETE + INSERT, mirroring
+the ``vec_memory_facts`` refresh pattern.
+
+### Data — Legacy pages refreshed
+
+The 4 owner-account pages that pre-dated v1.26.0 (owner, Murat,
+WhatsApp, TriAttention) were manually recompiled into the new
+4-section template, joining Zeynep which had already been refreshed
+during 22J-A smoke. All 5 pages now report:
+  - owner v4 — bucket=owner, weight=5.06
+  - Zeynep v4 — bucket=medium, weight=4.37
+  - Murat v2 — bucket=medium, weight=4.61
+  - TriAttention v2 — bucket=medium, weight=2.14
+  - WhatsApp v2 — bucket=small, weight=0.86
+And every page now has an ``Lead / Profile / Interactions / History``
+section structure, version-history snapshot, and a fresh embedding.
+
+### Tests
+
+446 pytest green, identical to v1.26.0. ``memory.page_incremental``
+adds a new eval target; not part of pytest.
+
+---
+
 ## [1.26.0] - 2026-05-13 — Faz 22J: Living Wiki Pages + Dynamic Retrieval + 10k Context
 
 Three independently shippable alt-fases land together as v1.26.0.

@@ -1,0 +1,120 @@
+name: memory.page_incremental
+description: |
+  Faz 22J-A — incremental entity-page update quality. Each case feeds
+  an existing four-section page plus 1-3 delta facts and scores the
+  LLM's update: did it keep the old text verbatim, cite the new
+  fact_ids, move contradicted claims to ## History, and preserve all
+  four section headers?
+runner: memory_page_incremental
+requires_gbot: true
+default_max_tokens: 1500
+default_temperature: 0.2
+
+cases:
+- id: inc01
+  _intent: append a new bullet without rewriting anything
+  entity: Murat
+  aliases: [Murat]
+  today: "2026-05-13"
+  existing_page_md: |
+    ## Lead
+    Murat is a software developer who works on the same team as the user. He lives in Ankara and contributes to mobile projects.
+
+    ## Profile
+    - Murat works at HangiKredi alongside the user [fact_id:9a2b3c4d]
+    - Murat lives in Ankara [fact_id:1e2f3a4b]
+    - Murat uses SQLite for personal projects [fact_id:5c6d7e8f]
+
+    ## Interactions
+    - 2026-04-10 — Pair-programmed on the auth module [fact_id:aa11bb22]
+
+    ## History
+  delta_facts:
+  - fact_id: f0030001
+    content: Murat is now learning Go to migrate some services
+    importance: 0.7
+    access_count: 1
+  context_facts:
+  - fact_id: 9a2b3c4d
+    content: Murat works at HangiKredi alongside the user
+    importance: 0.9
+    access_count: 5
+  relations: []
+  expected:
+    verbatim_substrings:
+      - "Murat is a software developer"
+      - "lives in Ankara"
+      - "works at HangiKredi"
+      - "Pair-programmed on the auth module"
+    history_substrings: []      # no contradictions
+- id: inc02
+  _intent: contradicting fact must move old claim to ## History
+  entity: Zeynep
+  aliases: [Zeynep]
+  today: "2026-05-13"
+  existing_page_md: |
+    ## Lead
+    Zeynep is the user's partner. She lives in Pendik and works at TechCo.
+
+    ## Profile
+    - Zeynep lives in Pendik [fact_id:p1a2b3c4]
+    - Zeynep works at TechCo [fact_id:p1a2b3c5]
+    - Zeynep is married to the user [fact_id:p1a2b3c6]
+
+    ## Interactions
+    - 2026-04-20 — Birthday celebration [fact_id:p1a2b3c7]
+
+    ## History
+  delta_facts:
+  - fact_id: f0040001
+    content: Zeynep changed jobs to OtherCo (was TechCo)
+    importance: 0.9
+    access_count: 1
+  context_facts:
+  - fact_id: p1a2b3c6
+    content: Zeynep is married to the user
+    importance: 1.0
+    access_count: 9
+  relations: []
+  expected:
+    verbatim_substrings:
+      - "Zeynep is the user's partner"
+      - "lives in Pendik"
+      - "married to the user"
+    history_substrings:
+      - "TechCo"        # the old claim must end up in History
+- id: inc03
+  _intent: episodic addition lands in ## Interactions
+  entity: owner
+  aliases: [owner, Ömer, Kullanıcı]
+  today: "2026-05-13"
+  existing_page_md: |
+    ## Lead
+    The user (Ömer) is a developer married to Zeynep, lives in İstanbul, works at HangiKredi.
+
+    ## Profile
+    - Ömer works at HangiKredi as a developer [fact_id:o0001aaa]
+    - Ömer lives in İstanbul with Zeynep [fact_id:o0001bbb]
+    - Ömer uses Python and SQLite for personal projects [fact_id:o0001ccc]
+
+    ## Interactions
+    - 2026-04-15 — Started a new graph viz project [fact_id:o0002aaa]
+
+    ## History
+  delta_facts:
+  - fact_id: f0050001
+    content: 2026-05-13 — Ömer benchmarked Kimi K2.6 vs Gemini Flash for the delegation suite and decided to keep Gemini
+    importance: 0.6
+    access_count: 0
+  context_facts:
+  - fact_id: o0001aaa
+    content: Ömer works at HangiKredi as a developer
+    importance: 0.95
+    access_count: 12
+  relations: []
+  expected:
+    verbatim_substrings:
+      - "married to Zeynep"
+      - "works at HangiKredi"
+      - "Started a new graph viz project"
+    history_substrings: []

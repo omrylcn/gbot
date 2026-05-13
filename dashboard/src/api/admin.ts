@@ -170,6 +170,27 @@ export interface MemoryEntityPage {
   last_compiled_at: string;
   last_accessed_at: string | null;
   access_count: number;
+  // Faz 22J
+  sections?: string | null;            // JSON-encoded {"Lead":..,"Profile":..}
+  entity_weight?: number;
+  size_bucket?: "small" | "medium" | "large" | "owner" | string;
+  last_delta_fact_ids?: string | null;
+}
+
+export interface MemoryEntityPageVersion {
+  version_id: string;
+  page_id: string;
+  user_id: string;
+  entity_canonical: string;
+  version: number;
+  content_md: string;
+  section_diff: string | null;          // JSON
+  source_fact_ids: string | null;       // JSON list
+  compile_kind: "full" | "incremental" | "lint" | string;
+  delta_fact_ids: string | null;
+  token_budget: number | null;
+  output_tokens: number | null;
+  compiled_at: string;
 }
 
 export interface ServerConfig {
@@ -253,6 +274,31 @@ export const adminApi = {
   recompileEntityPage: (userId: string, entity: string) =>
     api.post<{ ok: boolean; reason?: string; user_id: string; entity: string; page: MemoryEntityPage | null }>(
       `/admin/memory/${userId}/pages/recompile?entity=${encodeURIComponent(entity)}`,
+      {},
+    ),
+  // Faz 22J — version history view
+  getPageVersions: (userId: string, entity: string, limit = 20) =>
+    api.get<{
+      ok: boolean;
+      reason?: string;
+      user_id: string;
+      entity: string;
+      page_id?: string;
+      count?: number;
+      versions: MemoryEntityPageVersion[];
+    }>(
+      `/admin/memory/${userId}/pages/${encodeURIComponent(entity)}/versions?limit=${limit}`,
+    ),
+  // Faz 22J — backfill embeddings for legacy pages
+  reindexPages: (userId: string) =>
+    api.post<{ ok: boolean; reason?: string; scanned?: number; embedded?: number; skipped?: number }>(
+      `/admin/memory/${userId}/pages/reindex`,
+      {},
+    ),
+  // Faz 22J — manual lint pass (stale citations + orphan pages)
+  lintPages: (userId: string) =>
+    api.post<{ user_id: string; kind: string; pages_scanned: number; pages_marked_stale: number; stale_citations: number; orphans_enqueued: number }>(
+      `/admin/memory/${userId}/pages/lint`,
       {},
     ),
   forgetEntity: (userId: string, entity: string) =>

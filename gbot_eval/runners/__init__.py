@@ -48,6 +48,7 @@ def _load_runners() -> None:
         from gbot_eval.runners import memory_audn  # noqa: F401
         from gbot_eval.runners import memory_extraction  # noqa: F401
         from gbot_eval.runners import memory_page_compile  # noqa: F401
+        from gbot_eval.runners import memory_page_incremental  # noqa: F401
     except ImportError:
         # Modules don't exist yet (Step 6D adds them) — skip silently.
         pass

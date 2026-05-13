@@ -47,6 +47,11 @@ dependencies = [
     "rich>=13.0.0",
     "prompt_toolkit>=3.0.0",
     "sqlite-vec>=0.1.7",
+    # Token measurement (Faz 22J-C). Optional in spirit (gbot.core.tokens
+    # falls back to len/4 when missing) but pulling it in by default
+    # makes context budget enforcement accurate without an extra setup
+    # step. ~4 MB wheel, cl100k encoder.
+    "tiktoken>=0.7.0",
 ]
 
 [project.urls]

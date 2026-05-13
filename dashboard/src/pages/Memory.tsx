@@ -1,8 +1,8 @@
 import { Suspense, lazy, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { EyeOff, RotateCcw, Play, FileDown } from "lucide-react";
+import { EyeOff, RotateCcw, Play, FileDown, History, X, RefreshCw, AlertTriangle } from "lucide-react";
 
-import { adminApi, type MemoryFact } from "@/api/admin";
+import { adminApi, type MemoryEntityPageVersion, type MemoryFact } from "@/api/admin";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { Badge } from "@/components/shared/Badge";
@@ -486,6 +486,7 @@ function RelationsTab({ userId }: { userId: string }) {
 
 function EntityPagesTab({ userId }: { userId: string }) {
   const queryClient = useQueryClient();
+  const [versionsFor, setVersionsFor] = useState<string | null>(null);
   const { data: pages } = useQuery({
     queryKey: ["entity-pages", userId],
     queryFn: () => adminApi.getMemoryEntityPages(userId),
@@ -508,13 +509,61 @@ function EntityPagesTab({ userId }: { userId: string }) {
     },
   });
 
+  const reindex = useMutation({
+    mutationFn: () => adminApi.reindexPages(userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["entity-pages", userId] });
+    },
+  });
+
+  const lint = useMutation({
+    mutationFn: () => adminApi.lintPages(userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["entity-pages", userId] });
+    },
+  });
+
   return (
     <div className="space-y-4">
-      <div className="text-xs text-muted">
-        {pages?.count ?? 0} pages. Disabled by default — set
-        <code className="px-1 mx-1 bg-background rounded text-foreground">memory.entity_pages.enabled: true</code>
-        in config to populate via the agent's extraction pipeline.
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs text-muted">
+          {pages?.count ?? 0} pages. Disabled by default — set
+          <code className="px-1 mx-1 bg-background rounded text-foreground">memory.entity_pages.enabled: true</code>
+          in config to populate via the agent's extraction pipeline.
+        </div>
+        <div className="flex gap-2 shrink-0">
+          <button
+            onClick={() => reindex.mutate()}
+            disabled={reindex.isPending}
+            className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-border hover:bg-sidebar-active disabled:opacity-50"
+            title="Backfill embeddings for legacy pages (Faz 22J-B)"
+          >
+            <RefreshCw className="w-3 h-3" />
+            {reindex.isPending ? "Reindexing…" : "Reindex"}
+          </button>
+          <button
+            onClick={() => lint.mutate()}
+            disabled={lint.isPending}
+            className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-border hover:bg-sidebar-active disabled:opacity-50"
+            title="Sweep pages for stale citations + orphan pages (Faz 22J-A)"
+          >
+            <AlertTriangle className="w-3 h-3" />
+            {lint.isPending ? "Linting…" : "Lint"}
+          </button>
+        </div>
       </div>
+
+      {/* Reindex/Lint result inline (clears on next refetch) */}
+      {reindex.data && (
+        <div className="text-xs text-muted bg-background border border-border rounded p-2">
+          Reindex: scanned {reindex.data.scanned ?? 0}, embedded {reindex.data.embedded ?? 0}, skipped {reindex.data.skipped ?? 0}
+        </div>
+      )}
+      {lint.data && (
+        <div className="text-xs text-muted bg-background border border-border rounded p-2">
+          Lint: scanned {lint.data.pages_scanned}, marked stale {lint.data.pages_marked_stale}, stale citations {lint.data.stale_citations}, orphans {lint.data.orphans_enqueued}
+        </div>
+      )}
 
       {pages?.pages?.map((p) => {
         let factIds: string[] = [];
@@ -529,6 +578,11 @@ function EntityPagesTab({ userId }: { userId: string }) {
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-semibold text-foreground">{p.entity_canonical}</h3>
                 <Badge>v{p.version}</Badge>
+                {p.size_bucket && (
+                  <span className="text-xs px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                    {p.size_bucket}
+                  </span>
+                )}
                 {p.stale === 1 && (
                   <span className="text-xs px-2 py-0.5 rounded bg-yellow-500/10 text-yellow-600 dark:text-yellow-400">
                     stale
@@ -536,9 +590,20 @@ function EntityPagesTab({ userId }: { userId: string }) {
                 )}
                 <span className="text-xs text-muted">
                   {p.fact_count} facts · {p.relation_count} rels · {p.access_count} reads
+                  {typeof p.entity_weight === "number" && p.entity_weight > 0 && (
+                    <> · w={p.entity_weight.toFixed(2)}</>
+                  )}
                 </span>
               </div>
               <div className="flex gap-2">
+                <button
+                  onClick={() => setVersionsFor(p.entity_canonical)}
+                  className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-border hover:bg-sidebar-active"
+                  title="Version history (Faz 22J)"
+                >
+                  <History className="w-3 h-3" />
+                  Versions
+                </button>
                 <button
                   onClick={() => recompile.mutate(p.entity_canonical)}
                   disabled={recompile.isPending}
@@ -570,6 +635,15 @@ function EntityPagesTab({ userId }: { userId: string }) {
         );
       })}
 
+      {/* Faz 22J — version history drawer */}
+      {versionsFor && (
+        <VersionsDrawer
+          userId={userId}
+          entity={versionsFor}
+          onClose={() => setVersionsFor(null)}
+        />
+      )}
+
       {!pages?.pages?.length && (
         <div className="bg-card border border-border rounded-xl p-8 text-center">
           <p className="text-sm text-muted italic">No entity pages yet.</p>
@@ -578,6 +652,144 @@ function EntityPagesTab({ userId }: { userId: string }) {
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Faz 22J — Version history drawer ───────────────────────────
+
+const KIND_COLOR: Record<string, string> = {
+  full: "bg-blue-500/15 text-blue-500 border-blue-500/30",
+  incremental: "bg-emerald-500/15 text-emerald-500 border-emerald-500/30",
+  lint: "bg-orange-500/15 text-orange-500 border-orange-500/30",
+};
+
+function VersionsDrawer({
+  userId,
+  entity,
+  onClose,
+}: {
+  userId: string;
+  entity: string;
+  onClose: () => void;
+}) {
+  const [selected, setSelected] = useState<MemoryEntityPageVersion | null>(null);
+  const { data, isLoading } = useQuery({
+    queryKey: ["page-versions", userId, entity],
+    queryFn: () => adminApi.getPageVersions(userId, entity, 40),
+  });
+
+  const versions = data?.versions ?? [];
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-card border border-border rounded-2xl w-full max-w-5xl h-[80vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border">
+          <div className="flex items-center gap-2">
+            <History className="w-4 h-4 text-muted" />
+            <h3 className="font-medium text-foreground">
+              {entity} — version history
+            </h3>
+            {data?.count !== undefined && (
+              <span className="text-xs text-muted">({data.count})</span>
+            )}
+          </div>
+          <button onClick={onClose} className="text-muted hover:text-foreground">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 flex overflow-hidden">
+          {/* Left: version list */}
+          <div className="w-72 border-r border-border overflow-y-auto">
+            {isLoading && <div className="p-4 text-xs text-muted">Loading…</div>}
+            {!isLoading && versions.length === 0 && (
+              <div className="p-4 text-xs text-muted italic">
+                No history yet. The next recompile will append a snapshot.
+              </div>
+            )}
+            {versions.map((v) => {
+              let deltaCount = 0;
+              try {
+                deltaCount = JSON.parse(v.delta_fact_ids || "[]").length;
+              } catch {
+                /* ignore */
+              }
+              const isSel = selected?.version_id === v.version_id;
+              return (
+                <button
+                  key={v.version_id}
+                  onClick={() => setSelected(v)}
+                  className={`w-full text-left px-3 py-2 border-b border-border transition-colors ${
+                    isSel
+                      ? "bg-sidebar-active"
+                      : "hover:bg-sidebar-active/60"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-sm font-medium text-foreground">
+                      v{v.version}
+                    </span>
+                    <span
+                      className={`text-[10px] uppercase px-1.5 py-0.5 rounded border ${
+                        KIND_COLOR[v.compile_kind] ||
+                        "bg-muted/15 text-muted border-border"
+                      }`}
+                    >
+                      {v.compile_kind}
+                    </span>
+                  </div>
+                  <div className="text-xs text-muted">
+                    {formatDate(v.compiled_at)}
+                  </div>
+                  <div className="text-[11px] text-muted mt-1">
+                    {v.output_tokens ?? "?"} tok / budget {v.token_budget ?? "?"}
+                    {deltaCount > 0 && <> · Δ {deltaCount}</>}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Right: selected version content */}
+          <div className="flex-1 overflow-y-auto p-5">
+            {!selected && versions.length > 0 && (
+              <div className="text-sm text-muted italic">
+                Soldan bir versiyon seç.
+              </div>
+            )}
+            {selected && (
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span
+                    className={`uppercase px-2 py-0.5 rounded border ${
+                      KIND_COLOR[selected.compile_kind] ||
+                      "bg-muted/15 text-muted border-border"
+                    }`}
+                  >
+                    {selected.compile_kind}
+                  </span>
+                  <span className="text-muted">
+                    v{selected.version} · {formatDate(selected.compiled_at)}
+                  </span>
+                  <span className="text-muted">
+                    {selected.output_tokens ?? "?"} out / {selected.token_budget ?? "?"} budget
+                  </span>
+                </div>
+                {selected.section_diff && (
+                  <div className="text-xs">
+                    <span className="text-muted">section diff: </span>
+                    <code className="text-foreground">{selected.section_diff}</code>
+                  </div>
+                )}
+                <pre className="text-xs text-foreground whitespace-pre-wrap font-mono bg-background border border-border rounded-lg p-3 overflow-x-auto">
+                  {selected.content_md}
+                </pre>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

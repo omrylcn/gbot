@@ -2065,14 +2065,19 @@ class MemoryStore:
                 "UPDATE memory_entity_pages SET content_embedding = ? WHERE page_id = ?",
                 (emb_json, page_id),
             )
+            # sqlite-vec virtual tables don't honour "INSERT OR REPLACE"
+            # uniformly across versions — explicit DELETE-then-INSERT is
+            # the portable refresh path.
             try:
                 conn.execute(
-                    "INSERT OR REPLACE INTO vec_entity_pages(rowid, embedding) "
-                    "VALUES (?, ?)",
+                    "DELETE FROM vec_entity_pages WHERE rowid = ?", (rowid,),
+                )
+                conn.execute(
+                    "INSERT INTO vec_entity_pages(rowid, embedding) VALUES (?, ?)",
                     (rowid, emb_json),
                 )
             except Exception as e:  # pragma: no cover — vec absent
-                logger.debug(f"vec_entity_pages insert skipped: {e}")
+                logger.debug(f"vec_entity_pages refresh skipped: {e}")
             conn.commit()
 
     def search_similar_pages(
