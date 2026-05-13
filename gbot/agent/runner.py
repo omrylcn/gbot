@@ -260,6 +260,7 @@ class GraphRunner:
         # config.memory.entity_pages.enabled.
         compiler = EntityPageCompiler(
             self.db, self.config.memory, resolver=resolver,
+            embedder=self._embedder,
         )
         return MemoryService(
             self.db, model=mem_model,

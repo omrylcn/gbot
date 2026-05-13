@@ -259,18 +259,30 @@ class ContextBuilder:
             except Exception:  # pragma: no cover — defensive
                 pass
 
-            # Faz 22D — Entity pages: when a compiled page exists for one
-            # of the entities in play, inject the page instead of (or in
-            # addition to) the raw relations list. Pages compile on a
-            # debounced schedule by EntityPageCompiler; here we just read.
+            # Faz 22D + 22J-B — Entity pages.
+            # Selection is now pinned (always) + dynamic top-K by
+            # multi-signal score (direct + semantic + backlink + graph
+            # + recency). Pinned pages don't require entities_in_play,
+            # so we always invoke the renderer when pages are enabled.
             try:
-                if (
-                    self.config.memory.entity_pages.enabled
-                    and entities_in_play
-                ):
+                if self.config.memory.entity_pages.enabled:
                     entity_pages_block = self._render_entity_pages_block(
-                        user_id, entities_in_play
+                        user_id,
+                        entities_in_play,
+                        query=last_message or "",
+                        query_embedding=locals().get("query_emb"),
+                        retrieved_facts=facts if "facts" in locals() else [],
                     )
+            except Exception:  # pragma: no cover — defensive
+                pass
+
+            # Faz 22J-B — Wiki index: compact directory of every page so
+            # the LLM can discover what's available. Always rendered when
+            # enabled, no scoring needed.
+            wiki_index_block = ""
+            try:
+                if self.config.memory.entity_pages.enabled:
+                    wiki_index_block = self._render_wiki_index_block(user_id)
             except Exception:  # pragma: no cover — defensive
                 pass
 
@@ -296,9 +308,10 @@ class ContextBuilder:
                 for p in [
                     user_ctx,
                     style_block,
+                    wiki_index_block,
+                    entity_pages_block,
                     learned,
                     relationships,
-                    entity_pages_block,
                 ]
                 if p
             )
@@ -757,31 +770,237 @@ class ContextBuilder:
         return "RELATIONSHIPS:\n" + "\n".join(lines)
 
     def _render_entity_pages_block(
-        self, user_id: str, entities: list[str]
+        self,
+        user_id: str,
+        entities: list[str],
+        query: str = "",
+        query_embedding: list[float] | None = None,
+        retrieved_facts: list[dict[str, Any]] | None = None,
     ) -> str:
-        """Render an ENTITY PAGES section with compiled markdown summaries.
+        """Faz 22J-B — pinned + dynamic entity-page selection.
 
-        For each entity in the in-play list, fetch its
-        ``memory_entity_pages`` row. Pages are inserted as
-        ``## {Entity}\\n{markdown}``. Stale pages still surface (with a
-        marker) so the agent has *something* while the compiler catches
-        up; the compiler is debounced and may take ~60s after a write.
+        Selection logic:
+          1. Always include pages in ``entity_pages.pinned`` (anchor
+             entities — typically just "owner").
+          2. Score every remaining page via ``_score_entity_pages``
+             (direct mention + semantic + fact-backlink + 1-hop graph
+             + recency). Pick the top ``dynamic_top_k`` by score above
+             a soft threshold.
+          3. Render pinned first, then dynamic; stale pages still
+             surface with a marker so the agent has *something* while
+             the compiler catches up.
         """
-        if not entities:
-            return ""
         page_cfg = self.config.memory.entity_pages
-        max_pages = max(1, page_cfg.max_pages_in_context)
+        pinned = list(getattr(page_cfg, "pinned", []) or [])
+        dynamic_top_k = max(
+            0, getattr(page_cfg, "dynamic_top_k", page_cfg.max_pages_in_context),
+        )
 
-        sections: list[str] = []
-        for ent in entities[:max_pages]:
+        # ── Pinned ──
+        rendered: list[str] = []
+        pinned_present: set[str] = set()
+        for ent in pinned:
             page = self.db.get_entity_page(user_id, ent)
-            if not page:
-                continue
-            stale = " *(stale — recompile pending)*" if page.get("stale") else ""
-            sections.append(f"## {ent}{stale}\n{page['content_md']}")
-        if not sections:
+            if page:
+                stale = " *(stale — recompile pending)*" if page.get("stale") else ""
+                rendered.append(f"## {ent}{stale}\n{page['content_md']}")
+                pinned_present.add(ent)
+
+        # ── Dynamic (scored) ──
+        if dynamic_top_k > 0:
+            ranked = self._score_entity_pages(
+                user_id=user_id,
+                query=query,
+                query_embedding=query_embedding,
+                retrieved_facts=retrieved_facts or [],
+                entities_in_play=entities,
+                exclude=pinned_present,
+            )
+            for canonical, _score in ranked[:dynamic_top_k]:
+                page = self.db.get_entity_page(user_id, canonical)
+                if not page:
+                    continue
+                stale = " *(stale — recompile pending)*" if page.get("stale") else ""
+                rendered.append(f"## {canonical}{stale}\n{page['content_md']}")
+
+        if not rendered:
             return ""
-        return "ENTITY PAGES:\n" + "\n\n".join(sections)
+        return "ENTITY PAGES:\n" + "\n\n".join(rendered)
+
+    def _score_entity_pages(
+        self,
+        user_id: str,
+        query: str,
+        query_embedding: list[float] | None,
+        retrieved_facts: list[dict[str, Any]],
+        entities_in_play: list[str],
+        exclude: set[str] | None = None,
+    ) -> list[tuple[str, float]]:
+        """Faz 22J-B multi-signal page scorer. Returns
+        ``[(canonical, score)]`` sorted by score desc.
+
+        Five signals (weights from ``PageScoringConfig``):
+          α direct mention — surface form appears in the query text
+          β semantic — cosine(query_emb, page.content_embedding)
+          γ fact backlink — shared fact_ids between page source + retrieved
+          δ graph — 1-hop neighbour of an entity in entities_in_play
+          ε recency — exponential decay by ``recency_half_life_days``
+        """
+        import json as _json
+        import math
+        from datetime import datetime
+
+        exclude = exclude or set()
+        page_cfg = self.config.memory.entity_pages
+        weights = getattr(page_cfg, "scoring", None)
+        if weights is None:
+            return []
+
+        alpha = float(getattr(weights, "alpha_direct", 2.0))
+        beta = float(getattr(weights, "beta_semantic", 1.5))
+        gamma = float(getattr(weights, "gamma_backlink", 1.0))
+        delta = float(getattr(weights, "delta_graph", 0.5))
+        epsilon = float(getattr(weights, "epsilon_recency", 0.3))
+        half_life = max(1, int(getattr(weights, "recency_half_life_days", 14)))
+
+        retrieved_ids = {f["fact_id"] for f in retrieved_facts if f.get("fact_id")}
+        entities_set = {e.lower() for e in entities_in_play}
+        q_lower = (query or "").lower()
+        now = datetime.now()
+
+        pages = self.db.list_entity_pages(user_id, only_fresh=False, limit=500)
+        out: list[tuple[str, float]] = []
+        for p in pages:
+            ent = p.get("entity_canonical") or ""
+            if not ent or ent in exclude:
+                continue
+
+            # 1. Direct mention — surface form lookup
+            try:
+                forms = _json.loads(p.get("entity_surface_forms") or "[]")
+            except (ValueError, TypeError):
+                forms = []
+            direct = 0.0
+            if q_lower:
+                for form in (forms or [ent]):
+                    if form and form.lower() in q_lower:
+                        direct = 1.0
+                        break
+
+            # 2. Semantic — cosine(query_emb, page_emb)
+            semantic = 0.0
+            if query_embedding and p.get("content_embedding"):
+                try:
+                    page_emb = _json.loads(p["content_embedding"])
+                    semantic = _cosine_similarity(query_embedding, page_emb)
+                except (ValueError, TypeError):
+                    semantic = 0.0
+
+            # 3. Fact backlink
+            backlink = 0.0
+            if retrieved_ids:
+                try:
+                    src_ids = set(_json.loads(p.get("source_fact_ids") or "[]"))
+                except (ValueError, TypeError):
+                    src_ids = set()
+                overlap = len(src_ids & retrieved_ids)
+                if overlap:
+                    backlink = overlap / max(1, len(retrieved_ids))
+
+            # 4. Graph 1-hop neighbour
+            graph = 0.0
+            if entities_set:
+                try:
+                    neighbours = self.db.get_relations(
+                        user_id, canonical=ent, limit=20,
+                    )
+                except Exception:
+                    neighbours = []
+                if neighbours:
+                    hits = 0
+                    for n in neighbours:
+                        src = (n.get("canonical_source") or n.get("source_entity") or "").lower()
+                        tgt = (n.get("canonical_target") or n.get("target_entity") or "").lower()
+                        if src in entities_set or tgt in entities_set:
+                            hits += 1
+                    graph = hits / max(1, len(neighbours))
+
+            # 5. Recency
+            recency = 0.0
+            last = p.get("last_compiled_at")
+            if last:
+                try:
+                    dt = datetime.fromisoformat(str(last))
+                    age_days = max(0, (now - dt).days)
+                    recency = math.exp(-age_days / half_life)
+                except (ValueError, TypeError):
+                    recency = 0.0
+
+            score = (
+                alpha * direct
+                + beta * semantic
+                + gamma * backlink
+                + delta * graph
+                + epsilon * recency
+            )
+            if score > 0:
+                out.append((ent, score))
+
+        out.sort(key=lambda x: -x[1])
+        return out
+
+    def _render_wiki_index_block(self, user_id: str) -> str:
+        """Faz 22J-B — Karpathy wiki ``index.md`` analogue.
+
+        Compact directory of every canonical entity the user has a page
+        for, grouped by inferred type (or flat if grouping disabled).
+        Lets the LLM see the full set of pages it could ask about
+        without dumping their contents.
+        """
+        page_cfg = self.config.memory.entity_pages
+        if not getattr(page_cfg, "wiki_index_enabled", False):
+            return ""
+        pages = self.db.list_entity_pages(user_id, only_fresh=False, limit=200)
+        if not pages:
+            return ""
+
+        # Group by size_bucket as a stand-in for entity type until 22J-D
+        # adds proper type classification.
+        if getattr(page_cfg, "wiki_index_group_by_type", True):
+            buckets: dict[str, list[dict[str, Any]]] = {}
+            for p in pages:
+                key = p.get("size_bucket") or "small"
+                buckets.setdefault(key, []).append(p)
+            order = ["owner", "large", "medium", "small"]
+            lines: list[str] = ["WIKI INDEX:"]
+            for k in order:
+                bucket = buckets.get(k)
+                if not bucket:
+                    continue
+                bucket.sort(key=lambda r: -(r.get("entity_weight") or 0))
+                lines.append(f"  [{k}]")
+                for p in bucket:
+                    weight = p.get("entity_weight") or 0
+                    fc = p.get("fact_count") or 0
+                    rc = p.get("relation_count") or 0
+                    lines.append(
+                        f"  - {p['entity_canonical']} · {fc}f/{rc}r · w={weight:.1f}"
+                    )
+            return "\n".join(lines)
+
+        # Flat
+        sorted_pages = sorted(
+            pages, key=lambda r: -(r.get("entity_weight") or 0)
+        )
+        lines = ["WIKI INDEX:"]
+        for p in sorted_pages:
+            weight = p.get("entity_weight") or 0
+            fc = p.get("fact_count") or 0
+            rc = p.get("relation_count") or 0
+            lines.append(
+                f"  - {p['entity_canonical']} · {fc}f/{rc}r · w={weight:.1f}"
+            )
+        return "\n".join(lines)
 
     @staticmethod
     def _truncate(text: str, token_budget: int) -> str:
@@ -790,3 +1009,26 @@ class ContextBuilder:
         if len(text) <= char_limit:
             return text
         return text[:char_limit] + "\n\n[...truncated]"
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Faz 22J-B — cosine similarity for the page scorer.
+
+    Returns ``0.0`` when either side is empty or zero-norm, so a missing
+    embedding never blows up the scorer. Same scale as 1 − distance from
+    sqlite-vec, so callers can blend it with α/β/etc. weights directly.
+    """
+    import math
+
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = 0.0
+    na = 0.0
+    nb = 0.0
+    for x, y in zip(a, b):
+        dot += x * y
+        na += x * x
+        nb += y * y
+    if na == 0.0 or nb == 0.0:
+        return 0.0
+    return dot / (math.sqrt(na) * math.sqrt(nb))

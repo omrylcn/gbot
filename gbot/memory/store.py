@@ -2034,6 +2034,86 @@ class MemoryStore:
             ).fetchall()
         return [dict(r) for r in rows[:top_k]]
 
+    def upsert_page_embedding(
+        self, page_id: str, embedding: list[float]
+    ) -> None:
+        """Faz 22J-B — store a 3072-dim cosine embedding for an entity
+        page so the multi-signal scorer can use semantic similarity.
+
+        Embeddings live in two places:
+          * ``memory_entity_pages.content_embedding`` (BLOB, JSON) — the
+            authoritative column, queried by `get_entity_page` / dump.
+          * ``vec_entity_pages`` (sqlite-vec virtual table) — the
+            ANN-index used by `search_similar_pages`.
+
+        Both updates happen in a single transaction. Silent no-op if
+        sqlite-vec isn't installed (older deployments).
+        """
+        if not embedding:
+            return
+        emb_json = json.dumps(embedding)
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT rowid FROM memory_entity_pages WHERE page_id = ?",
+                (page_id,),
+            ).fetchone()
+            if not row:
+                return
+            rowid = row["rowid"]
+            conn.execute(
+                "UPDATE memory_entity_pages SET content_embedding = ? WHERE page_id = ?",
+                (emb_json, page_id),
+            )
+            try:
+                conn.execute(
+                    "INSERT OR REPLACE INTO vec_entity_pages(rowid, embedding) "
+                    "VALUES (?, ?)",
+                    (rowid, emb_json),
+                )
+            except Exception as e:  # pragma: no cover — vec absent
+                logger.debug(f"vec_entity_pages insert skipped: {e}")
+            conn.commit()
+
+    def search_similar_pages(
+        self,
+        user_id: str,
+        query_embedding: list[float],
+        top_k: int = 10,
+        max_distance: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Faz 22J-B — semantic page search, mirrors ``search_similar_facts``.
+        Returns matched ``memory_entity_pages`` rows plus a ``distance``
+        field. Pages without embeddings are excluded silently."""
+        with self._get_conn() as conn:
+            try:
+                count = conn.execute(
+                    "SELECT COUNT(*) FROM vec_entity_pages"
+                ).fetchone()[0]
+            except Exception:  # pragma: no cover — vec absent
+                return []
+            if count == 0:
+                return []
+            params: list[Any] = [json.dumps(query_embedding), top_k * 3, user_id]
+            distance_filter = ""
+            if max_distance is not None:
+                distance_filter = "AND knn.distance <= ?"
+                params.append(max_distance)
+            rows = conn.execute(
+                f"""WITH knn AS (
+                        SELECT rowid, distance
+                        FROM vec_entity_pages
+                        WHERE embedding MATCH ? AND k = ?
+                    )
+                    SELECT p.*, knn.distance
+                    FROM knn
+                    JOIN memory_entity_pages p ON p.rowid = knn.rowid
+                    WHERE p.user_id = ?
+                          {distance_filter}
+                    ORDER BY knn.distance""",
+                params,
+            ).fetchall()
+        return [dict(r) for r in rows[:top_k]]
+
     def get_fact_stats(self, user_id: str) -> dict[str, Any]:
         with self._get_conn() as conn:
             rows = conn.execute(

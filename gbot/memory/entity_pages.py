@@ -162,10 +162,12 @@ class EntityPageCompiler:
         config: "MemoryConfig",
         resolver: "EntityResolver | None" = None,
         model: str | None = None,
+        embedder: Any | None = None,
     ):
         self.db = db
         self.config = config
         self.resolver = resolver
+        self.embedder = embedder  # Faz 22J-B — embed pages on compile
         page_cfg = getattr(config, "entity_pages", None)
         self.model = (
             model
@@ -344,6 +346,18 @@ class EntityPageCompiler:
             )
         except Exception as e:  # pragma: no cover — defensive
             logger.debug(f"insert_page_version failed for {canonical}: {e}")
+
+        # Faz 22J-B — embed the freshly compiled page so the multi-signal
+        # scorer can use semantic similarity later. Embedding lives in
+        # both `memory_entity_pages.content_embedding` and the
+        # `vec_entity_pages` virtual table.
+        if self.embedder is not None:
+            try:
+                emb = self.embedder.embed(content_md)
+                if emb:
+                    self.db.upsert_page_embedding(page_id, emb)
+            except Exception as e:  # pragma: no cover — defensive
+                logger.debug(f"upsert_page_embedding failed for {canonical}: {e}")
 
         logger.info(
             f"entity-page {compile_kind}: {canonical} (page_id={page_id}, "

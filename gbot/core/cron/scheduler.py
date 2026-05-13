@@ -347,8 +347,20 @@ class CronScheduler:
                 owner_display_name=getattr(owner, "name", None) if owner else None,
             )
             mem_cfg = self.config.memory if self.config else None
+            # Try to construct an embedder so the compiler can refresh
+            # page embeddings on lint-triggered recompiles. Soft-fail
+            # when memory.embedding isn't configured.
+            embedder = None
+            if mem_cfg and getattr(mem_cfg, "enabled", False):
+                try:
+                    from gbot.memory.embedder import MemoryEmbedder
+                    embedder = MemoryEmbedder(mem_cfg.embedding)
+                except Exception:  # pragma: no cover — embedder optional
+                    embedder = None
             compiler = (
-                EntityPageCompiler(self.db, mem_cfg, resolver=resolver)
+                EntityPageCompiler(
+                    self.db, mem_cfg, resolver=resolver, embedder=embedder,
+                )
                 if mem_cfg else None
             )
             maintenance = MemoryMaintenance(self.db, mem_cfg, compiler=compiler)

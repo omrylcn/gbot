@@ -500,7 +500,12 @@ async def admin_recompile_entity_page(
         owner_username=getattr(owner, "username", None) if owner else None,
         owner_display_name=getattr(owner, "name", None) if owner else None,
     )
-    compiler = EntityPageCompiler(db, config.memory, resolver=resolver)
+    try:
+        from gbot.memory.embedder import MemoryEmbedder
+        _embedder = MemoryEmbedder(config.memory.embedding) if config.memory.enabled else None
+    except Exception:
+        _embedder = None
+    compiler = EntityPageCompiler(db, config.memory, resolver=resolver, embedder=_embedder)
     if not compiler.enabled:
         return {
             "ok": False,
@@ -512,6 +517,56 @@ async def admin_recompile_entity_page(
         "user_id": user_id,
         "entity": entity,
         "page": page,
+    }
+
+
+@router.post("/memory/{user_id}/pages/reindex")
+async def admin_reindex_pages(
+    user_id: str,
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    db: MemoryStore = Depends(get_db),
+):
+    """Faz 22J-B — backfill `content_embedding` for every page that
+    doesn't already have one. Idempotent; safe to call after a fresh
+    migration or whenever the embedding model changes.
+
+    Returns counts; the embedder skips silently when memory is disabled.
+    """
+    _require_owner(current_user, config)
+    if not config.memory.enabled:
+        return {"ok": False, "reason": "memory disabled", "embedded": 0}
+    from gbot.memory.embedder import MemoryEmbedder
+
+    embedder = MemoryEmbedder(config.memory.embedding)
+    pages = db.list_entity_pages(user_id, only_fresh=False, limit=500)
+    embedded = 0
+    skipped = 0
+    for p in pages:
+        if p.get("content_embedding"):
+            skipped += 1
+            continue
+        body = p.get("content_md") or ""
+        if not body:
+            continue
+        try:
+            emb = embedder.embed(body)
+            if emb:
+                db.upsert_page_embedding(p["page_id"], emb)
+                embedded += 1
+        except Exception as e:  # pragma: no cover — defensive
+            return {
+                "ok": False,
+                "error": str(e),
+                "embedded": embedded,
+                "skipped": skipped,
+            }
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "scanned": len(pages),
+        "embedded": embedded,
+        "skipped": skipped,
     }
 
 
@@ -564,7 +619,12 @@ async def admin_lint_pages(
         owner_username=getattr(owner, "username", None) if owner else None,
         owner_display_name=getattr(owner, "name", None) if owner else None,
     )
-    compiler = EntityPageCompiler(db, config.memory, resolver=resolver)
+    try:
+        from gbot.memory.embedder import MemoryEmbedder
+        _embedder = MemoryEmbedder(config.memory.embedding) if config.memory.enabled else None
+    except Exception:
+        _embedder = None
+    compiler = EntityPageCompiler(db, config.memory, resolver=resolver, embedder=_embedder)
     maintenance = MemoryMaintenance(db, config.memory, compiler=compiler)
     stats = await maintenance.lint_pages(user_id)
     return stats
@@ -610,7 +670,12 @@ async def admin_run_maintenance(
         owner_username=getattr(owner, "username", None) if owner else None,
         owner_display_name=getattr(owner, "name", None) if owner else None,
     )
-    compiler = EntityPageCompiler(db, config.memory, resolver=resolver)
+    try:
+        from gbot.memory.embedder import MemoryEmbedder
+        _embedder = MemoryEmbedder(config.memory.embedding) if config.memory.enabled else None
+    except Exception:
+        _embedder = None
+    compiler = EntityPageCompiler(db, config.memory, resolver=resolver, embedder=_embedder)
     maintenance = MemoryMaintenance(db, config.memory, compiler=compiler)
     return await maintenance.run_now(user_id)
 
