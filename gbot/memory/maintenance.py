@@ -76,12 +76,20 @@ class MemoryMaintenance:
         return stats
 
     async def run_weekly(self, user_id: str) -> dict[str, Any]:
-        """Weekly housekeeping: relations dedup catch-up."""
+        """Weekly housekeeping: relations dedup catch-up + Faz 22J page lint."""
         stats: dict[str, Any] = {
             "user_id": user_id,
             "kind": "weekly",
             "relations_deduped": self._dedup_live_relations(user_id),
         }
+        # Faz 22J — wiki page lint pass (stale citations, orphan pages).
+        page_cfg = getattr(self.config, "entity_pages", None) if self.config else None
+        if page_cfg and getattr(page_cfg, "lint_enabled", True):
+            try:
+                stats["lint"] = await self.lint_pages(user_id)
+            except Exception as e:  # pragma: no cover — defensive
+                logger.warning(f"lint_pages failed for {user_id}: {e}")
+                stats["lint"] = {"error": str(e)}
         logger.info(f"memory weekly maintenance: {stats}")
         return stats
 
@@ -91,6 +99,103 @@ class MemoryMaintenance:
             "daily": await self.run_daily(user_id),
             "weekly": await self.run_weekly(user_id),
         }
+
+    # ── Faz 22J — Wiki page lint ────────────────────────────────
+
+    async def lint_pages(self, user_id: str) -> dict[str, Any]:
+        """Sweep entity pages for issues that drift in over time.
+
+        Looks for:
+          - **Stale citations**: ``[fact_id:xxxxxxxx]`` references whose
+            underlying fact has been archived. Marks the page stale so
+            the next compile drops the citation.
+          - **Pages without source facts**: zero valid source_fact_ids
+            (orphans). Enqueues a recompile (`_compile` will skip-or-
+            archive based on current valid set).
+
+        Returns counts. Idempotent — safe to schedule weekly.
+        """
+        if not self.compiler:
+            return {"user_id": user_id, "enabled": False}
+
+        import json as _json
+        import re
+
+        cite_re = re.compile(r"\[fact_id:([0-9a-fA-F]{6,16})\]")
+
+        with self.db._get_conn() as conn:
+            pages = conn.execute(
+                """SELECT page_id, entity_canonical, content_md, source_fact_ids
+                       FROM memory_entity_pages
+                       WHERE user_id = ?""",
+                (user_id,),
+            ).fetchall()
+
+        stale_marked = 0
+        orphan_enqueued = 0
+        total_stale_cites = 0
+
+        for p in pages:
+            content = p["content_md"] or ""
+            ids = cite_re.findall(content)
+            if not ids:
+                # Page exists with zero citations — borderline, skip.
+                continue
+
+            # Look up each cited fact: archived or missing → stale citation.
+            with self.db._get_conn() as conn:
+                placeholders = ",".join("?" * len(ids))
+                rows = conn.execute(
+                    f"""SELECT fact_id, valid_until FROM memory_facts
+                            WHERE fact_id IN ({placeholders}) AND user_id = ?""",
+                    [*ids, user_id],
+                ).fetchall()
+            valid_by_id = {r["fact_id"]: r["valid_until"] is None for r in rows}
+            stale_for_page = [
+                fid for fid in ids
+                if not valid_by_id.get(fid, False)  # missing or archived
+            ]
+            if stale_for_page:
+                total_stale_cites += len(stale_for_page)
+                # Mark stale; next compile will rewrite the section without
+                # the dead citations.
+                try:
+                    self.db.mark_entity_pages_stale(user_id, p["entity_canonical"])
+                    stale_marked += 1
+                except Exception:
+                    pass
+
+            # Orphan check — every source fact archived?
+            try:
+                src_ids = _json.loads(p["source_fact_ids"] or "[]")
+            except (ValueError, TypeError):
+                src_ids = []
+            if src_ids:
+                with self.db._get_conn() as conn:
+                    placeholders = ",".join("?" * len(src_ids))
+                    valid_row = conn.execute(
+                        f"""SELECT COUNT(*) FROM memory_facts
+                                WHERE fact_id IN ({placeholders})
+                                  AND valid_until IS NULL""",
+                        src_ids,
+                    ).fetchone()
+                if valid_row and valid_row[0] == 0:
+                    try:
+                        await self.compiler.enqueue(user_id, p["entity_canonical"])
+                        orphan_enqueued += 1
+                    except Exception:
+                        pass
+
+        stats = {
+            "user_id": user_id,
+            "kind": "lint",
+            "pages_scanned": len(pages),
+            "pages_marked_stale": stale_marked,
+            "stale_citations": total_stale_cites,
+            "orphans_enqueued": orphan_enqueued,
+        }
+        logger.info(f"memory page lint: {stats}")
+        return stats
 
     # ── Internals ─────────────────────────────────────────────────
 

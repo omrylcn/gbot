@@ -107,6 +107,13 @@ class MemoryStore:
             self._migrate_22g(conn)
             conn.execute("PRAGMA user_version = 23")
 
+        # Faz 22J: Living wiki pages — version history, sections, entity weight,
+        # adaptive size bucket, content embedding for dynamic retrieval.
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if version < 24:
+            self._migrate_22j(conn)
+            conn.execute("PRAGMA user_version = 24")
+
     _TASK_TABLES_SQL = """
         CREATE TABLE IF NOT EXISTS background_tasks (
             task_id TEXT PRIMARY KEY,
@@ -420,6 +427,85 @@ class MemoryStore:
         logger.info(
             "Faz 22G schema migration applied (memory_facts.state + "
             "inhibited_until + last_accessed_at; existing rows backfilled)"
+        )
+
+    def _migrate_22j(self, conn) -> None:
+        """Faz 22J — Living wiki pages.
+
+        Adds version history table, section structure JSON, entity weight,
+        size bucket, last delta-fact tracking, and content embedding for
+        dynamic retrieval. All ALTER statements are guarded by PRAGMA
+        table_info so re-runs no-op.
+        """
+        # ── memory_entity_pages: new columns ─────────────────────
+        cols = {
+            r[1]
+            for r in conn.execute("PRAGMA table_info(memory_entity_pages)").fetchall()
+        }
+        if "entity_weight" not in cols:
+            conn.execute(
+                "ALTER TABLE memory_entity_pages ADD COLUMN entity_weight REAL DEFAULT 1.0"
+            )
+        if "size_bucket" not in cols:
+            conn.execute(
+                "ALTER TABLE memory_entity_pages ADD COLUMN size_bucket TEXT DEFAULT 'small'"
+            )
+        if "sections" not in cols:
+            # JSON-serialised dict: {"lead": ..., "profile": ..., "interactions": ..., "history": ...}
+            conn.execute(
+                "ALTER TABLE memory_entity_pages ADD COLUMN sections TEXT"
+            )
+        if "last_delta_fact_ids" not in cols:
+            # JSON list of fact_ids that triggered the most recent compile.
+            conn.execute(
+                "ALTER TABLE memory_entity_pages ADD COLUMN last_delta_fact_ids TEXT"
+            )
+        if "content_embedding" not in cols:
+            # 3072-dim cosine via sqlite-vec; mirrors vec_memory_facts pattern.
+            conn.execute(
+                "ALTER TABLE memory_entity_pages ADD COLUMN content_embedding BLOB"
+            )
+
+        # ── memory_entity_page_versions: append-only history ─────
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS memory_entity_page_versions (
+                version_id TEXT PRIMARY KEY,
+                page_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                entity_canonical TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                content_md TEXT NOT NULL,
+                section_diff TEXT,
+                source_fact_ids TEXT,
+                compile_kind TEXT NOT NULL DEFAULT 'full',
+                delta_fact_ids TEXT,
+                token_budget INTEGER,
+                output_tokens INTEGER,
+                compiled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (page_id) REFERENCES memory_entity_pages(page_id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_page_versions_page
+                ON memory_entity_page_versions(page_id, version DESC);
+            CREATE INDEX IF NOT EXISTS idx_page_versions_user
+                ON memory_entity_page_versions(user_id, compiled_at DESC);
+            """
+        )
+
+        # ── vec_entity_pages: sqlite-vec virtual table for page semantic search ──
+        try:
+            conn.execute(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS vec_entity_pages "
+                "USING vec0(embedding float[3072] distance_metric=cosine)"
+            )
+        except Exception as e:  # pragma: no cover — sqlite-vec missing or older
+            logger.warning(
+                f"vec_entity_pages creation failed (sqlite-vec unavailable?): {e}"
+            )
+
+        logger.info(
+            "Faz 22J schema migration applied (page sections + entity_weight + "
+            "size_bucket + content_embedding + memory_entity_page_versions table)"
         )
 
     def _migrate_to_unified_tasks(self, conn, old_tables: set[str]) -> None:
@@ -2121,15 +2207,30 @@ class MemoryStore:
         source_fact_ids: list[str] | None = None,
         source_relation_ids: list[str] | None = None,
         surface_forms: list[str] | None = None,
+        sections: dict[str, str] | None = None,
+        entity_weight: float | None = None,
+        size_bucket: str | None = None,
+        last_delta_fact_ids: list[str] | None = None,
     ) -> str:
         """Insert or update an entity page. Bumps version on update,
         clears stale flag, refreshes last_compiled_at.
+
+        Faz 22J fields (all optional, default to existing values on update):
+        ``sections`` JSON, ``entity_weight``, ``size_bucket``,
+        ``last_delta_fact_ids``. Old callers pass none of these and keep
+        working — the columns simply hold their defaults.
 
         Returns the page_id.
         """
         import uuid
 
         existing = self.get_entity_page(user_id, entity_canonical)
+        sections_json = json.dumps(sections) if sections is not None else None
+        delta_json = (
+            json.dumps(last_delta_fact_ids)
+            if last_delta_fact_ids is not None
+            else None
+        )
         with self._get_conn() as conn:
             if existing:
                 conn.execute(
@@ -2142,7 +2243,11 @@ class MemoryStore:
                                relation_count = ?,
                                version = version + 1,
                                stale = 0,
-                               last_compiled_at = CURRENT_TIMESTAMP
+                               last_compiled_at = CURRENT_TIMESTAMP,
+                               sections = COALESCE(?, sections),
+                               entity_weight = COALESCE(?, entity_weight),
+                               size_bucket = COALESCE(?, size_bucket),
+                               last_delta_fact_ids = COALESCE(?, last_delta_fact_ids)
                            WHERE page_id = ?""",
                     (
                         content_md,
@@ -2151,6 +2256,10 @@ class MemoryStore:
                         json.dumps(surface_forms or []),
                         len(source_fact_ids or []),
                         len(source_relation_ids or []),
+                        sections_json,
+                        entity_weight,
+                        size_bucket,
+                        delta_json,
                         existing["page_id"],
                     ),
                 )
@@ -2161,8 +2270,9 @@ class MemoryStore:
                 """INSERT INTO memory_entity_pages
                        (page_id, user_id, entity_canonical, entity_surface_forms,
                         content_md, source_fact_ids, source_relation_ids,
-                        fact_count, relation_count, version, stale)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)""",
+                        fact_count, relation_count, version, stale,
+                        sections, entity_weight, size_bucket, last_delta_fact_ids)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?)""",
                 (
                     page_id, user_id, entity_canonical,
                     json.dumps(surface_forms or []),
@@ -2171,10 +2281,115 @@ class MemoryStore:
                     json.dumps(source_relation_ids or []),
                     len(source_fact_ids or []),
                     len(source_relation_ids or []),
+                    sections_json,
+                    entity_weight if entity_weight is not None else 1.0,
+                    size_bucket or "small",
+                    delta_json,
                 ),
             )
             conn.commit()
             return page_id
+
+    # ── Faz 22J: Living wiki version history + scoring helpers ────
+
+    def insert_page_version(
+        self,
+        page_id: str,
+        user_id: str,
+        entity_canonical: str,
+        version: int,
+        content_md: str,
+        compile_kind: str = "full",
+        section_diff: dict | None = None,
+        source_fact_ids: list[str] | None = None,
+        delta_fact_ids: list[str] | None = None,
+        token_budget: int | None = None,
+        output_tokens: int | None = None,
+    ) -> str:
+        """Append a snapshot of a page version. Append-only — never
+        UPDATE or DELETE these rows. Used for diff/history inspection
+        and rollback. Returns the generated version_id.
+        """
+        import uuid
+
+        version_id = str(uuid.uuid4())[:12]
+        with self._get_conn() as conn:
+            conn.execute(
+                """INSERT INTO memory_entity_page_versions
+                       (version_id, page_id, user_id, entity_canonical, version,
+                        content_md, section_diff, source_fact_ids,
+                        compile_kind, delta_fact_ids,
+                        token_budget, output_tokens)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    version_id, page_id, user_id, entity_canonical, version,
+                    content_md,
+                    json.dumps(section_diff) if section_diff else None,
+                    json.dumps(source_fact_ids) if source_fact_ids is not None else None,
+                    compile_kind,
+                    json.dumps(delta_fact_ids) if delta_fact_ids is not None else None,
+                    token_budget,
+                    output_tokens,
+                ),
+            )
+            conn.commit()
+        return version_id
+
+    def list_page_versions(
+        self, page_id: str, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        """Return version history snapshots for a page, newest first."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                """SELECT * FROM memory_entity_page_versions
+                       WHERE page_id = ?
+                       ORDER BY version DESC
+                       LIMIT ?""",
+                (page_id, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def compute_entity_weight(
+        self, user_id: str, entity_canonical: str
+    ) -> float:
+        """Heuristic weight used for adaptive page-size buckets.
+
+        Combines log-scaled fact + relation counts with normalised access
+        signal. Hubs (Zeynep, owner — 30+ facts, 40+ relations) end up at
+        ~6.0; long-tail entities (1-2 mentions) stay below 1.0.
+        """
+        import math
+
+        with self._get_conn() as conn:
+            row = conn.execute(
+                """SELECT fact_count, relation_count,
+                          COALESCE(access_count, 0) AS access_count
+                       FROM memory_entity_pages
+                       WHERE user_id = ? AND entity_canonical = ?""",
+                (user_id, entity_canonical),
+            ).fetchone()
+            if not row:
+                # Compute from raw facts + relations even if no page yet.
+                fact_row = conn.execute(
+                    """SELECT COUNT(*) FROM memory_facts
+                           WHERE user_id = ? AND valid_until IS NULL
+                             AND content LIKE ?""",
+                    (user_id, f"%{entity_canonical}%"),
+                ).fetchone()
+                rel_row = conn.execute(
+                    """SELECT COUNT(*) FROM memory_relations
+                           WHERE user_id = ? AND valid_until IS NULL
+                             AND (canonical_source = ? OR canonical_target = ?)""",
+                    (user_id, entity_canonical, entity_canonical),
+                ).fetchone()
+                fc = fact_row[0] if fact_row else 0
+                rc = rel_row[0] if rel_row else 0
+                ac = 0
+            else:
+                fc = row["fact_count"] or 0
+                rc = row["relation_count"] or 0
+                ac = row["access_count"] or 0
+        return math.log1p(fc) + 0.5 * math.log1p(rc) + 0.3 * min(1.0, ac / 20.0)
 
     def get_entity_page(
         self, user_id: str, entity_canonical: str
@@ -2196,6 +2411,27 @@ class MemoryStore:
                 )
                 conn.commit()
         return dict(row) if row else None
+
+    def list_canonical_entities(self, user_id: str) -> list[str]:
+        """All canonical entity names known for this user — union of
+        page entities + relation endpoints. Used by the ripple scan in
+        ``MemoryService._collect_touched_entities`` (Faz 22J).
+        """
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                """SELECT DISTINCT entity_canonical AS c FROM memory_entity_pages
+                       WHERE user_id = ?
+                   UNION
+                   SELECT DISTINCT canonical_source FROM memory_relations
+                       WHERE user_id = ? AND canonical_source IS NOT NULL
+                         AND canonical_source != ''
+                   UNION
+                   SELECT DISTINCT canonical_target FROM memory_relations
+                       WHERE user_id = ? AND canonical_target IS NOT NULL
+                         AND canonical_target != ''""",
+                (user_id, user_id, user_id),
+            ).fetchall()
+        return [r["c"] for r in rows if r["c"]]
 
     def list_entity_pages(
         self,

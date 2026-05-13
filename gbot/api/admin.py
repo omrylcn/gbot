@@ -515,6 +515,61 @@ async def admin_recompile_entity_page(
     }
 
 
+@router.get("/memory/{user_id}/pages/{entity}/versions")
+async def admin_list_page_versions(
+    user_id: str,
+    entity: str,
+    limit: int = Query(default=20, ge=1, le=200),
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    db: MemoryStore = Depends(get_db),
+):
+    """Faz 22J — return the append-only compile-version history for an
+    entity page. Useful for diffing recent revisions, debugging
+    incremental updates, or rolling back via UI.
+    """
+    _require_owner(current_user, config)
+    page = db.get_entity_page(user_id, entity)
+    if not page:
+        return {"ok": False, "reason": "page not found", "entity": entity}
+    versions = db.list_page_versions(page["page_id"], limit=limit)
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "entity": entity,
+        "page_id": page["page_id"],
+        "count": len(versions),
+        "versions": versions,
+    }
+
+
+@router.post("/memory/{user_id}/pages/lint")
+async def admin_lint_pages(
+    user_id: str,
+    current_user: str = Depends(get_current_user),
+    config: Config = Depends(get_config),
+    db: MemoryStore = Depends(get_db),
+):
+    """Faz 22J — sweep wiki pages for stale citations + orphan pages.
+    Idempotent. Returns counts. Runs the same logic that the weekly
+    maintenance pass invokes."""
+    _require_owner(current_user, config)
+    from gbot.memory.entities import EntityResolver
+    from gbot.memory.entity_pages import EntityPageCompiler
+    from gbot.memory.maintenance import MemoryMaintenance
+
+    owner = getattr(config.assistant, "owner", None)
+    resolver = EntityResolver(
+        db,
+        owner_username=getattr(owner, "username", None) if owner else None,
+        owner_display_name=getattr(owner, "name", None) if owner else None,
+    )
+    compiler = EntityPageCompiler(db, config.memory, resolver=resolver)
+    maintenance = MemoryMaintenance(db, config.memory, compiler=compiler)
+    stats = await maintenance.lint_pages(user_id)
+    return stats
+
+
 @router.delete("/memory/{user_id}/entity/{entity}")
 async def admin_forget_entity(
     user_id: str,

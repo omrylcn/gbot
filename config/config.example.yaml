@@ -119,8 +119,31 @@ memory:
     min_facts_for_page: 3
     min_relations_for_page: 2
     max_input_tokens: 1000
-    max_output_tokens: 200
-    max_pages_in_context: 3
+    max_output_tokens: 200            # legacy fallback (small bucket)
+    max_pages_in_context: 3           # legacy — overridden by len(pinned) + dynamic_top_k
+    # Faz 22J — Living wiki
+    pinned: ["owner"]                 # always present in context
+    incremental_enabled: true         # update existing page with delta facts
+    incremental_max_delta: 5          # >N facts → fall back to full compile
+    lint_enabled: true                # weekly contradiction/stale-citation sweep
+    max_ripple_per_extraction: 12     # 1 fact → up to N page enqueues
+    # Adaptive size by entity weight bucket (highest matching wins)
+    size_buckets:
+      small:  { weight_max: 2.0,   max_tokens: 200 }
+      medium: { weight_max: 8.0,   max_tokens: 600 }
+      large:  { weight_max: 20.0,  max_tokens: 1500 }
+      owner:  { weight_max: 9999.0, max_tokens: 3000 }
+    # Faz 22J-B — Dynamic retrieval
+    dynamic_top_k: 4                  # non-pinned pages selected by scorer
+    wiki_index_enabled: true
+    wiki_index_group_by_type: true
+    scoring:
+      alpha_direct: 2.0
+      beta_semantic: 1.5
+      gamma_backlink: 1.0
+      delta_graph: 0.5
+      epsilon_recency: 0.3
+      recency_half_life_days: 14
   obsidian_sync:                     # Faz 22G Aşama 4 — entity pages → markdown export
     enabled: false                   # opt-in; needs entity_pages.enabled=true to be useful
     vault_path: "/app/data/obsidian" # written under this directory as <user>/<entity>.md

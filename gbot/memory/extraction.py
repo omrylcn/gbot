@@ -262,9 +262,14 @@ class MemoryService:
         if added or updated:
             logger.info(f"Memory extraction for {user_id}: {stats}")
 
-        # Faz 22D — entity page recompilation (debounced)
+        # Faz 22D — entity page recompilation (debounced).
+        # Faz 22J — extended ripple: scan fact content for known canonicals
+        # so a single new fact can touch multiple pages (Karpathy "10-15"
+        # pattern) without an explicit relation tying them.
         if (added or updated or deleted) and self.entity_compiler:
-            touched = self._collect_touched_entities(user_id, raw_relations)
+            touched = self._collect_touched_entities(
+                user_id, raw_relations, raw_facts,
+            )
             for canonical in touched:
                 try:
                     await self.entity_compiler.enqueue(user_id, canonical)
@@ -274,14 +279,27 @@ class MemoryService:
         return stats
 
     def _collect_touched_entities(
-        self, user_id: str, raw_relations: list[dict[str, Any]]
+        self,
+        user_id: str,
+        raw_relations: list[dict[str, Any]],
+        raw_facts: list[dict[str, Any]] | None = None,
     ) -> set[str]:
         """Canonical entity names mentioned by the latest extraction.
 
-        Resolves surface forms through the resolver so the compiler keys
-        on the same canonical the page table uses. Excludes empty strings.
+        Two sources combined:
+        1. Relations — every source/target canonical (always).
+        2. **Faz 22J ripple**: scan fact ``content`` against the known
+           canonical pool from ``memory_entity_pages``; a fact that
+           mentions "Zeynep" causes the Zeynep page to recompile even
+           if the extracted relations don't reference her explicitly.
+
+        Capped at ``memory.entity_pages.max_ripple_per_extraction`` so a
+        long article touching every canonical doesn't trigger a compile
+        storm. Sorted by mention strength (relations first, then richer
+        canonicals).
         """
         touched: set[str] = set()
+        # 1. Relations (legacy path) — always counted, no cap.
         for rel in raw_relations:
             for surface in (rel.get("source"), rel.get("target")):
                 if not surface:
@@ -292,6 +310,32 @@ class MemoryService:
                     canonical = surface
                 if canonical:
                     touched.add(canonical)
+
+        # 2. Fact-content ripple.
+        page_cfg = getattr(self.config, "entity_pages", None) if self.config else None
+        ripple_cap = (
+            getattr(page_cfg, "max_ripple_per_extraction", 12) if page_cfg else 12
+        )
+        if raw_facts and ripple_cap > 0:
+            try:
+                known = self.db.list_canonical_entities(user_id) or []
+            except Exception:
+                known = []
+            # Substring scan — case-insensitive, longest-first so "Akasya
+            # AVM" wins over "Akasya". Skip entities already touched via
+            # relations to save work.
+            for canonical in sorted(known, key=len, reverse=True):
+                if not canonical or canonical in touched:
+                    continue
+                if len(touched) >= ripple_cap:
+                    break
+                hay = canonical.lower()
+                for fact in raw_facts:
+                    body = (fact.get("content") or "").lower()
+                    if hay in body:
+                        touched.add(canonical)
+                        break
+
         return touched
 
     async def _audn_decide(

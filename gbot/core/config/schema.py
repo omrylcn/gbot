@@ -282,6 +282,21 @@ class ObsidianSyncConfig(BaseModel):
     include_stale: bool = False
 
 
+class PageScoringConfig(BaseModel):
+    """Faz 22J-B — weights for the multi-signal entity-page scorer.
+
+    Each signal returns a value roughly in [0, 1]; weighted sum
+    determines rank. Pinned pages bypass the score entirely.
+    """
+
+    alpha_direct: float = 2.0          # surface-form mention in query
+    beta_semantic: float = 1.5         # cosine(query_emb, page_emb)
+    gamma_backlink: float = 1.0        # shared fact_ids w/ retrieved facts
+    delta_graph: float = 0.5           # 1-hop neighbour in entities_in_play
+    epsilon_recency: float = 0.3       # exp-decayed by half-life
+    recency_half_life_days: int = 14
+
+
 class MemoryEntityPagesConfig(BaseModel):
     """Faz 22D — LLM-compiled entity pages (Karpathy LLM-Wiki pattern).
 
@@ -289,6 +304,15 @@ class MemoryEntityPagesConfig(BaseModel):
     (debounced) and a separate context layer. Enable when the relations
     graph is rich enough to justify it (typically after a few weeks of
     accumulated facts).
+
+    Faz 22J — living wiki extensions:
+    - ``pinned`` keeps anchor entities (e.g. owner) in context every turn
+    - ``incremental_enabled`` activates Karpathy-style "update old page
+      with delta facts" instead of full rewrite
+    - ``size_buckets`` map entity weight → max_output_tokens bucket so
+      hubs get bigger pages naturally
+    - ``dynamic_top_k`` limits non-pinned pages selected by the scorer
+    - ``scoring`` weights drive the multi-signal page selector
     """
 
     enabled: bool = False
@@ -297,8 +321,31 @@ class MemoryEntityPagesConfig(BaseModel):
     min_facts_for_page: int = 3
     min_relations_for_page: int = 2
     max_input_tokens: int = 1000
-    max_output_tokens: int = 200
-    max_pages_in_context: int = 3
+    max_output_tokens: int = 200       # legacy hard cap (also fallback for small bucket)
+    max_pages_in_context: int = 3      # legacy; superseded by len(pinned) + dynamic_top_k
+
+    # ── Faz 22J — Living wiki ─────────────────────────────────
+    pinned: list[str] = Field(default_factory=lambda: ["owner"])
+    incremental_enabled: bool = True
+    incremental_max_delta: int = 5     # if delta > N → fall back to full compile
+    lint_enabled: bool = True
+    max_ripple_per_extraction: int = 12
+    # Adaptive size: (weight upper bound) → (max_output_tokens, bucket name)
+    # Highest matching bucket wins. Pinned entities always use the top bucket.
+    size_buckets: dict[str, dict] = Field(
+        default_factory=lambda: {
+            "small":  {"weight_max": 2.0,   "max_tokens": 200},
+            "medium": {"weight_max": 8.0,   "max_tokens": 600},
+            "large":  {"weight_max": 20.0,  "max_tokens": 1500},
+            "owner":  {"weight_max": 9999.0, "max_tokens": 3000},
+        }
+    )
+
+    # ── Faz 22J-B — Dynamic retrieval ────────────────────────
+    dynamic_top_k: int = 4             # non-pinned pages selected by scorer
+    wiki_index_enabled: bool = True    # render `[[entity]] · stats` index block
+    wiki_index_group_by_type: bool = True
+    scoring: PageScoringConfig = Field(default_factory=PageScoringConfig)
 
 
 class MemoryConfig(BaseModel):

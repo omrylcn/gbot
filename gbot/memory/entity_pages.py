@@ -44,17 +44,47 @@ if TYPE_CHECKING:
     from gbot.memory.store import MemoryStore
 
 
-_PAGE_PROMPT = """You are compiling a memory page for the entity below.
+# Section names used by the parser. Turkish synonyms accept the same
+# semantic slot — the LLM may emit either set.
+_CANONICAL_SECTIONS = ("Lead", "Profile", "Interactions", "History")
+_SECTION_SYNONYMS = {
+    # English canonical → Turkish synonyms (we normalise to the English form
+    # in the parser to avoid downstream branches).
+    "Lead": ("Lead", "Özet", "Giriş"),
+    "Profile": ("Profile", "Profil"),
+    "Interactions": ("Interactions", "Etkileşim", "Olaylar"),
+    "History": ("History", "Geçmiş", "Tarihçe"),
+}
 
-Output format:
-1. ONE short paragraph (max 80 words) — who/what this entity is, their
-   relationship to the user, and the most current state.
-2. A bullet list of the 3–7 most important facts. Each bullet ends with
-   `[fact_id:xxxxxxxx]` citation. Resolve any contradictions toward the
-   most recent valid fact and ignore the rest.
-3. Markdown only. No greeting, no preamble, no headings beyond the
-   bullet list. Match the dominant language of the source facts
-   (typically Turkish).
+
+_PAGE_PROMPT_FULL = """You are compiling a memory wiki page for the entity below.
+
+Output **markdown with four sections**, each as an H2 header (use the
+English headers verbatim so the parser can find them):
+
+## Lead
+ONE short paragraph (target {lead_words} words) — who/what this entity is,
+their relationship to the user, and the most current state. Resolve any
+contradictions toward the most recent valid fact.
+
+## Profile
+Bullet list of stable structural facts (lives_in, works_at, owns,
+married_to, partner_of, knows, uses, studies). Each bullet ends with
+`[fact_id:xxxxxxxx]` citation when a specific fact backs it. Skip if no
+structural facts apply.
+
+## Interactions
+Bullet list of recent or notable events with this entity (episodic
+facts). Each bullet starts with a date when known (`YYYY-MM-DD —`).
+Skip if no episodic facts apply.
+
+## History
+Leave empty on a fresh compile. Reserved for superseded claims (filled
+on incremental updates only).
+
+Use markdown only — no greeting, no preamble. Match the dominant
+language of the source facts (typically Turkish). Total length should
+not exceed {budget_tokens} tokens.
 
 ENTITY: {entity}
 ALIASES: {aliases}
@@ -65,6 +95,47 @@ RELATIONS (valid only):
 FACTS (most recent first, valid only):
 {facts}
 """
+
+
+_PAGE_PROMPT_INCREMENTAL = """You are **updating** an existing memory wiki
+page with new information. The page already has four sections — Lead,
+Profile, Interactions, History — and your job is to merge the delta
+facts into the right places without rewriting unchanged content.
+
+Rules:
+1. **Keep unchanged text verbatim**. Do NOT paraphrase or rephrase the
+   existing Lead / Profile / Interactions text unless a delta fact
+   directly contradicts a claim there.
+2. **Move contradicted claims to ## History** with a dated marker:
+   `- ~~old claim~~ (superseded {today})`. Do this only when a delta
+   fact replaces a specific Lead/Profile/Interactions bullet.
+3. **Append new structural facts** as bullets in ## Profile.
+4. **Append new episodic facts** as bullets in ## Interactions, dated.
+5. Lead paragraph: only revise if the entity's headline status changed
+   (job, location, relationship). Otherwise leave verbatim.
+6. Each new bullet ends with `[fact_id:xxxxxxxx]` citation.
+7. Markdown only, four sections preserved. Total length cap:
+   {budget_tokens} tokens.
+
+ENTITY: {entity}
+ALIASES: {aliases}
+
+CURRENT PAGE:
+{current_page}
+
+DELTA FACTS (new since last compile):
+{delta_facts}
+
+OTHER VALID FACTS (for context, do not duplicate):
+{context_facts}
+
+RELATIONS (valid only):
+{relations}
+"""
+
+
+# Kept for backward compatibility (some test fixtures import this symbol).
+_PAGE_PROMPT = _PAGE_PROMPT_FULL
 
 
 @dataclass
@@ -169,8 +240,9 @@ class EntityPageCompiler:
     async def _compile(
         self, user_id: str, canonical: str
     ) -> dict[str, Any] | None:
-        """Gather context → call LLM → upsert page. Returns the page row
-        or None if not eligible / failed.
+        """Gather context → choose full vs incremental → upsert page +
+        append version snapshot. Returns the page row or None if not
+        eligible / failed.
         """
         page_cfg = self.config.entity_pages
 
@@ -208,28 +280,37 @@ class EntityPageCompiler:
             except (ValueError, TypeError, KeyError):
                 pass
 
-        # Render LLM prompt
-        prompt = _PAGE_PROMPT.format(
-            entity=canonical,
-            aliases=", ".join(sorted(surface_forms)) if surface_forms else canonical,
-            relations=self._format_relations(relations),
-            facts=self._format_facts(facts),
+        # Faz 22J — adaptive size + branch on incremental eligibility.
+        pinned = canonical in (getattr(page_cfg, "pinned", []) or [])
+        weight = self.db.compute_entity_weight(user_id, canonical)
+        budget_tokens, bucket = self._adaptive_max_output_tokens(weight, pinned)
+
+        delta_fact_ids = self._compute_delta_fact_ids(existing, facts)
+        use_incremental = bool(
+            getattr(page_cfg, "incremental_enabled", True)
+            and existing
+            and existing.get("sections")
+            and 0 < len(delta_fact_ids) <= getattr(page_cfg, "incremental_max_delta", 5)
         )
 
-        try:
-            response = await llm_provider.achat(
-                messages=[{"role": "user", "content": prompt}],
-                model=self.model,
-                temperature=0.2,
-                max_tokens=page_cfg.max_output_tokens,
+        if use_incremental:
+            content_md, compile_kind = await self._compile_incremental(
+                canonical, existing, facts, relations, surface_forms,
+                delta_fact_ids, budget_tokens,
             )
-            content_md = (response.content or "").strip()
-        except Exception as e:
-            logger.warning(f"entity-page LLM failed for {canonical}: {e}")
-            return None
+        else:
+            content_md, compile_kind = await self._compile_full(
+                canonical, facts, relations, surface_forms, budget_tokens,
+            )
 
         if not content_md:
             return None
+
+        sections = self._parse_sections(content_md)
+        old_sections = (
+            json.loads(existing["sections"]) if existing and existing.get("sections") else {}
+        )
+        section_diff = self._diff_sections(old_sections, sections)
 
         page_id = self.db.upsert_entity_page(
             user_id=user_id,
@@ -238,12 +319,238 @@ class EntityPageCompiler:
             source_fact_ids=[f["fact_id"] for f in facts],
             source_relation_ids=[r["relation_id"] for r in relations],
             surface_forms=sorted(surface_forms),
+            sections=sections,
+            entity_weight=weight,
+            size_bucket=bucket,
+            last_delta_fact_ids=delta_fact_ids,
         )
+
+        # Append a snapshot to history — append-only, lets us inspect
+        # diffs and roll back if needed (Faz 22J).
+        try:
+            new_page = self.db.get_entity_page(user_id, canonical)
+            self.db.insert_page_version(
+                page_id=page_id,
+                user_id=user_id,
+                entity_canonical=canonical,
+                version=int(new_page.get("version") if new_page else 1),
+                content_md=content_md,
+                compile_kind=compile_kind,
+                section_diff=section_diff,
+                source_fact_ids=[f["fact_id"] for f in facts],
+                delta_fact_ids=delta_fact_ids,
+                token_budget=budget_tokens,
+                output_tokens=len(content_md) // 4,  # rough char/4 heuristic
+            )
+        except Exception as e:  # pragma: no cover — defensive
+            logger.debug(f"insert_page_version failed for {canonical}: {e}")
+
         logger.info(
-            f"entity-page compiled: {canonical} (page_id={page_id}, "
-            f"{len(facts)} facts, {len(relations)} relations)"
+            f"entity-page {compile_kind}: {canonical} (page_id={page_id}, "
+            f"weight={weight:.2f}, bucket={bucket}, budget={budget_tokens}, "
+            f"{len(facts)} facts, {len(relations)} relations, "
+            f"delta={len(delta_fact_ids)})"
         )
         return self.db.get_entity_page(user_id, canonical)
+
+    async def _compile_full(
+        self,
+        canonical: str,
+        facts: list[dict[str, Any]],
+        relations: list[dict[str, Any]],
+        surface_forms: set[str],
+        budget_tokens: int,
+    ) -> tuple[str, str]:
+        """Full rewrite — first compile or contradicted-everything case.
+        Returns (content_md, compile_kind)."""
+        lead_words = self._target_lead_words(budget_tokens)
+        prompt = _PAGE_PROMPT_FULL.format(
+            entity=canonical,
+            aliases=", ".join(sorted(surface_forms)) if surface_forms else canonical,
+            relations=self._format_relations(relations),
+            facts=self._format_facts(facts),
+            budget_tokens=budget_tokens,
+            lead_words=lead_words,
+        )
+        try:
+            response = await llm_provider.achat(
+                messages=[{"role": "user", "content": prompt}],
+                model=self.model,
+                temperature=0.2,
+                max_tokens=budget_tokens,
+            )
+            return (response.content or "").strip(), "full"
+        except Exception as e:
+            logger.warning(f"entity-page LLM (full) failed for {canonical}: {e}")
+            return "", "full"
+
+    async def _compile_incremental(
+        self,
+        canonical: str,
+        existing: dict[str, Any],
+        facts: list[dict[str, Any]],
+        relations: list[dict[str, Any]],
+        surface_forms: set[str],
+        delta_fact_ids: list[str],
+        budget_tokens: int,
+    ) -> tuple[str, str]:
+        """Karpathy LLM-Wiki update: keep verbatim, append new bullets,
+        move contradictions to ## History. Returns (content_md, kind).
+
+        Falls back to full compile if the LLM appears to have rewritten
+        the unchanged Lead paragraph (drift > 50% Jaccard distance).
+        """
+        from datetime import date
+
+        delta_facts = [f for f in facts if f["fact_id"] in delta_fact_ids]
+        context_facts = [f for f in facts if f["fact_id"] not in delta_fact_ids]
+
+        old_sections = json.loads(existing.get("sections") or "{}")
+        old_lead = (old_sections.get("Lead") or "").strip()
+
+        prompt = _PAGE_PROMPT_INCREMENTAL.format(
+            entity=canonical,
+            aliases=", ".join(sorted(surface_forms)) if surface_forms else canonical,
+            current_page=existing.get("content_md") or "",
+            delta_facts=self._format_facts(delta_facts),
+            context_facts=self._format_facts(context_facts[:8]),
+            relations=self._format_relations(relations),
+            budget_tokens=budget_tokens,
+            today=date.today().isoformat(),
+        )
+        try:
+            response = await llm_provider.achat(
+                messages=[{"role": "user", "content": prompt}],
+                model=self.model,
+                temperature=0.2,
+                max_tokens=budget_tokens,
+            )
+            content_md = (response.content or "").strip()
+        except Exception as e:
+            logger.warning(f"entity-page LLM (incremental) failed for {canonical}: {e}")
+            return "", "incremental"
+
+        # Drift guard — if the LLM rewrote the Lead despite no contradicting
+        # delta fact, fall back to a full compile so we don't silently lose
+        # the existing wording.
+        new_sections = self._parse_sections(content_md)
+        new_lead = (new_sections.get("Lead") or "").strip()
+        if old_lead and new_lead and self._jaccard_distance(old_lead, new_lead) > 0.5:
+            logger.warning(
+                f"entity-page incremental drift detected for {canonical} — "
+                f"Lead rewrote (jaccard>{0.5}); falling back to full compile"
+            )
+            return await self._compile_full(
+                canonical, facts, relations, surface_forms, budget_tokens,
+            )
+
+        return content_md, "incremental"
+
+    # ── Faz 22J helpers ───────────────────────────────────────────
+
+    def _adaptive_max_output_tokens(
+        self, weight: float, pinned: bool
+    ) -> tuple[int, str]:
+        """Map entity weight → (max_tokens, bucket_name). Pinned entities
+        always use the largest bucket so the user's anchor pages have
+        room to breathe."""
+        page_cfg = self.config.entity_pages
+        buckets = getattr(page_cfg, "size_buckets", None) or {}
+        # Sort buckets by weight_max so we pick the smallest container that fits.
+        ordered = sorted(buckets.items(), key=lambda kv: kv[1].get("weight_max", 0))
+        if pinned and ordered:
+            name, conf = ordered[-1]
+            return int(conf.get("max_tokens", 3000)), name
+        for name, conf in ordered:
+            if weight <= float(conf.get("weight_max", 0)):
+                return int(conf.get("max_tokens", page_cfg.max_output_tokens)), name
+        # Fallback to legacy cap if no bucket matched.
+        return int(page_cfg.max_output_tokens), "small"
+
+    def _compute_delta_fact_ids(
+        self,
+        existing: dict[str, Any] | None,
+        facts: list[dict[str, Any]],
+    ) -> list[str]:
+        """Fact ids present now but not in the last compile's source list."""
+        if not existing:
+            return [f["fact_id"] for f in facts]
+        try:
+            prior = set(json.loads(existing.get("source_fact_ids") or "[]"))
+        except (ValueError, TypeError):
+            prior = set()
+        current = [f["fact_id"] for f in facts]
+        return [fid for fid in current if fid not in prior]
+
+    def _parse_sections(self, md: str) -> dict[str, str]:
+        """Split markdown into the four canonical sections. Accepts
+        Turkish synonyms in headers and normalises to English keys.
+
+        Lines before the first recognised H2 are kept under ``"Lead"``
+        if Lead wasn't explicitly headed.
+        """
+        import re
+
+        # Build a synonyms-to-canonical lookup (case-insensitive).
+        syn_map: dict[str, str] = {}
+        for canonical, synonyms in _SECTION_SYNONYMS.items():
+            for s in synonyms:
+                syn_map[s.lower()] = canonical
+
+        sections: dict[str, list[str]] = {k: [] for k in _CANONICAL_SECTIONS}
+        current = "Lead"  # implicit head until first ## header
+        header_re = re.compile(r"^##\s+(.+?)\s*$")
+
+        for line in md.splitlines():
+            m = header_re.match(line)
+            if m:
+                key = syn_map.get(m.group(1).strip().lower())
+                if key:
+                    current = key
+                    continue
+                # Unknown ## header — keep it inside the current section.
+            sections[current].append(line)
+
+        return {k: "\n".join(v).strip() for k, v in sections.items()}
+
+    @staticmethod
+    def _diff_sections(
+        old: dict[str, str], new: dict[str, str]
+    ) -> dict[str, str]:
+        """Tag each section as ``added``, ``edited``, ``removed``, or
+        ``unchanged``. Lightweight — just a presence + equality check."""
+        diff: dict[str, str] = {}
+        keys = set(old.keys()) | set(new.keys())
+        for k in keys:
+            o = (old.get(k) or "").strip()
+            n = (new.get(k) or "").strip()
+            if not o and n:
+                diff[k] = "added"
+            elif o and not n:
+                diff[k] = "removed"
+            elif o != n:
+                diff[k] = "edited"
+            else:
+                diff[k] = "unchanged"
+        return diff
+
+    @staticmethod
+    def _jaccard_distance(a: str, b: str) -> float:
+        """1.0 − Jaccard(a, b) over lowercased word sets. Cheap drift
+        detector for the incremental-compile guard."""
+        ta = set(a.lower().split())
+        tb = set(b.lower().split())
+        if not ta and not tb:
+            return 0.0
+        intersection = len(ta & tb)
+        union = len(ta | tb) or 1
+        return 1.0 - (intersection / union)
+
+    @staticmethod
+    def _target_lead_words(budget_tokens: int) -> int:
+        """Crude mapping of total page budget → target words for the
+        Lead paragraph. Roughly 25% of budget, capped at 120 words."""
+        return min(120, max(40, int(budget_tokens * 0.75 // 4)))
 
     # ── Helpers ───────────────────────────────────────────────────
 
