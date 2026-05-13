@@ -22,6 +22,23 @@ assistant:
   # system_prompt: "You are GBot — a helpful AI assistant."
   # ^ If set, overrides AGENT.md (higher priority)
 
+  context_priorities:                # Faz 22J-C — per-layer token budgets
+    # Defaults shown — uncomment to override.
+    # identity: 500
+    # agent_memory: 500
+    # user_context: 6000             # was 1500; bumped for the living wiki
+    # session_summary: 1000
+    # skills: 1000
+    # tool_definitions_target: 2500  # informational only
+    # user_context_sub:
+    #   wiki_index: 400
+    #   pinned_pages: 1100
+    #   dynamic_pages: 2200
+    #   learned: 1500
+    #   relationships: 750
+    #   explicit: 500
+    #   style: 250
+
 providers:
   # API keys are read from .env (OPENROUTER_API_KEY, OPENAI_API_KEY, etc.)
   # Leave empty here — env vars take priority. Only override below if you

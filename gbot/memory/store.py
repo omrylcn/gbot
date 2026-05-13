@@ -711,10 +711,11 @@ class MemoryStore:
             )
 
     def list_users(self) -> list[dict[str, Any]]:
-        """List all users with their linked channels."""
+        """List all users with their linked channels + role."""
         with self._get_conn() as conn:
             users = conn.execute(
-                "SELECT user_id, name, created_at FROM users ORDER BY created_at"
+                "SELECT user_id, name, role, created_at FROM users "
+                "ORDER BY created_at"
             ).fetchall()
         result = []
         for u in users:

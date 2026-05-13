@@ -32,11 +32,16 @@ def test_schema_has_state_column(store):
     assert "last_accessed_at" in cols
 
 
-def test_user_version_is_23(tmp_path):
+def test_user_version_is_at_least_22g(tmp_path):
+    """Schema migrations move user_version forward over time. Faz 22G
+    bumped to 23, Faz 22J to 24. The lifecycle columns were added in
+    22G, so anything ≥ 23 means the migration this file cares about
+    has run.
+    """
     db = MemoryStore(str(tmp_path / "v.db"))
     with db._get_conn() as conn:
         v = conn.execute("PRAGMA user_version").fetchone()[0]
-    assert v == 23
+    assert v >= 23
 
 
 def test_backfill_sets_state_from_implicit_signals(tmp_path):

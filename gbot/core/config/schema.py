@@ -59,14 +59,40 @@ class RolesConfig(BaseModel):
     available: dict[str, str] = Field(default_factory=dict)
 
 
+class UserContextSubBudgetsConfig(BaseModel):
+    """Faz 22J-C — per-block budget inside the ``user_context`` layer.
+
+    Together these add up to a bit more than ``user_context`` so a
+    single block can overflow without immediately starving the others.
+    The hierarchical drop in ``ContextBuilder._render_user_context``
+    chooses what to trim first when the total exceeds the parent cap.
+    """
+
+    wiki_index: int = 400
+    pinned_pages: int = 1100
+    dynamic_pages: int = 2200
+    learned: int = 1500
+    relationships: int = 750
+    explicit: int = 500
+    style: int = 250
+
+
 class ContextPrioritiesConfig(BaseModel):
     """Token budget per context layer (approximate — 1 token ~ 4 chars)."""
 
     identity: int = 500
     agent_memory: int = 500
-    user_context: int = 1500
-    session_summary: int = 500
+    # Faz 22J-C — bumped from 1500 to 6000 so the living wiki has room
+    # to grow (owner page alone can be up to 3000 tokens).
+    user_context: int = 6000
+    session_summary: int = 1000
     skills: int = 1000
+    user_context_sub: UserContextSubBudgetsConfig = Field(
+        default_factory=UserContextSubBudgetsConfig
+    )
+    # Informational only — emit a warning when the registered tools
+    # exceed this. Doesn't truncate (LangChain controls tool serialisation).
+    tool_definitions_target: int = 2500
 
 
 class AssistantConfig(BaseModel):

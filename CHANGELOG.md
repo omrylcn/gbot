@@ -6,6 +6,143 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.26.0] - 2026-05-13 — Faz 22J: Living Wiki Pages + Dynamic Retrieval + 10k Context
+
+Three independently shippable alt-fases land together as v1.26.0.
+Together they implement Karpathy's LLM-Wiki pattern: pages accumulate,
+update incrementally, contradictions move to a History section, and
+the context layer pulls the right page in via a multi-signal score.
+
+### 22J-A — Living wiki compile (commit `e83df7d`)
+
+Entity pages used to be rewritten from scratch on every compile —
+every contradicting fact erased the prior page. Now compile is
+structurally aware:
+
+- **Section template**: each page has ``## Lead``, ``## Profile``,
+  ``## Interactions``, ``## History`` headers (Turkish synonyms
+  accepted — Özet / Profil / Etkileşim / Geçmiş).
+- **Incremental update** (``_compile_incremental``): when an existing
+  page has sections and the delta-fact count is ≤
+  ``incremental_max_delta`` (default 5), the LLM gets the old page +
+  delta facts and is instructed to keep verbatim text, move
+  contradicted claims to ``## History`` with a date marker, and
+  append new bullets only. Drift guard (Jaccard > 0.5 on Lead)
+  falls back to a full compile.
+- **Adaptive size**: ``_adaptive_max_output_tokens`` maps
+  ``db.compute_entity_weight`` to a bucket — small (200 token),
+  medium (600), large (1500), owner (3000). Pinned entities always
+  use the owner bucket.
+- **Ripple**: ``MemoryService._collect_touched_entities`` now scans
+  fact ``content`` against ``list_canonical_entities`` and enqueues
+  every entity mentioned (capped at
+  ``max_ripple_per_extraction = 12``). A single fact can refresh up
+  to 12 pages — Karpathy's "10–15 pages per source" guidance.
+- **Version history**: ``memory_entity_page_versions`` table —
+  append-only snapshots with ``compile_kind`` (full / incremental /
+  lint), section diff, delta_fact_ids, token budget, output tokens.
+  Inspect via ``GET /admin/memory/{user}/pages/{entity}/versions``.
+- **Lint pass**: ``MemoryMaintenance.lint_pages`` scans every page
+  for ``[fact_id:xxx]`` citations whose facts have been archived
+  (marks page stale) plus pages where every source fact is invalid
+  (orphan enqueue). Runs in the weekly maintenance cron when
+  ``entity_pages.lint_enabled = true``. Manual trigger via
+  ``POST /admin/memory/{user}/pages/lint``.
+
+Schema bumped to ``PRAGMA user_version = 24``. Added columns
+(``entity_weight``, ``size_bucket``, ``sections``,
+``last_delta_fact_ids``, ``content_embedding``) all guarded by
+PRAGMA ``table_info`` so the migration is idempotent.
+
+### 22J-B — Dynamic retrieval (commit `37b8f14`)
+
+Pages no longer surface by substring count of in-play entities.
+Selection is now pinned + dynamic with multi-signal scoring:
+
+- **Pinned** (``entity_pages.pinned = ["owner"]`` by default): always
+  rendered, regardless of query. The user's own page is the
+  gravitational anchor of every turn.
+- **Dynamic top-K** (``dynamic_top_k = 4``): scored by a 5-signal
+  blend with weights from ``PageScoringConfig``:
+    α direct (2.0)  — surface form appears in the query
+    β semantic (1.5) — cosine(query_emb, page.content_embedding)
+    γ link (1.0)    — shared fact_ids with retrieved facts
+    δ graph (0.5)   — 1-hop relation neighbour of in-play entities
+    ε recency (0.3) — exp-decayed by 14-day half-life
+- **Page embedding**: ``EntityPageCompiler`` re-embeds content_md on
+  every compile; both ``content_embedding`` BLOB and
+  ``vec_entity_pages`` sqlite-vec virtual table are kept in sync.
+  ``POST /admin/memory/{user}/pages/reindex`` backfills legacy pages.
+- **Wiki index**: ``_render_wiki_index_block`` emits a compact
+  directory of every page grouped by size_bucket. Gives the LLM
+  a Karpathy-style ``index.md`` so it can see what pages exist
+  without loading their bodies.
+
+### 22J-C — Budget resize + sub-budgets (this commit)
+
+The wiki pages need room to breathe. Bumped:
+
+- ``ContextPrioritiesConfig.user_context: 1500 → 6000`` tokens
+- ``session_summary: 500 → 1000``
+- New ``UserContextSubBudgetsConfig`` carries per-block caps that
+  add up to a bit more than the parent budget so a single block
+  can overflow without starving the others:
+    wiki_index 400, pinned_pages 1100, dynamic_pages 2200,
+    learned 1500, relationships 750, explicit 500, style 250
+- New ``ContextPrioritiesConfig.tool_definitions_target: 2500`` is
+  informational only — LangChain owns tool serialisation, we just
+  warn when it grows past target.
+
+``ContextBuilder._assemble_user_context`` fits each block to its
+sub-budget then performs a hierarchical drop if the combined total
+still exceeds ``user_context``:
+
+1. drop ``style``
+2. drop ``explicit`` (user notes / preferences / favourites)
+3. drop ``relationships``
+4. drop ``wiki_index``
+5. drop ``learned``
+6. truncate ``pages`` as a last resort — pinned content sits at
+   the top so it survives a line-based trim
+
+``gbot/core/tokens.py`` is a new module wrapping ``tiktoken`` (opt
+dep). When installed it uses the ``cl100k_base`` encoder (within
+~10% of Anthropic/Gemini tokenisers); when not, falls back to the
+existing ``len/4`` heuristic so behaviour stays identical.
+
+### Migration
+
+Schema migration runs idempotently on startup. Existing pages
+keep their content and gain the new columns at default values
+(``entity_weight = 1.0``, ``size_bucket = 'small'``,
+``sections = NULL`` until their next compile). Reindex existing
+embeddings via the admin endpoint after first startup.
+
+### Tests
+
+446 pytest green (up from 441 in v1.25.2). New coverage:
+- ``test_user_version_is_at_least_22g`` now version-tolerant (≥23).
+- ``test_user_version_set`` accepts any version ≥ 22 + checks
+  idempotency on re-init.
+- Maintenance tests promote fixture users to ``role='owner'`` so
+  they survive the v1.25.2 owner-only bootstrap filter.
+- ``list_users`` now returns the ``role`` column (needed for the
+  bootstrap filter to see it).
+
+### Performance / cost
+
+- Page compile: incremental path expected ~50–70% smaller LLM call
+  than a full rewrite (passes old page + delta facts instead of
+  every valid fact).
+- Embedding cost: one ``embedder.embed`` call per compile finalize.
+  3072-dim, ~1.5K input chars typical; negligible vs the compile
+  call itself.
+- Memory budget: live owner system measured at 21 462 / 30 000
+  tokens before 22J; user_context grew from 636/1500 to a projected
+  ~4 000–5 500 / 6 000 once pages refresh. Headroom preserved.
+
+---
+
 ## [1.25.2] - 2026-05-12 — Memory bootstrap owner-only
 
 Hotfix: `_ensure_maintenance_jobs` and `_ensure_obsidian_jobs` were

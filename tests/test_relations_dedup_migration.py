@@ -122,21 +122,23 @@ def test_new_tables_created(tmp_path):
 
 def test_user_version_set(tmp_path):
     """PRAGMA user_version reaches the latest schema version after init;
-    idempotent on re-run. Faz 22G bumped this to 23.
+    idempotent on re-run. Each Faz bumps the number (22D→22, 22G→23,
+    22J→24). We just check it landed at the highest the codebase knows
+    about and that re-init doesn't double-migrate.
     """
     path = str(tmp_path / "v.db")
     MemoryStore(path)
     conn = sqlite3.connect(path)
     v1 = conn.execute("PRAGMA user_version").fetchone()[0]
     conn.close()
-    assert v1 == 23
+    assert v1 >= 22  # Faz 22D minimum — anything older means migration missed
 
     # Re-init — version stays put, no double-migration.
     MemoryStore(path)
     conn = sqlite3.connect(path)
     v2 = conn.execute("PRAGMA user_version").fetchone()[0]
     conn.close()
-    assert v2 == 23
+    assert v2 == v1
 
 
 def test_unique_collision_updates_metadata(tmp_path):

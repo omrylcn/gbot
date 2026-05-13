@@ -34,6 +34,12 @@ def store(tmp_path):
     db = MemoryStore(str(tmp_path / "maint.db"))
     db.get_or_create_user("u1", "Alice")
     db.get_or_create_user("u2", "Bob")
+    # Faz 22J post-bootstrap filter (v1.25.2) only registers maintenance
+    # jobs for owner-role users. The legacy tests in this file predate
+    # that filter and assert two-user behaviour, so we promote both
+    # fixture users to ``owner`` to preserve the original test intent.
+    db.set_user_role("u1", "owner")
+    db.set_user_role("u2", "owner")
     return db
 
 

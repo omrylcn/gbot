@@ -303,17 +303,22 @@ class ContextBuilder:
             except Exception:  # pragma: no cover — defensive
                 pass
 
-            combined = "\n\n".join(
-                p
-                for p in [
-                    user_ctx,
-                    style_block,
-                    wiki_index_block,
-                    entity_pages_block,
-                    learned,
-                    relationships,
-                ]
-                if p
+            # Faz 22J-C — per-block sub-budgets + hierarchical drop.
+            # Each block is fit to its own cap; if the concatenated
+            # total still overflows ``user_context``, ``_assemble_user_context``
+            # drops in priority order (style → explicit → relationships
+            # → learned tail → dynamic pages tail → wiki index; pinned
+            # pages survive).
+            sub = getattr(priorities, "user_context_sub", None)
+            combined = self._assemble_user_context(
+                user_ctx=user_ctx,
+                style_block=style_block,
+                wiki_index_block=wiki_index_block,
+                entity_pages_block=entity_pages_block,
+                learned=learned,
+                relationships=relationships,
+                sub_budgets=sub,
+                parent_budget=priorities.user_context,
             )
             if combined:
                 _add("user_context", f"# User Context\n\n{combined}", priorities.user_context)
@@ -1009,6 +1014,112 @@ class ContextBuilder:
         if len(text) <= char_limit:
             return text
         return text[:char_limit] + "\n\n[...truncated]"
+
+    @staticmethod
+    def _assemble_user_context(
+        user_ctx: str,
+        style_block: str,
+        wiki_index_block: str,
+        entity_pages_block: str,
+        learned: str,
+        relationships: str,
+        sub_budgets: Any | None,
+        parent_budget: int,
+    ) -> str:
+        """Faz 22J-C — per-block fit + hierarchical drop.
+
+        Each block is first fit into its own sub-budget. If the
+        concatenated total still exceeds ``parent_budget`` we drop
+        whole sections in priority order so the most important
+        information (pinned pages first, then learned facts) survives.
+        Pinned pages live inside ``entity_pages_block`` — they're at
+        the very top of that block so a generic line-based trim won't
+        cut them unless the rest is entirely gone.
+
+        Returns the final ``\\n\\n``-joined markdown (may be empty).
+        """
+        from gbot.core.tokens import count_tokens, fit_to_budget
+
+        # Default sub-budgets (used when config doesn't provide them).
+        defaults = {
+            "wiki_index": 400,
+            "pinned_pages": 1100,
+            "dynamic_pages": 2200,
+            "learned": 1500,
+            "relationships": 750,
+            "explicit": 500,
+            "style": 250,
+        }
+        if sub_budgets is not None:
+            for k in defaults:
+                v = getattr(sub_budgets, k, None)
+                if isinstance(v, int) and v > 0:
+                    defaults[k] = v
+
+        # ``entity_pages_block`` is a single chunk emitted by
+        # _render_entity_pages_block — pinned first, dynamic after.
+        # We cap its overall size at pinned + dynamic to keep the
+        # drop logic simple; per-page caps live in the page compiler.
+        pages_budget = defaults["pinned_pages"] + defaults["dynamic_pages"]
+
+        blocks: list[tuple[str, str, int]] = [
+            # (block_name, content, sub_budget) — order = render order
+            ("explicit", user_ctx, defaults["explicit"]),
+            ("style", style_block, defaults["style"]),
+            ("wiki_index", wiki_index_block, defaults["wiki_index"]),
+            ("pages", entity_pages_block, pages_budget),
+            ("learned", learned, defaults["learned"]),
+            ("relationships", relationships, defaults["relationships"]),
+        ]
+
+        # 1. Fit each block to its own cap.
+        fitted: list[tuple[str, str]] = []
+        for name, content, cap in blocks:
+            if not content:
+                continue
+            fitted.append((name, fit_to_budget(content, cap)))
+
+        def render(parts: list[tuple[str, str]]) -> str:
+            return "\n\n".join(p[1] for p in parts if p[1])
+
+        # 2. Hierarchical drop if total overflows parent_budget.
+        # Priority order — first to go = least essential.
+        drop_order = [
+            "style",
+            "explicit",
+            "relationships",
+            "wiki_index",
+            "learned",
+            # "pages" stays last; pinned pages live at the top of that
+            # block and we never want to drop them entirely.
+        ]
+        combined = render(fitted)
+        while combined and count_tokens(combined) > parent_budget:
+            dropped = False
+            for victim in drop_order:
+                for i, (name, _content) in enumerate(fitted):
+                    if name == victim:
+                        del fitted[i]
+                        dropped = True
+                        break
+                if dropped:
+                    break
+            if not dropped:
+                # Only the pages block is left and it's still too big;
+                # truncate it as a last resort. Pinned content is at
+                # the top so the trim catches dynamic pages first.
+                idx = next(
+                    (i for i, (n, _) in enumerate(fitted) if n == "pages"), None,
+                )
+                if idx is None:
+                    break
+                trimmed = fit_to_budget(fitted[idx][1], parent_budget)
+                fitted[idx] = (fitted[idx][0], trimmed)
+                combined = render(fitted)
+                break
+            combined = render(fitted)
+
+        return combined
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
